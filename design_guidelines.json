@@ -1,0 +1,170 @@
+{
+  "project_name": "FinanceAI_Infographic_Obaid",
+  "design_philosophy": {
+    "persona": "E1 - The Anti-AI Designer",
+    "core_principles": [
+      "Fusion over Imitation: Mix Financial Rigor with Editorial Elegance.",
+      "Data is Art: Every chart must be beautiful enough to frame.",
+      "Density with Breath: High information density (Bento grids) balanced by massive padding.",
+      "Anti-SaaS: No generic blue gradients. No default Bootstrap grids."
+    ],
+    "theme_strategy": {
+      "mode": "toggle",
+      "default": "system",
+      "styles": {
+        "light": {
+          "archetype": "Organic & Earthy (Trust)",
+          "background": "#F5F5F0",
+          "surface": "#FFFFFF",
+          "text_primary": "#1C1C1E",
+          "text_secondary": "#48484A",
+          "accent_primary": "#044738",
+          "accent_secondary": "#D4AF37",
+          "border": "#E5E5E5"
+        },
+        "dark": {
+          "archetype": "Swiss & High-Contrast (Authority)",
+          "background": "#09090B",
+          "surface": "#18181B",
+          "text_primary": "#FFFFFF",
+          "text_secondary": "#A1A1AA",
+          "accent_primary": "#10B981",
+          "accent_secondary": "#FBBF24",
+          "border": "#27272A"
+        }
+      }
+    }
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Playfair Display, serif",
+      "body": "Inter, sans-serif",
+      "data": "JetBrains Mono, monospace"
+    },
+    "rules": [
+      "Headings (H1-H3): Playfair Display. Weights: 600/700. Tracking: tight.",
+      "Body Text: Inter. Weights: 400. Leading: relaxed.",
+      "Numbers/Charts/Financial Data: JetBrains Mono. Uppercase labels. Tracking: wide."
+    ],
+    "scaling": {
+      "h1": "text-5xl md:text-7xl font-bold tracking-tight",
+      "h2": "text-3xl md:text-5xl font-semibold tracking-tight",
+      "h3": "text-xl md:text-3xl font-medium",
+      "data_large": "text-4xl md:text-6xl font-mono font-bold",
+      "label": "text-xs font-mono uppercase tracking-widest text-muted-foreground"
+    }
+  },
+  "colors": {
+    "palette": {
+      "emerald_deep": "#044738",
+      "emerald_vivid": "#10B981",
+      "gold_muted": "#D4AF37",
+      "obsidian": "#09090B",
+      "bone": "#F5F5F0",
+      "slate_gray": "#64748B",
+      "chart_1": "#044738",
+      "chart_2": "#D4AF37",
+      "chart_3": "#10B981",
+      "chart_4": "#F97316",
+      "chart_5": "#3B82F6"
+    },
+    "usage": {
+      "primary_button": "bg-primary text-primary-foreground hover:bg-primary/90",
+      "secondary_button": "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      "chart_tooltip": "bg-background/90 backdrop-blur border border-border shadow-xl",
+      "infographic_card": "bg-card text-card-foreground border border-border/50 shadow-sm hover:shadow-md transition-all duration-300"
+    }
+  },
+  "layout_system": {
+    "grid_strategy": "Bento Grid",
+    "spacing": {
+      "container_padding": "p-6 md:p-12 lg:p-24",
+      "card_gap": "gap-6",
+      "section_gap": "gap-24"
+    },
+    "modes": {
+      "infographic": {
+        "description": "Grid layout for the report. Mix of 1x1, 2x1, and 2x2 cells.",
+        "classes": "grid grid-cols-1 md:grid-cols-4 lg:grid-cols-12 auto-rows-[minmax(180px,auto)]"
+      },
+      "dashboard": {
+        "description": "High density data view.",
+        "classes": "grid grid-cols-1 md:grid-cols-3 gap-4"
+      }
+    }
+  },
+  "components": {
+    "buttons": {
+      "style": "sharp",
+      "radius": "rounded-sm",
+      "classes": "font-mono uppercase tracking-wider text-xs h-10 px-6"
+    },
+    "cards": {
+      "style": "flat_border",
+      "radius": "rounded-none",
+      "classes": "border border-border bg-card/50 backdrop-blur-sm hover:border-primary/50 transition-colors"
+    },
+    "charts": {
+      "library": "Recharts (via Shadcn Charts)",
+      "style": "minimal",
+      "grid": "stroke-border/20 stroke-dasharray-4",
+      "tooltip": "custom_tooltip_component"
+    },
+    "inputs": {
+      "style": "underlined",
+      "classes": "border-0 border-b border-input bg-transparent rounded-none focus-visible:ring-0 focus-visible:border-primary px-0"
+    }
+  },
+  "pages": {
+    "landing": {
+      "structure": [
+        "Hero Section: Abstract 3D/Geometric background, heavy serif typography.",
+        "Feature Grid: Bento grid of key capabilities (Real-time stock, AI Analysis, PDF Report).",
+        "CTA: 'Meet Obaid' - Large interactive button."
+      ]
+    },
+    "infographic_report": {
+      "structure": [
+        "Header: 'The State of AI in Finance 2024'.",
+        "Section 1: The Landscape (Big number metrics, Pie charts).",
+        "Section 2: Adoption Velocity (Bar charts, Heatmaps).",
+        "Section 3: Future Projections (Line charts, Prediction intervals).",
+        "Footer: Export controls (PDF Download)."
+      ],
+      "export_tools": "html2canvas + jspdf"
+    },
+    "obaid_chat": {
+      "structure": [
+        "Interface: Floating glass panel or Split screen (Chat left, Data right).",
+        "Avatar: 3D Robot or Abstract Geometric Shape.",
+        "Message Bubbles: Distinct styling. User (Minimal), Obaid (Rich media, charts, tables)."
+      ]
+    }
+  },
+  "image_assets": {
+    "hero_background": "https://images.unsplash.com/photo-1760239037245-a372db8630f3?crop=entropy&cs=srgb&fm=jpg&q=85",
+    "report_cover": "https://images.unsplash.com/photo-1684610529682-553625a1ffed?crop=entropy&cs=srgb&fm=jpg&q=85",
+    "meeting_context": "https://images.pexels.com/photos/260689/pexels-photo-260689.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "obaid_avatar": "https://images.pexels.com/photos/8294598/pexels-photo-8294598.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "chart_placeholder": "https://images.pexels.com/photos/6203470/pexels-photo-6203470.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  },
+  "motion_and_interaction": {
+    "libraries": [
+      "framer-motion (for page transitions and staggered entrance)",
+      "lenis (for smooth scrolling on landing page)"
+    ],
+    "rules": [
+      "Stagger charts: Charts should not appear all at once. Stagger them by 0.1s.",
+      "Hover effects: Cards should lift slightly (-2px) and border color should intensify.",
+      "Page Transition: Fade in + Slide up (10px)."
+    ]
+  },
+  "universal_guidelines": [
+    "DO NOT use generic centered layouts. Use asymmetry.",
+    "DO NOT use gradients for text. Keep text solid high-contrast.",
+    "Ensure all charts are accessible (patterns + color).",
+    "Use 'data-testid' on all interactive elements.",
+    "PDF Export: Create a specific CSS class '.print-container' that fixes layout width for A4 PDF generation."
+  ],
+  "instructions_to_main_agent": "You are building a high-end financial tool. Do not make it look like a admin dashboard template. Treat it like a Bloomberg Terminal met a Swiss Design magazine. Use the provided image URLs. Ensure the 'Obaid' chat can render markdown tables and charts. For the Infographic, use Recharts to visualize the mock data. Implement the PDF download using html2canvas and jspdf."
+}
