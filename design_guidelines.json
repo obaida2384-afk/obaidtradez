@@ -1,170 +1,111 @@
 {
-  "project_name": "FinanceAI_Infographic_Obaid",
-  "design_philosophy": {
-    "persona": "E1 - The Anti-AI Designer",
-    "core_principles": [
-      "Fusion over Imitation: Mix Financial Rigor with Editorial Elegance.",
-      "Data is Art: Every chart must be beautiful enough to frame.",
-      "Density with Breath: High information density (Bento grids) balanced by massive padding.",
-      "Anti-SaaS: No generic blue gradients. No default Bootstrap grids."
-    ],
-    "theme_strategy": {
-      "mode": "toggle",
-      "default": "system",
-      "styles": {
-        "light": {
-          "archetype": "Organic & Earthy (Trust)",
-          "background": "#F5F5F0",
-          "surface": "#FFFFFF",
-          "text_primary": "#1C1C1E",
-          "text_secondary": "#48484A",
-          "accent_primary": "#044738",
-          "accent_secondary": "#D4AF37",
-          "border": "#E5E5E5"
-        },
-        "dark": {
-          "archetype": "Swiss & High-Contrast (Authority)",
-          "background": "#09090B",
-          "surface": "#18181B",
-          "text_primary": "#FFFFFF",
-          "text_secondary": "#A1A1AA",
-          "accent_primary": "#10B981",
-          "accent_secondary": "#FBBF24",
-          "border": "#27272A"
-        }
-      }
+  "theme": "Dark",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) + Archetype 2 (Performance Pro) Hybrid",
+  "vibe": "Professional finance dashboard, high-density terminal chic, authoritative and precise.",
+  "color_palette": {
+    "background": {
+      "main": "#09090b",
+      "surface": "#18181b",
+      "surface_elevated": "#27272a",
+      "glass": "rgba(9, 9, 11, 0.7)"
+    },
+    "text": {
+      "primary": "#fafafa",
+      "secondary": "#a1a1aa",
+      "muted": "#71717a",
+      "inverse": "#09090b"
+    },
+    "brand": {
+      "primary": "#2563eb",
+      "primary_hover": "#3b82f6",
+      "accent": "#0ea5e9"
+    },
+    "market": {
+      "bullish": "#10b981",
+      "bullish_bg": "rgba(16, 185, 129, 0.15)",
+      "bearish": "#ef4444",
+      "bearish_bg": "rgba(239, 68, 68, 0.15)",
+      "warning": "#f59e0b"
+    },
+    "border": {
+      "default": "#27272a",
+      "focus": "#2563eb",
+      "light": "#3f3f46"
     }
   },
   "typography": {
-    "font_family": {
-      "headings": "Playfair Display, serif",
-      "body": "Inter, sans-serif",
+    "fonts": {
+      "headings": "Chivo, sans-serif",
+      "body": "IBM Plex Sans, sans-serif",
       "data": "JetBrains Mono, monospace"
     },
-    "rules": [
-      "Headings (H1-H3): Playfair Display. Weights: 600/700. Tracking: tight.",
-      "Body Text: Inter. Weights: 400. Leading: relaxed.",
-      "Numbers/Charts/Financial Data: JetBrains Mono. Uppercase labels. Tracking: wide."
-    ],
-    "scaling": {
-      "h1": "text-5xl md:text-7xl font-bold tracking-tight",
-      "h2": "text-3xl md:text-5xl font-semibold tracking-tight",
-      "h3": "text-xl md:text-3xl font-medium",
-      "data_large": "text-4xl md:text-6xl font-mono font-bold",
-      "label": "text-xs font-mono uppercase tracking-widest text-muted-foreground"
+    "scales": {
+      "h1": "text-3xl sm:text-4xl tracking-tight font-bold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl font-semibold",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "small": "text-xs sm:text-sm",
+      "data_label": "text-[10px] sm:text-xs tracking-[0.2em] uppercase font-semibold text-zinc-400"
     }
   },
-  "colors": {
-    "palette": {
-      "emerald_deep": "#044738",
-      "emerald_vivid": "#10B981",
-      "gold_muted": "#D4AF37",
-      "obsidian": "#09090B",
-      "bone": "#F5F5F0",
-      "slate_gray": "#64748B",
-      "chart_1": "#044738",
-      "chart_2": "#D4AF37",
-      "chart_3": "#10B981",
-      "chart_4": "#F97316",
-      "chart_5": "#3B82F6"
-    },
-    "usage": {
-      "primary_button": "bg-primary text-primary-foreground hover:bg-primary/90",
-      "secondary_button": "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-      "chart_tooltip": "bg-background/90 backdrop-blur border border-border shadow-xl",
-      "infographic_card": "bg-card text-card-foreground border border-border/50 shadow-sm hover:shadow-md transition-all duration-300"
-    }
-  },
-  "layout_system": {
-    "grid_strategy": "Bento Grid",
-    "spacing": {
-      "container_padding": "p-6 md:p-12 lg:p-24",
-      "card_gap": "gap-6",
-      "section_gap": "gap-24"
-    },
-    "modes": {
-      "infographic": {
-        "description": "Grid layout for the report. Mix of 1x1, 2x1, and 2x2 cells.",
-        "classes": "grid grid-cols-1 md:grid-cols-4 lg:grid-cols-12 auto-rows-[minmax(180px,auto)]"
-      },
-      "dashboard": {
-        "description": "High density data view.",
-        "classes": "grid grid-cols-1 md:grid-cols-3 gap-4"
-      }
-    }
+  "spacing_and_layout": {
+    "grid": "Control Room (Mode B) - Dense and scanning-optimized.",
+    "container_padding": "p-4 sm:p-6",
+    "section_gap": "gap-4 sm:gap-6",
+    "card_padding": "p-4 sm:p-5",
+    "radius": "rounded-md",
+    "borders": "1px solid"
   },
   "components": {
-    "buttons": {
-      "style": "sharp",
-      "radius": "rounded-sm",
-      "classes": "font-mono uppercase tracking-wider text-xs h-10 px-6"
-    },
-    "cards": {
-      "style": "flat_border",
-      "radius": "rounded-none",
-      "classes": "border border-border bg-card/50 backdrop-blur-sm hover:border-primary/50 transition-colors"
-    },
-    "charts": {
-      "library": "Recharts (via Shadcn Charts)",
-      "style": "minimal",
-      "grid": "stroke-border/20 stroke-dasharray-4",
-      "tooltip": "custom_tooltip_component"
-    },
-    "inputs": {
-      "style": "underlined",
-      "classes": "border-0 border-b border-input bg-transparent rounded-none focus-visible:ring-0 focus-visible:border-primary px-0"
-    }
+    "cards": "Flat background (bg-zinc-900), subtle border (border-zinc-800), no shadow. Hover: slight border color change (border-zinc-700) and -translate-y-[1px].",
+    "buttons": "Primary: Solid bg-blue-600 hover:bg-blue-500 text-white. Secondary: Transparent bg, border border-zinc-700 hover:bg-zinc-800 text-zinc-300.",
+    "tables": "Dense rows, tabular numbers (font-mono). Columns aligned based on data type (numbers right-aligned).",
+    "badges": "Pill-shaped (rounded-full), text-xs font-medium. Bullish (green text/bg), Bearish (red text/bg), Neutral (zinc text/bg).",
+    "inputs": "bg-zinc-950, border-zinc-800, focus:ring-1 focus:ring-blue-600. text-white placeholder:text-zinc-500.",
+    "chatbot": "Integrated side panel or distinct column (Control Room vibe). Use glassmorphism only if floating: bg-zinc-950/80 backdrop-blur-xl border-l border-zinc-800.",
+    "charts": "Recharts. Grid lines should be very faint (stroke='#27272a'). Tooltips must match dark theme with border."
   },
-  "pages": {
-    "landing": {
-      "structure": [
-        "Hero Section: Abstract 3D/Geometric background, heavy serif typography.",
-        "Feature Grid: Bento grid of key capabilities (Real-time stock, AI Analysis, PDF Report).",
-        "CTA: 'Meet Obaid' - Large interactive button."
-      ]
-    },
-    "infographic_report": {
-      "structure": [
-        "Header: 'The State of AI in Finance 2024'.",
-        "Section 1: The Landscape (Big number metrics, Pie charts).",
-        "Section 2: Adoption Velocity (Bar charts, Heatmaps).",
-        "Section 3: Future Projections (Line charts, Prediction intervals).",
-        "Footer: Export controls (PDF Download)."
-      ],
-      "export_tools": "html2canvas + jspdf"
-    },
-    "obaid_chat": {
-      "structure": [
-        "Interface: Floating glass panel or Split screen (Chat left, Data right).",
-        "Avatar: 3D Robot or Abstract Geometric Shape.",
-        "Message Bubbles: Distinct styling. User (Minimal), Obaid (Rich media, charts, tables)."
-      ]
-    }
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "enter": "animate-in fade-in zoom-in-95 duration-300",
+    "stagger": "animate-in slide-in-from-bottom-2 duration-400"
   },
-  "image_assets": {
-    "hero_background": "https://images.unsplash.com/photo-1760239037245-a372db8630f3?crop=entropy&cs=srgb&fm=jpg&q=85",
-    "report_cover": "https://images.unsplash.com/photo-1684610529682-553625a1ffed?crop=entropy&cs=srgb&fm=jpg&q=85",
-    "meeting_context": "https://images.pexels.com/photos/260689/pexels-photo-260689.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-    "obaid_avatar": "https://images.pexels.com/photos/8294598/pexels-photo-8294598.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-    "chart_placeholder": "https://images.pexels.com/photos/6203470/pexels-photo-6203470.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
-  },
-  "motion_and_interaction": {
-    "libraries": [
-      "framer-motion (for page transitions and staggered entrance)",
-      "lenis (for smooth scrolling on landing page)"
+  "media_and_assets": {
+    "images": [
+      {
+        "category": "hero_background",
+        "url": "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwzfHxzdG9jayUyMG1hcmtldCUyMGNoYXJ0JTIwZGFya3xlbnwwfHx8fDE3NzQ2MzE2OTd8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract dark neon lines for login page or landing hero"
+      },
+      {
+        "category": "data_chart_placeholder",
+        "url": "https://images.unsplash.com/photo-1639825752750-5061ded5503b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwxfHxzdG9jayUyMG1hcmtldCUyMGNoYXJ0JTIwZGFya3xlbnwwfHx8fDE3NzQ2MzE2OTd8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dark stock market chart screenshot for placeholder"
+      },
+      {
+        "category": "logo_placeholder",
+        "url": "https://images.pexels.com/photos/9949424/pexels-photo-9949424.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Apple logo placeholder for company details"
+      }
     ],
-    "rules": [
-      "Stagger charts: Charts should not appear all at once. Stagger them by 0.1s.",
-      "Hover effects: Cards should lift slightly (-2px) and border color should intensify.",
-      "Page Transition: Fade in + Slide up (10px)."
-    ]
+    "icons": {
+      "library": "lucide-react",
+      "usage": "Minimalist, stroke-width 1.5, size 16px to 20px for UI elements. Use Phosphor Icons (@phosphor-icons/react) if building dense data tables requiring highly legible miniature icons."
+    }
   },
-  "universal_guidelines": [
-    "DO NOT use generic centered layouts. Use asymmetry.",
-    "DO NOT use gradients for text. Keep text solid high-contrast.",
-    "Ensure all charts are accessible (patterns + color).",
-    "Use 'data-testid' on all interactive elements.",
-    "PDF Export: Create a specific CSS class '.print-container' that fixes layout width for A4 PDF generation."
-  ],
-  "instructions_to_main_agent": "You are building a high-end financial tool. Do not make it look like a admin dashboard template. Treat it like a Bloomberg Terminal met a Swiss Design magazine. Use the provided image URLs. Ensure the 'Obaid' chat can render markdown tables and charts. For the Infographic, use Recharts to visualize the mock data. Implement the PDF download using html2canvas and jspdf."
+  "accessibility_and_testing": {
+    "data_testid_rules": "All interactive elements, forms, links, buttons, and key informational values MUST include a data-testid attribute in kebab-case (e.g., 'submit-trade-btn', 'stock-price-value').",
+    "contrast": "Ensure pure white text on deep background passes APCA. Use explicitly colored text for hover states (e.g., hover:text-white)."
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette. Do NOT use generic grays; stick to the Zinc scale as defined (Zinc 950 for background, Zinc 900 for cards, Zinc 800 for borders).",
+    "Use Shadcn UI extensively for complex dashboard elements (Tables, Tabs, Cards, Badges, Input). Remove box-shadows from standard Shadcn cards to maintain the flat 'Terminal' look.",
+    "For financial data, numbers MUST use 'JetBrains Mono' font or another monospaced font so decimals and digits align properly across rows.",
+    "Implement Recharts for financial visualization. Ensure chart lines and area gradients use the exact market colors (bullish/bearish) or brand blue for neutral data.",
+    "The AI chatbot interface should feel integrated into the terminal environment. Make it a dedicated sticky side-panel, avoiding bouncy/playful floating bubbles.",
+    "Remember to include data-testid on every single interactive component and critical data node for automated testing.",
+    "Apply `font-mono` explicitly to price tags, ticker symbols, and volume metrics.",
+    "Import Google fonts: Chivo (headings), IBM Plex Sans (body), and JetBrains Mono (data)."
+  ]
 }
