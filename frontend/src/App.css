@@ -1,41 +1,5 @@
-/* Additional App styles */
+/* App-specific styles */
 .App {
     min-height: 100vh;
-}
-
-/* Stat card styling */
-.stat-card {
-    position: relative;
-    overflow: hidden;
-}
-
-.stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--secondary)));
-}
-
-/* Hero section */
-.hero-gradient {
-    background: radial-gradient(ellipse at top right, hsl(var(--primary) / 0.1), transparent 50%),
-                radial-gradient(ellipse at bottom left, hsl(var(--secondary) / 0.1), transparent 50%);
-}
-
-/* Chart container */
-.chart-container {
-    position: relative;
-}
-
-.chart-container::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, hsl(var(--border)), transparent);
+    background-color: #09090b;
 }

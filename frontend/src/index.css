@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Chivo:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -8,85 +8,68 @@ body {
     margin: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    font-family: 'IBM Plex Sans', sans-serif;
 }
 
 code {
     font-family: 'JetBrains Mono', monospace;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - dark theme */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-    background: transparent;
+    background: #18181b;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.3);
-    border-radius: 3px;
+    background: #3f3f46;
+    border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.5);
+    background: #52525b;
 }
 
 @layer base {
     :root {
-        --background: 50 10% 95%;
-        --foreground: 240 5% 12%;
-        --card: 0 0% 100%;
-        --card-foreground: 240 5% 12%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 240 5% 12%;
-        --primary: 160 85% 15%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 45 60% 52%;
-        --secondary-foreground: 240 5% 12%;
-        --muted: 50 10% 90%;
-        --muted-foreground: 240 5% 40%;
-        --accent: 160 85% 15%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 84% 60%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 50 5% 85%;
-        --input: 50 5% 85%;
-        --ring: 160 85% 15%;
-        --chart-1: 160 85% 15%;
-        --chart-2: 45 60% 52%;
-        --chart-3: 160 60% 45%;
-        --chart-4: 25 90% 55%;
-        --chart-5: 210 70% 50%;
-        --radius: 0rem;
-    }
-    
-    .dark {
         --background: 240 6% 4%;
         --foreground: 0 0% 98%;
         --card: 240 6% 9%;
         --card-foreground: 0 0% 98%;
         --popover: 240 6% 9%;
         --popover-foreground: 0 0% 98%;
-        --primary: 160 60% 45%;
-        --primary-foreground: 240 6% 4%;
-        --secondary: 45 90% 55%;
-        --secondary-foreground: 240 6% 4%;
+        --primary: 217 91% 60%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 240 5% 15%;
+        --secondary-foreground: 0 0% 98%;
         --muted: 240 5% 15%;
         --muted-foreground: 240 5% 65%;
-        --accent: 160 60% 45%;
-        --accent-foreground: 240 6% 4%;
-        --destructive: 0 62% 30%;
+        --accent: 199 89% 48%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 84% 60%;
         --destructive-foreground: 0 0% 98%;
-        --border: 240 5% 18%;
-        --input: 240 5% 18%;
-        --ring: 160 60% 45%;
-        --chart-1: 160 60% 45%;
-        --chart-2: 45 90% 55%;
-        --chart-3: 160 85% 15%;
-        --chart-4: 25 90% 55%;
-        --chart-5: 210 70% 50%;
+        --border: 240 5% 17%;
+        --input: 240 5% 17%;
+        --ring: 217 91% 60%;
+        --radius: 0.375rem;
+        
+        /* Market colors */
+        --bullish: 160 84% 39%;
+        --bullish-bg: 160 84% 39% / 0.15;
+        --bearish: 0 84% 60%;
+        --bearish-bg: 0 84% 60% / 0.15;
+        --warning: 38 92% 50%;
+        
+        /* Chart colors */
+        --chart-1: 217 91% 60%;
+        --chart-2: 160 84% 39%;
+        --chart-3: 38 92% 50%;
+        --chart-4: 0 84% 60%;
+        --chart-5: 280 65% 60%;
     }
 }
 
@@ -96,24 +79,84 @@ code {
     }
     body {
         @apply bg-background text-foreground;
-        font-family: 'Inter', sans-serif;
     }
     h1, h2, h3, h4, h5, h6 {
-        font-family: 'Playfair Display', serif;
+        font-family: 'Chivo', sans-serif;
     }
 }
 
 /* Typography utilities */
-.font-display {
-    font-family: 'Playfair Display', serif;
+.font-heading {
+    font-family: 'Chivo', sans-serif;
 }
 
 .font-body {
-    font-family: 'Inter', sans-serif;
+    font-family: 'IBM Plex Sans', sans-serif;
 }
 
 .font-mono {
     font-family: 'JetBrains Mono', monospace;
+}
+
+/* Data label style */
+.data-label {
+    @apply text-[10px] sm:text-xs tracking-[0.2em] uppercase font-semibold text-zinc-400;
+}
+
+/* Score badge colors */
+.score-excellent {
+    @apply bg-emerald-500/15 text-emerald-400 border-emerald-500/30;
+}
+
+.score-good {
+    @apply bg-blue-500/15 text-blue-400 border-blue-500/30;
+}
+
+.score-neutral {
+    @apply bg-zinc-500/15 text-zinc-400 border-zinc-500/30;
+}
+
+.score-poor {
+    @apply bg-amber-500/15 text-amber-400 border-amber-500/30;
+}
+
+.score-bad {
+    @apply bg-red-500/15 text-red-400 border-red-500/30;
+}
+
+/* Signal badges */
+.signal-strong {
+    @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/40;
+}
+
+.signal-candidate {
+    @apply bg-blue-500/20 text-blue-400 border border-blue-500/40;
+}
+
+.signal-watchlist {
+    @apply bg-amber-500/20 text-amber-400 border border-amber-500/40;
+}
+
+.signal-avoid {
+    @apply bg-red-500/20 text-red-400 border border-red-500/40;
+}
+
+/* Card styles */
+.terminal-card {
+    @apply bg-zinc-900 border border-zinc-800 rounded-md transition-all duration-200;
+}
+
+.terminal-card:hover {
+    @apply border-zinc-700 -translate-y-[1px];
+}
+
+/* Price colors */
+.price-up {
+    @apply text-emerald-400;
+}
+
+.price-down {
+    @apply text-red-400;
 }
 
 /* Chart styling */
@@ -121,58 +164,37 @@ code {
     outline: none !important;
 }
 
-/* Print styles for PDF */
-@media print {
-    .print-container {
-        width: 210mm;
-        min-height: 297mm;
-        padding: 20mm;
-        background: white !important;
-        color: black !important;
-    }
-    
-    .no-print {
-        display: none !important;
-    }
+.recharts-default-tooltip {
+    @apply !bg-zinc-900/95 !border-zinc-700 !rounded-md backdrop-blur-sm;
 }
 
-/* Animations */
-@keyframes fade-in {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+/* Chat styling */
+.chat-message-user {
+    @apply bg-blue-600 text-white rounded-2xl rounded-br-sm;
 }
 
-.animate-fade-in {
-    animation: fade-in 0.5s ease-out forwards;
+.chat-message-ai {
+    @apply bg-zinc-800 text-zinc-100 rounded-2xl rounded-bl-sm border border-zinc-700;
 }
 
-/* Chat bubble styling */
-.chat-bubble-user {
-    @apply bg-primary text-primary-foreground rounded-2xl rounded-br-sm;
-}
-
-.chat-bubble-ai {
-    @apply bg-muted text-foreground rounded-2xl rounded-bl-sm;
-}
-
-/* Markdown content styling */
+/* Markdown in chat */
 .markdown-content h1,
 .markdown-content h2,
 .markdown-content h3 {
-    @apply font-display font-semibold mt-4 mb-2;
+    @apply font-heading font-semibold mt-3 mb-2;
 }
 
-.markdown-content h1 { @apply text-2xl; }
-.markdown-content h2 { @apply text-xl; }
-.markdown-content h3 { @apply text-lg; }
+.markdown-content h1 { @apply text-xl; }
+.markdown-content h2 { @apply text-lg; }
+.markdown-content h3 { @apply text-base; }
 
 .markdown-content p {
-    @apply mb-3 leading-relaxed;
+    @apply mb-2 leading-relaxed;
 }
 
 .markdown-content ul,
 .markdown-content ol {
-    @apply ml-4 mb-3;
+    @apply ml-4 mb-2;
 }
 
 .markdown-content li {
@@ -180,11 +202,11 @@ code {
 }
 
 .markdown-content code {
-    @apply font-mono bg-muted px-1.5 py-0.5 rounded text-sm;
+    @apply font-mono bg-zinc-800 px-1.5 py-0.5 rounded text-sm text-blue-400;
 }
 
 .markdown-content pre {
-    @apply bg-muted p-4 rounded-lg overflow-x-auto mb-3;
+    @apply bg-zinc-800 p-3 rounded-md overflow-x-auto mb-2;
 }
 
 .markdown-content pre code {
@@ -192,34 +214,78 @@ code {
 }
 
 .markdown-content strong {
-    @apply font-semibold;
+    @apply font-semibold text-white;
 }
 
 .markdown-content table {
-    @apply w-full border-collapse mb-3;
+    @apply w-full border-collapse mb-2 text-sm;
 }
 
 .markdown-content th,
 .markdown-content td {
-    @apply border border-border px-3 py-2 text-left;
+    @apply border border-zinc-700 px-2 py-1.5 text-left;
 }
 
 .markdown-content th {
-    @apply bg-muted font-semibold;
+    @apply bg-zinc-800 font-semibold;
 }
 
-/* Glass effect */
-.glass {
-    @apply bg-background/80 backdrop-blur-xl;
+/* Animation utilities */
+@keyframes fade-in-up {
+    from { 
+        opacity: 0; 
+        transform: translateY(10px); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateY(0); 
+    }
 }
 
-/* Bento grid items */
-.bento-item {
-    @apply border border-border bg-card/50 backdrop-blur-sm p-6 transition-all duration-300;
+.animate-fade-in-up {
+    animation: fade-in-up 0.3s ease-out forwards;
 }
 
-.bento-item:hover {
-    @apply border-primary/50 shadow-lg;
+@keyframes pulse-glow {
+    0%, 100% { 
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); 
+    }
+    50% { 
+        box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); 
+    }
+}
+
+.pulse-glow {
+    animation: pulse-glow 2s infinite;
+}
+
+/* Score bar */
+.score-bar {
+    @apply h-1.5 rounded-full bg-zinc-800 overflow-hidden;
+}
+
+.score-bar-fill {
+    @apply h-full rounded-full transition-all duration-500;
+}
+
+/* Glassmorphism for floating elements */
+.glass-panel {
+    @apply bg-zinc-950/80 backdrop-blur-xl border border-zinc-800;
+}
+
+/* Hide scrollbar but allow scroll */
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+
+/* Table number alignment */
+.tabular-nums {
+    font-variant-numeric: tabular-nums;
 }
 
 @layer base {
