@@ -1,129 +1,62 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useAuth, API } from "../App";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { 
-  Search, 
+  Search as SearchIcon,
   Filter,
+  TrendingUp,
+  TrendingDown,
   Loader2,
-  ChevronRight,
-  RotateCcw
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  Target,
+  Zap
 } from "lucide-react";
-import { API } from "../App";
-
-// Score Badge
-const ScoreBadge = ({ score }) => {
-  const getScoreClass = (s) => {
-    if (s >= 70) return "bg-emerald-500/15 text-emerald-400";
-    if (s >= 55) return "bg-blue-500/15 text-blue-400";
-    if (s >= 45) return "bg-zinc-500/15 text-zinc-400";
-    if (s >= 30) return "bg-amber-500/15 text-amber-400";
-    return "bg-red-500/15 text-red-400";
-  };
-  
-  return (
-    <span className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${getScoreClass(score)}`}>
-      {score?.toFixed(0) || "—"}
-    </span>
-  );
-};
-
-// Signal Badge
-const SignalBadge = ({ signal }) => {
-  const classes = {
-    "Strong Candidate": "bg-emerald-500/20 text-emerald-400",
-    "Candidate": "bg-blue-500/20 text-blue-400",
-    "Watchlist": "bg-amber-500/20 text-amber-400",
-    "Avoid": "bg-red-500/20 text-red-400",
-  }[signal] || "bg-zinc-500/20 text-zinc-400";
-  
-  return (
-    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${classes}`}>
-      {signal}
-    </span>
-  );
-};
-
-const SECTORS = [
-  "Technology",
-  "Healthcare",
-  "Financial Services",
-  "Consumer Cyclical",
-  "Consumer Defensive",
-  "Industrials",
-  "Energy",
-  "Utilities",
-  "Real Estate",
-  "Communication Services",
-  "Basic Materials"
-];
 
 const Screener = () => {
-  const [filters, setFilters] = useState({
-    minMarketCap: 10,
-    maxMarketCap: 1000,
-    sector: "all",
-    minPe: 0,
-    maxPe: 50,
-    minRoe: 0,
-    minDividendYield: 0,
-    minRevenueGrowth: -20,
-    strategy: "all"
-  });
-  
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
-  const navigate = useNavigate();
+  const [mode, setMode] = useState("trading"); // trading or investing
+  const [sortField, setSortField] = useState("confidence");
+  const [sortDir, setSortDir] = useState("desc");
+  const { token } = useAuth();
 
-  const runScreener = async () => {
+  // Trading filters
+  const [tradingFilters, setTradingFilters] = useState({
+    minVolume: 1.0,
+    minChange: 0,
+    signal: "all"
+  });
+
+  // Investment filters
+  const [investmentFilters, setInvestmentFilters] = useState({
+    minScore: 50,
+    minValuation: 0,
+    signal: "all"
+  });
+
+  useEffect(() => {
+    runScreen();
+  }, [mode]);
+
+  const runScreen = async () => {
     setLoading(true);
-    setHasSearched(true);
-    
     try {
-      const params = {
-        limit: 20
-      };
-      
-      if (filters.minMarketCap > 0) {
-        params.min_market_cap = filters.minMarketCap * 1e9;
-      }
-      if (filters.maxMarketCap < 1000) {
-        params.max_market_cap = filters.maxMarketCap * 1e9;
-      }
-      if (filters.sector && filters.sector !== "all") {
-        params.sector = filters.sector;
-      }
-      if (filters.strategy && filters.strategy !== "all") {
-        params.strategy = filters.strategy;
-      }
-      if (filters.minRoe > 0) {
-        params.min_roe = filters.minRoe / 100;
-      }
-
-      const response = await fetch(`${API}/screener`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(params)
+      const endpoint = mode === "trading" ? "/trading/scan" : "/investments/scan";
+      const response = await fetch(`${API}${endpoint}`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
       
       if (response.ok) {
-        let data = await response.json();
-        
-        // Apply client-side filters
-        if (filters.minPe > 0 || filters.maxPe < 50) {
-          data = data.filter(s => {
-            const pe = s.pe_ratio;
-            if (!pe) return true;
-            return pe >= filters.minPe && pe <= filters.maxPe;
-          });
-        }
-        
-        setResults(data);
+        const data = await response.json();
+        setResults(data.all || []);
       }
     } catch (error) {
       console.error("Screener error:", error);
@@ -132,258 +65,354 @@ const Screener = () => {
     }
   };
 
-  const resetFilters = () => {
-    setFilters({
-      minMarketCap: 10,
-      maxMarketCap: 1000,
-      sector: "all",
-      minPe: 0,
-      maxPe: 50,
-      minRoe: 0,
-      minDividendYield: 0,
-      minRevenueGrowth: -20,
-      strategy: "all"
+  const applyFilters = () => {
+    let filtered = [...results];
+    
+    if (mode === "trading") {
+      if (tradingFilters.minVolume > 0) {
+        filtered = filtered.filter(s => (s.indicators?.volume_ratio || 0) >= tradingFilters.minVolume);
+      }
+      if (tradingFilters.minChange !== 0) {
+        filtered = filtered.filter(s => (s.indicators?.change_pct || 0) >= tradingFilters.minChange);
+      }
+      if (tradingFilters.signal !== "all") {
+        filtered = filtered.filter(s => s.signal === tradingFilters.signal);
+      }
+    } else {
+      if (investmentFilters.minScore > 0) {
+        filtered = filtered.filter(s => (s.overall_score || 0) >= investmentFilters.minScore);
+      }
+      if (investmentFilters.minValuation > 0) {
+        filtered = filtered.filter(s => (s.valuation_score || 0) >= investmentFilters.minValuation);
+      }
+      if (investmentFilters.signal !== "all") {
+        filtered = filtered.filter(s => s.signal === investmentFilters.signal);
+      }
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      let aVal, bVal;
+      if (sortField === "confidence") {
+        aVal = a.confidence || 0;
+        bVal = b.confidence || 0;
+      } else if (sortField === "score") {
+        aVal = a.overall_score || 0;
+        bVal = b.overall_score || 0;
+      } else if (sortField === "volume") {
+        aVal = a.indicators?.volume_ratio || 0;
+        bVal = b.indicators?.volume_ratio || 0;
+      } else if (sortField === "change") {
+        aVal = a.indicators?.change_pct || 0;
+        bVal = b.indicators?.change_pct || 0;
+      } else {
+        aVal = a.symbol;
+        bVal = b.symbol;
+      }
+      return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
-    setResults([]);
-    setHasSearched(false);
+
+    return filtered;
+  };
+
+  const resetFilters = () => {
+    if (mode === "trading") {
+      setTradingFilters({ minVolume: 1.0, minChange: 0, signal: "all" });
+    } else {
+      setInvestmentFilters({ minScore: 50, minValuation: 0, signal: "all" });
+    }
+  };
+
+  const filteredResults = applyFilters();
+
+  const SignalBadge = ({ signal }) => {
+    const config = {
+      "Buy": "signal-buy",
+      "Watch": "signal-watch",
+      "Hold": "signal-hold",
+      "Avoid": "signal-avoid",
+      "Sell": "signal-avoid",
+      "Watchlist": "signal-watch"
+    }[signal] || "signal-watch";
+    
+    return (
+      <span className={`text-xs font-medium px-2 py-0.5 rounded ${config}`}>
+        {signal}
+      </span>
+    );
   };
 
   return (
     <div className="space-y-6" data-testid="screener-page">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-white mb-1">Stock Screener</h1>
-          <p className="text-sm text-zinc-500">Filter and find stocks based on your criteria</p>
+          <div className="flex items-center gap-2 mb-1">
+            <SearchIcon className="w-6 h-6 text-purple-400" />
+            <h1 className="font-display text-2xl font-bold text-white">Stock Screener</h1>
+          </div>
+          <p className="text-sm text-slate-500">Filter and find opportunities</p>
         </div>
-        <div className="flex gap-2">
+        
+        {/* Mode Toggle */}
+        <Tabs value={mode} onValueChange={setMode}>
+          <TabsList className="bg-slate-900 border border-slate-800">
+            <TabsTrigger value="trading" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
+              <Zap className="w-4 h-4 mr-1" /> Trading
+            </TabsTrigger>
+            <TabsTrigger value="investing" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
+              <Target className="w-4 h-4 mr-1" /> Investing
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {/* Filters */}
+      <Card className="terminal-card p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Filter className="w-4 h-4 text-slate-400" />
+          <span className="text-sm font-medium text-white">Filters</span>
           <Button 
-            variant="outline" 
-            size="sm"
+            variant="ghost" 
+            size="sm" 
             onClick={resetFilters}
-            className="border-zinc-700 text-zinc-400 hover:text-white"
-            data-testid="reset-filters-btn"
+            className="ml-auto text-slate-400 hover:text-white"
           >
-            <RotateCcw className="w-4 h-4 mr-1" />
-            Reset
-          </Button>
-          <Button 
-            onClick={runScreener}
-            disabled={loading}
-            className="bg-blue-600 hover:bg-blue-500"
-            data-testid="run-screener-btn"
-          >
-            {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Search className="w-4 h-4 mr-1" />}
-            Screen Stocks
+            <RotateCcw className="w-3 h-3 mr-1" /> Reset
           </Button>
         </div>
+
+        {mode === "trading" ? (
+          <div className="grid md:grid-cols-4 gap-4">
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Min Volume Ratio</label>
+              <div className="flex items-center gap-2">
+                <Slider
+                  value={[tradingFilters.minVolume]}
+                  onValueChange={([v]) => setTradingFilters(f => ({...f, minVolume: v}))}
+                  min={0}
+                  max={5}
+                  step={0.5}
+                  className="flex-1"
+                />
+                <span className="text-sm font-mono text-white w-12">{tradingFilters.minVolume}x</span>
+              </div>
+            </div>
+            
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Min % Change</label>
+              <div className="flex items-center gap-2">
+                <Slider
+                  value={[tradingFilters.minChange]}
+                  onValueChange={([v]) => setTradingFilters(f => ({...f, minChange: v}))}
+                  min={-10}
+                  max={10}
+                  step={1}
+                  className="flex-1"
+                />
+                <span className="text-sm font-mono text-white w-12">{tradingFilters.minChange}%</span>
+              </div>
+            </div>
+            
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Signal</label>
+              <Select value={tradingFilters.signal} onValueChange={(v) => setTradingFilters(f => ({...f, signal: v}))}>
+                <SelectTrigger className="bg-slate-900 border-slate-700">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Signals</SelectItem>
+                  <SelectItem value="Buy">Buy Only</SelectItem>
+                  <SelectItem value="Watch">Watch Only</SelectItem>
+                  <SelectItem value="Avoid">Avoid Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Sort By</label>
+              <Select value={sortField} onValueChange={setSortField}>
+                <SelectTrigger className="bg-slate-900 border-slate-700">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="confidence">Confidence</SelectItem>
+                  <SelectItem value="volume">Volume Ratio</SelectItem>
+                  <SelectItem value="change">% Change</SelectItem>
+                  <SelectItem value="symbol">Symbol</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-4 gap-4">
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Min Overall Score</label>
+              <div className="flex items-center gap-2">
+                <Slider
+                  value={[investmentFilters.minScore]}
+                  onValueChange={([v]) => setInvestmentFilters(f => ({...f, minScore: v}))}
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="flex-1"
+                />
+                <span className="text-sm font-mono text-white w-12">{investmentFilters.minScore}</span>
+              </div>
+            </div>
+            
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Min Valuation Score</label>
+              <div className="flex items-center gap-2">
+                <Slider
+                  value={[investmentFilters.minValuation]}
+                  onValueChange={([v]) => setInvestmentFilters(f => ({...f, minValuation: v}))}
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="flex-1"
+                />
+                <span className="text-sm font-mono text-white w-12">{investmentFilters.minValuation}</span>
+              </div>
+            </div>
+            
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Signal</label>
+              <Select value={investmentFilters.signal} onValueChange={(v) => setInvestmentFilters(f => ({...f, signal: v}))}>
+                <SelectTrigger className="bg-slate-900 border-slate-700">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Signals</SelectItem>
+                  <SelectItem value="Buy">Buy Only</SelectItem>
+                  <SelectItem value="Hold">Hold Only</SelectItem>
+                  <SelectItem value="Watchlist">Watchlist</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
+              <label className="text-xs text-slate-500 mb-2 block">Sort By</label>
+              <Select value={sortField} onValueChange={setSortField}>
+                <SelectTrigger className="bg-slate-900 border-slate-700">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="score">Overall Score</SelectItem>
+                  <SelectItem value="confidence">Confidence</SelectItem>
+                  <SelectItem value="symbol">Symbol</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Results Count */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-500">
+          Showing <span className="text-white font-medium">{filteredResults.length}</span> results
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setSortDir(d => d === "desc" ? "asc" : "desc")}
+          className="text-slate-400"
+        >
+          {sortDir === "desc" ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+          {sortDir === "desc" ? "Highest First" : "Lowest First"}
+        </Button>
       </div>
 
-      <div className="grid lg:grid-cols-[300px_1fr] gap-6">
-        {/* Filters Panel */}
-        <Card className="terminal-card p-4 h-fit">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-zinc-800">
-            <Filter className="w-4 h-4 text-blue-400" />
-            <h2 className="font-heading font-semibold text-white">Filters</h2>
-          </div>
-
-          <div className="space-y-5">
-            {/* Strategy */}
-            <div>
-              <Label className="text-xs text-zinc-400 mb-2 block">Strategy</Label>
-              <Select 
-                value={filters.strategy} 
-                onValueChange={(v) => setFilters(f => ({ ...f, strategy: v }))}
-              >
-                <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="strategy-select">
-                  <SelectValue placeholder="All Strategies" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Strategies</SelectItem>
-                  <SelectItem value="value">Value</SelectItem>
-                  <SelectItem value="growth">Growth</SelectItem>
-                  <SelectItem value="momentum">Momentum</SelectItem>
-                  <SelectItem value="quality">Quality</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Sector */}
-            <div>
-              <Label className="text-xs text-zinc-400 mb-2 block">Sector</Label>
-              <Select 
-                value={filters.sector} 
-                onValueChange={(v) => setFilters(f => ({ ...f, sector: v }))}
-              >
-                <SelectTrigger className="bg-zinc-800 border-zinc-700" data-testid="sector-select">
-                  <SelectValue placeholder="All Sectors" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sectors</SelectItem>
-                  {SECTORS.map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Market Cap */}
-            <div>
-              <div className="flex justify-between mb-2">
-                <Label className="text-xs text-zinc-400">Market Cap (Billions)</Label>
-                <span className="text-xs font-mono text-zinc-500">
-                  ${filters.minMarketCap}B - ${filters.maxMarketCap >= 1000 ? '∞' : filters.maxMarketCap + 'B'}
-                </span>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-500 w-8">Min</span>
-                  <Slider
-                    value={[filters.minMarketCap]}
-                    onValueChange={([v]) => setFilters(f => ({ ...f, minMarketCap: v }))}
-                    min={0}
-                    max={500}
-                    step={10}
-                    className="flex-1"
-                    data-testid="min-market-cap-slider"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-500 w-8">Max</span>
-                  <Slider
-                    value={[filters.maxMarketCap]}
-                    onValueChange={([v]) => setFilters(f => ({ ...f, maxMarketCap: v }))}
-                    min={10}
-                    max={1000}
-                    step={10}
-                    className="flex-1"
-                    data-testid="max-market-cap-slider"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* P/E Range */}
-            <div>
-              <div className="flex justify-between mb-2">
-                <Label className="text-xs text-zinc-400">P/E Ratio</Label>
-                <span className="text-xs font-mono text-zinc-500">
-                  {filters.minPe} - {filters.maxPe >= 50 ? '∞' : filters.maxPe}
-                </span>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-500 w-8">Min</span>
-                  <Slider
-                    value={[filters.minPe]}
-                    onValueChange={([v]) => setFilters(f => ({ ...f, minPe: v }))}
-                    min={0}
-                    max={40}
-                    step={1}
-                    className="flex-1"
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-500 w-8">Max</span>
-                  <Slider
-                    value={[filters.maxPe]}
-                    onValueChange={([v]) => setFilters(f => ({ ...f, maxPe: v }))}
-                    min={5}
-                    max={50}
-                    step={1}
-                    className="flex-1"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Min ROE */}
-            <div>
-              <div className="flex justify-between mb-2">
-                <Label className="text-xs text-zinc-400">Min ROE (%)</Label>
-                <span className="text-xs font-mono text-zinc-500">{filters.minRoe}%</span>
-              </div>
-              <Slider
-                value={[filters.minRoe]}
-                onValueChange={([v]) => setFilters(f => ({ ...f, minRoe: v }))}
-                min={0}
-                max={40}
-                step={5}
-                className="flex-1"
-                data-testid="min-roe-slider"
-              />
-            </div>
-          </div>
-        </Card>
-
-        {/* Results */}
+      {/* Results Table */}
+      {loading ? (
+        <div className="flex items-center justify-center h-40">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        </div>
+      ) : (
         <Card className="terminal-card overflow-hidden">
-          <div className="p-4 border-b border-zinc-800">
-            <h2 className="font-heading font-semibold text-white">
-              Results {results.length > 0 && `(${results.length})`}
-            </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-900 border-b border-slate-800">
+                <tr>
+                  <th className="text-left p-3 text-slate-500 font-medium">Symbol</th>
+                  <th className="text-left p-3 text-slate-500 font-medium">Signal</th>
+                  <th className="text-right p-3 text-slate-500 font-medium">Price</th>
+                  {mode === "trading" ? (
+                    <>
+                      <th className="text-right p-3 text-slate-500 font-medium">Change</th>
+                      <th className="text-right p-3 text-slate-500 font-medium">Vol Ratio</th>
+                      <th className="text-right p-3 text-slate-500 font-medium">R:R</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="text-right p-3 text-slate-500 font-medium">Score</th>
+                      <th className="text-right p-3 text-slate-500 font-medium">Valuation</th>
+                      <th className="text-right p-3 text-slate-500 font-medium">Upside</th>
+                    </>
+                  )}
+                  <th className="text-right p-3 text-slate-500 font-medium">Confidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredResults.map((item) => (
+                  <tr key={item.symbol} className="border-b border-slate-800/50 hover:bg-slate-900/50">
+                    <td className="p-3">
+                      <div>
+                        <span className="font-mono font-medium text-white">{item.symbol}</span>
+                        <p className="text-xs text-slate-500 truncate max-w-[150px]">{item.name}</p>
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <SignalBadge signal={item.signal} />
+                    </td>
+                    <td className="p-3 text-right font-mono text-white">
+                      ${item.price?.toFixed(2)}
+                    </td>
+                    {mode === "trading" ? (
+                      <>
+                        <td className={`p-3 text-right font-mono ${item.indicators?.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {item.indicators?.change_pct >= 0 ? '+' : ''}{item.indicators?.change_pct?.toFixed(2)}%
+                        </td>
+                        <td className="p-3 text-right font-mono text-white">
+                          {item.indicators?.volume_ratio?.toFixed(1)}x
+                        </td>
+                        <td className="p-3 text-right font-mono text-slate-400">
+                          {item.risk_reward || "—"}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="p-3 text-right">
+                          <span className={`font-mono font-medium ${item.overall_score >= 70 ? 'text-emerald-400' : item.overall_score >= 50 ? 'text-blue-400' : 'text-amber-400'}`}>
+                            {item.overall_score?.toFixed(0)}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono text-slate-400">
+                          {item.valuation_score?.toFixed(0)}
+                        </td>
+                        <td className={`p-3 text-right font-mono ${item.upside_potential?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {item.upside_potential || "—"}
+                        </td>
+                      </>
+                    )}
+                    <td className="p-3 text-right font-mono text-white">
+                      {(item.confidence * 100).toFixed(0)}%
+                    </td>
+                  </tr>
+                ))}
+                {filteredResults.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                      No results match your filters
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-
-          {loading ? (
-            <div className="p-12 text-center">
-              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
-              <p className="text-zinc-500 text-sm">Screening stocks...</p>
-            </div>
-          ) : results.length > 0 ? (
-            <div className="max-h-[600px] overflow-y-auto">
-              {/* Table Header */}
-              <div className="grid grid-cols-[1fr_100px_80px_80px_80px_80px_40px] gap-2 px-4 py-2 bg-zinc-900 text-xs text-zinc-500 uppercase tracking-wider sticky top-0">
-                <span>Stock</span>
-                <span className="text-right">Price</span>
-                <span className="text-center">Signal</span>
-                <span className="text-center">Value</span>
-                <span className="text-center">Growth</span>
-                <span className="text-center">Score</span>
-                <span></span>
-              </div>
-              
-              {results.map((stock) => (
-                <button
-                  key={stock.symbol}
-                  onClick={() => navigate(`/stock/${stock.symbol}`)}
-                  className="w-full grid grid-cols-[1fr_100px_80px_80px_80px_80px_40px] gap-2 items-center px-4 py-3 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/50 text-left"
-                  data-testid={`result-${stock.symbol}`}
-                >
-                  <div className="min-w-0">
-                    <p className="font-mono font-semibold text-white">{stock.symbol}</p>
-                    <p className="text-xs text-zinc-500 truncate">{stock.company_name}</p>
-                  </div>
-                  <p className="font-mono text-sm text-white text-right">${stock.price?.toFixed(2) || "—"}</p>
-                  <div className="text-center">
-                    <SignalBadge signal={stock.investment_signal} />
-                  </div>
-                  <div className="text-center">
-                    <ScoreBadge score={stock.valuation_score} />
-                  </div>
-                  <div className="text-center">
-                    <ScoreBadge score={stock.growth_score} />
-                  </div>
-                  <div className="text-center">
-                    <ScoreBadge score={stock.overall_score} />
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-zinc-600" />
-                </button>
-              ))}
-            </div>
-          ) : hasSearched ? (
-            <div className="p-12 text-center">
-              <p className="text-zinc-500 mb-2">No stocks match your criteria</p>
-              <p className="text-xs text-zinc-600">Try adjusting your filters</p>
-            </div>
-          ) : (
-            <div className="p-12 text-center">
-              <Search className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
-              <p className="text-zinc-500 mb-2">Set your filters and click "Screen Stocks"</p>
-              <p className="text-xs text-zinc-600">Results will appear here</p>
-            </div>
-          )}
         </Card>
-      </div>
+      )}
     </div>
   );
 };

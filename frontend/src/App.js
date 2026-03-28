@@ -1,171 +1,208 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
+import AccessGate from "./pages/AccessGate";
 import Dashboard from "./pages/Dashboard";
-import StockDetail from "./pages/StockDetail";
+import Trading from "./pages/Trading";
+import Investments from "./pages/Investments";
+import Chatbot from "./pages/Chatbot";
+import News from "./pages/News";
 import Screener from "./pages/Screener";
-import Chat from "./pages/Chat";
-import Rankings from "./pages/Rankings";
+import Backtesting from "./pages/Backtesting";
+import Portfolio from "./pages/Portfolio";
+import Alerts from "./pages/Alerts";
+import AutoTrade from "./pages/AutoTrade";
+import Settings from "./pages/Settings";
 import { 
   LayoutDashboard, 
-  Search, 
+  TrendingUp, 
+  PiggyBank, 
   MessageSquare, 
-  TrendingUp,
-  BarChart3
+  Newspaper,
+  Search,
+  History,
+  Wallet,
+  Bell,
+  Bot,
+  Settings as SettingsIcon
 } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-// Sidebar Navigation
+// Auth Context
+const AuthContext = createContext(null);
+
+export const useAuth = () => useContext(AuthContext);
+
+const AuthProvider = ({ children }) => {
+  const [token, setToken] = useState(() => localStorage.getItem('obaidtradez_token'));
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    verifyToken();
+  }, [token]);
+
+  const verifyToken = async () => {
+    if (!token) {
+      setIsAuthenticated(false);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API}/auth/verify`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+      setIsAuthenticated(data.valid);
+    } catch {
+      setIsAuthenticated(false);
+    }
+    setLoading(false);
+  };
+
+  const login = (newToken) => {
+    localStorage.setItem('obaidtradez_token', newToken);
+    setToken(newToken);
+    setIsAuthenticated(true);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('obaidtradez_token');
+    setToken(null);
+    setIsAuthenticated(false);
+  };
+
+  return (
+    <AuthContext.Provider value={{ token, isAuthenticated, loading, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+// Sidebar
 const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
   const navItems = [
     { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-    { path: "/rankings", icon: TrendingUp, label: "Rankings" },
-    { path: "/screener", icon: BarChart3, label: "Screener" },
-    { path: "/chat", icon: MessageSquare, label: "AI Chat" },
+    { path: "/trading", icon: TrendingUp, label: "Trading" },
+    { path: "/investments", icon: PiggyBank, label: "Investments" },
+    { path: "/chatbot", icon: MessageSquare, label: "Chatbot" },
+    { path: "/screener", icon: Search, label: "Screener" },
+    { path: "/news", icon: Newspaper, label: "News" },
+    { path: "/backtesting", icon: History, label: "Backtesting" },
+    { path: "/portfolio", icon: Wallet, label: "Portfolio" },
+    { path: "/alerts", icon: Bell, label: "Alerts" },
+    { path: "/auto", icon: Bot, label: "Auto Trade" },
+    { path: "/settings", icon: SettingsIcon, label: "Settings" },
   ];
   
   return (
-    <aside className="fixed left-0 top-0 h-full w-16 lg:w-56 bg-zinc-950 border-r border-zinc-800 z-40 flex flex-col" data-testid="sidebar">
+    <aside className="sidebar fixed left-0 top-0 h-full w-16 lg:w-56 z-40 flex flex-col" data-testid="sidebar">
       {/* Logo */}
-      <div className="h-16 flex items-center justify-center lg:justify-start lg:px-4 border-b border-zinc-800">
+      <div className="h-16 flex items-center justify-center lg:justify-start lg:px-4 border-b border-slate-800">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-red-500 flex items-center justify-center">
             <TrendingUp className="w-5 h-5 text-white" />
           </div>
-          <span className="hidden lg:block font-heading font-bold text-lg text-white">AlphaLens</span>
+          <div className="hidden lg:block">
+            <span className="font-display font-bold text-sm text-white tracking-wider">OBAID</span>
+            <span className="font-display font-bold text-sm text-blue-400 tracking-wider">TRADEZ</span>
+          </div>
         </div>
       </div>
       
       {/* Navigation */}
-      <nav className="flex-1 py-4">
+      <nav className="flex-1 py-4 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
           return (
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
-              className={`w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 ${
-                isActive 
-                  ? "bg-blue-600/10 text-blue-400 border-r-2 border-blue-500" 
-                  : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
-              }`}
-              data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
+              className={`sidebar-item w-full ${isActive ? 'active' : ''}`}
+              data-testid={`nav-${item.label.toLowerCase().replace(/[^a-z]/g, '-')}`}
             >
               <item.icon className="w-5 h-5 mx-auto lg:mx-0" />
-              <span className="hidden lg:block text-sm font-medium">{item.label}</span>
+              <span className="hidden lg:block text-sm">{item.label}</span>
             </button>
           );
         })}
       </nav>
       
-      {/* Footer */}
-      <div className="p-4 border-t border-zinc-800">
-        <p className="hidden lg:block text-[10px] text-zinc-500 text-center">
-          For research only.<br/>Not financial advice.
-        </p>
+      {/* Status */}
+      <div className="p-4 border-t border-slate-800">
+        <div className="hidden lg:flex items-center gap-2 text-xs">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span className="text-slate-500">Paper Trading</span>
+        </div>
       </div>
     </aside>
   );
 };
 
-// Search Bar Component
-const GlobalSearch = () => {
+// Header with search
+const Header = () => {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   
-  useEffect(() => {
-    if (query.length < 1) {
-      setResults([]);
-      return;
+  const handleSearch = (e) => {
+    if (e.key === 'Enter' && query.trim()) {
+      navigate(`/trading?symbol=${query.toUpperCase()}`);
     }
-    
-    const search = async () => {
-      try {
-        const response = await fetch(`${API}/search?q=${encodeURIComponent(query)}`);
-        const data = await response.json();
-        setResults(data.slice(0, 6));
-        setIsOpen(true);
-      } catch (e) {
-        console.error(e);
-      }
-    };
-    
-    const debounce = setTimeout(search, 300);
-    return () => clearTimeout(debounce);
-  }, [query]);
+  };
   
   return (
-    <div className="relative" data-testid="global-search">
-      <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 focus-within:border-blue-600 transition-colors">
-        <Search className="w-4 h-4 text-zinc-500 mr-2" />
+    <header className="h-14 bg-[#080810]/80 backdrop-blur-sm border-b border-slate-800 flex items-center justify-between px-6 sticky top-0 z-30">
+      <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-md px-3 py-1.5">
+        <Search className="w-4 h-4 text-slate-500" />
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => results.length > 0 && setIsOpen(true)}
-          onBlur={() => setTimeout(() => setIsOpen(false), 200)}
-          placeholder="Search stocks..."
-          className="bg-transparent text-sm text-white placeholder:text-zinc-500 outline-none w-48 lg:w-64"
+          onChange={(e) => setQuery(e.target.value.toUpperCase())}
+          onKeyDown={handleSearch}
+          placeholder="Search symbols..."
+          className="bg-transparent text-sm text-white placeholder:text-slate-500 outline-none w-40 lg:w-64"
           data-testid="search-input"
         />
       </div>
       
-      {isOpen && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-zinc-900 border border-zinc-800 rounded-md shadow-xl z-50 overflow-hidden">
-          {results.map((stock, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                navigate(`/stock/${stock.symbol}`);
-                setQuery("");
-                setIsOpen(false);
-              }}
-              className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-800 transition-colors text-left"
-              data-testid={`search-result-${stock.symbol}`}
-            >
-              <div>
-                <span className="font-mono text-sm text-white">{stock.symbol}</span>
-                <span className="text-xs text-zinc-500 ml-2 truncate max-w-[150px] inline-block align-middle">
-                  {stock.name}
-                </span>
-              </div>
-              <span className="text-[10px] text-zinc-600">{stock.exchangeShortName}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Header
-const Header = () => {
-  return (
-    <header className="h-16 bg-zinc-950/80 backdrop-blur-sm border-b border-zinc-800 flex items-center justify-between px-6 sticky top-0 z-30">
-      <GlobalSearch />
-      
       <div className="flex items-center gap-4">
-        <div className="hidden md:flex items-center gap-2 text-xs text-zinc-500">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          Live Data
+        <div className="flex items-center gap-2 text-xs">
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span className="text-slate-400">Live</span>
         </div>
       </div>
     </header>
   );
 };
 
-// Main Layout
-const Layout = ({ children }) => {
+// Protected Layout
+const ProtectedLayout = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-500 text-sm">Loading ObaidTradez...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!isAuthenticated) {
+    return <AccessGate />;
+  }
+  
   return (
-    <div className="min-h-screen bg-zinc-950">
+    <div className="min-h-screen bg-[#0a0a0f]">
       <Sidebar />
       <div className="pl-16 lg:pl-56">
         <Header />
@@ -179,18 +216,30 @@ const Layout = ({ children }) => {
 
 function App() {
   return (
-    <div className="App dark">
+    <div className="App">
       <BrowserRouter>
-        <Layout>
+        <AuthProvider>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/rankings" element={<Rankings />} />
-            <Route path="/screener" element={<Screener />} />
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/stock/:symbol" element={<StockDetail />} />
+            <Route path="/*" element={
+              <ProtectedLayout>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/trading" element={<Trading />} />
+                  <Route path="/investments" element={<Investments />} />
+                  <Route path="/chatbot" element={<Chatbot />} />
+                  <Route path="/screener" element={<Screener />} />
+                  <Route path="/news" element={<News />} />
+                  <Route path="/backtesting" element={<Backtesting />} />
+                  <Route path="/portfolio" element={<Portfolio />} />
+                  <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/auto" element={<AutoTrade />} />
+                  <Route path="/settings" element={<Settings />} />
+                </Routes>
+              </ProtectedLayout>
+            } />
           </Routes>
-        </Layout>
-        <Toaster position="bottom-right" theme="dark" />
+          <Toaster position="bottom-right" theme="dark" />
+        </AuthProvider>
       </BrowserRouter>
     </div>
   );
