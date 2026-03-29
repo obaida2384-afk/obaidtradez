@@ -48,6 +48,19 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [x] **Data completeness indicators** for stocks with incomplete data
 - [x] **Sector coverage**: Technology, Healthcare, Financials, Consumer, Energy, Industrials, Materials, Utilities, Real Estate, Communications
 
+### Phase 2.5 - Investment Explainability UI (Dec 2025)
+- [x] **Score Breakdown Section**: 5 visual bars (Valuation, Quality, Growth, Strength, Risk)
+- [x] **Valuation Summary**: P/E Ratio, EV/EBITDA, Fair Value, Classification
+- [x] **Business Quality**: ROE, Net Margin, Gross Margin, Quality Rating
+- [x] **Growth Profile**: Revenue Growth, EPS Growth, Trend, Rating
+- [x] **Score Drivers**: Boosters, Detractors, Biggest Weakness
+- [x] **Bull Case**: Bullet points showing investment strengths
+- [x] **Bear Case**: Bullet points showing investment concerns (conditional)
+- [x] **Key Risks**: Badges showing risk factors (conditional)
+- [x] **AI Analysis**: GPT-generated summary text
+- [x] **Percentile Rank**: Top X% ranking indicator
+- [x] **Dynamic thresholding**: Percentile-based category assignment
+
 ## API Endpoints
 
 ### Authentication
@@ -110,12 +123,14 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 
 ## Test Status
 - Backend: 100% (22/22 tests passed)
-- Frontend: 100% (All features working)
+- Frontend: 100% (All features working, tested Dec 2025)
+- Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
 - Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
 ## Notes
-- Hot/Bullish categories may show 0 if no stocks meet high threshold criteria (expected behavior)
+- Category tabs working correctly: Hot (15), Bullish (15), Undervalued (15), Watch (15), Bearish (20)
 - FMP API rate limits may cause some stocks to have incomplete data (<80% completeness)
 - Investment signals are cached in MongoDB and refreshed on demand
 - Background refresh processes stocks in batches of 10 with 0.5s delays
+- Conditional sections (Bear Case, Key Risks, Score Detractors) only appear when data is available
