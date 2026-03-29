@@ -347,20 +347,36 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - UI shows warning when entering risky stock in Quick Trade form
   - Button changes to "Queue (Will Block)" for risky stocks
 
+### Phase 9 - UI Features (Mar 2026)
+- [x] **Decision Clarity UI** on Investment cards:
+  - "Why It's Strong" (green) - Bull case bullet points
+  - "Biggest Risk" (amber) - Biggest weakness/risk
+  - "Valuation Verdict" (blue) - Status, Fair Value, Upside
+- [x] **Custom Screener Presets** (8 presets):
+  - Value Picks, Growth Stocks, Quality Dividend, Safe Havens
+  - Bargain Hunters, Tech Leaders, Healthcare Picks, Financial Fortress
+  - Auto-apply filters on preset click
+- [x] **CSV Export** across 3 pages:
+  - Investments page (header Export button)
+  - Portfolio page (positions section, conditional on positions existing)
+  - AutoTrade page (Executed tab Export button)
+
 ### P2 (Medium Priority)
-- [ ] Custom screener presets
-- [ ] Email notifications
 - [ ] Compare stocks side-by-side
+- [ ] Email notifications
+- [ ] Sector filters for Investment Ideas
 
 ### P3 (Nice to Have)
-- [ ] Export portfolio/trades to CSV
 - [ ] Mobile-responsive sidebar collapse
 - [ ] Dark/light theme toggle
 - [ ] Multi-language support
 
 ## Test Status
 - Backend: 100% (All endpoints working - iteration_13)
-- Frontend: 100% (All features working, tested Mar 2026)
+- Frontend: 100% (All features working, tested Mar 2026 - iteration_14)
+- Decision Clarity UI: 100% (verified iteration_14)
+- Custom Screener Presets: 100% (verified iteration_14)
+- CSV Export: 100% (verified iteration_14)
 - Trading Signals (Quality Engine): 100% - selective signals with R:R > 2.0
 - Trading News Sentiment: 100% - news_sentiment, news_impact, news_headlines fields verified
 - Investment Engine: 100% - **1,097 stocks** analyzed across all categories:
