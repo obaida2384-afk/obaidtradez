@@ -7,11 +7,12 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 3. **Left sidebar tabs**: Dashboard, Trading, Investments, Chatbot, Screener, News & Sentiment, Backtesting, Portfolio, Alerts, Auto Trade, Settings
 4. **Multiple external APIs**: Alpaca (paper trading), Polygon, Finnhub, FMP, Alpha Vantage, NewsAPI
 5. **Strict Risk Management layer** and **AI chatbot with GPT-5.2**
+6. **Broad market coverage**: Investment universe of 350+ stocks across all sectors
 
 ## Architecture
 - **Frontend**: React + Tailwind CSS + Shadcn UI
 - **Backend**: FastAPI + Python
-- **Database**: MongoDB (for chat history, access logs)
+- **Database**: MongoDB (for chat history, access logs, investment signals cache)
 - **AI**: OpenAI GPT-5.2 via Emergent LLM Key
 - **Data**: Multi-provider (FMP, Polygon, Finnhub, Alpha Vantage, NewsAPI)
 - **Trading**: Alpaca Paper Trading API
@@ -22,29 +23,72 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 3. **Mixed**: Uses both approaches based on market conditions
 
 ## What's Been Implemented ✓
-- [x] Secure access gate with code validation (Dec 2025)
-- [x] Dashboard with dual-mode signals overview (Dec 2025)
-- [x] Trading page with signal categories (Hot, Breakout, Momentum, High Volume, Avoid) (Dec 2025)
-- [x] Investments page with signal categories (Hot, Bullish, Undervalued, Watch, Bearish) (Dec 2025)
-- [x] AI Chatbot with 3 modes: Trading, Investing, General (Dec 2025)
-- [x] News & Sentiment page with filtering (Dec 2025)
-- [x] Stock Screener with trading/investing mode toggle (Dec 2025)
-- [x] Backtesting page (simulated results) (Dec 2025)
-- [x] Portfolio page with Alpaca integration (Dec 2025)
-- [x] Alerts page (local state) (Dec 2025)
-- [x] Auto Trade/Invest configuration page (Dec 2025)
-- [x] Settings page with risk management (Dec 2025)
-- [x] 11 sidebar navigation tabs (Dec 2025)
-- [x] Real-time data from FMP, Polygon, Finnhub, NewsAPI (Dec 2025)
-- [x] GPT-5.2 powered AI chatbot (Dec 2025)
+
+### Phase 1 - Core Platform (Dec 2025)
+- [x] Secure access gate with code validation
+- [x] Dashboard with dual-mode signals overview
+- [x] Trading page with signal categories (Hot, Breakout, Momentum, High Volume, Avoid)
+- [x] AI Chatbot with 3 modes: Trading, Investing, General (GPT-5.2)
+- [x] News & Sentiment page with filtering
+- [x] Stock Screener with trading/investing mode toggle
+- [x] Backtesting page (simulated results)
+- [x] Portfolio page with Alpaca integration
+- [x] Alerts page (local state)
+- [x] Auto Trade/Invest configuration page
+- [x] Settings page with risk management
+- [x] 11 sidebar navigation tabs
+
+### Phase 2 - Broad Universe Coverage (Dec 2025)
+- [x] **350+ stock universe** covering all major sectors
+- [x] **Investment signals caching** in MongoDB (271 stocks analyzed)
+- [x] **Browse All tab** with pagination (10 pages, 30 stocks/page)
+- [x] **Advanced filtering**: Market cap, Sector, Signal type, Score thresholds
+- [x] **Category tabs**: Hot, Bullish, Undervalued, Watch, Bearish
+- [x] **Background refresh** for universe scanning
+- [x] **Data completeness indicators** for stocks with incomplete data
+- [x] **Sector coverage**: Technology, Healthcare, Financials, Consumer, Energy, Industrials, Materials, Utilities, Real Estate, Communications
+
+## API Endpoints
+
+### Authentication
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/access` | POST | Verify access code, return token |
+| `/api/auth/verify` | GET | Verify token validity |
+
+### Investments (Enhanced)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/investments/browse` | GET | Paginated browse with filters |
+| `/api/investments/filters` | GET | Available filter options |
+| `/api/investments/refresh` | POST | Trigger background scan |
+| `/api/investments/scan` | GET | Categorized signals overview |
+| `/api/investments/analyze/{symbol}` | GET | Deep analysis for single stock |
+
+### Trading
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/trading/scan` | GET | Scan trading opportunities |
+| `/api/trading/analyze/{symbol}` | GET | Analyze for trading |
+
+### Other
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat` | POST | AI chatbot |
+| `/api/news/market` | GET | Market news |
+| `/api/news/{symbol}` | GET | Symbol-specific news |
+| `/api/account` | GET | Alpaca account |
+| `/api/positions` | GET | Current positions |
+| `/api/universe/stats` | GET | Universe statistics |
 
 ## Prioritized Backlog
 
-### P0 (Critical) - COMPLETE
-- All 11 sidebar tabs implemented ✓
-- Access gate working ✓
-- Dual-mode trading/investing signals ✓
-- AI chatbot functional ✓
+### P0 (Critical) - COMPLETE ✓
+- All 11 sidebar tabs implemented
+- Access gate working
+- Dual-mode trading/investing signals
+- AI chatbot functional
+- Broad market coverage (271 stocks)
 
 ### P1 (High Priority)
 - [ ] Live Alpaca order execution (currently paper trading setup only)
@@ -64,23 +108,14 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Dark/light theme toggle
 - [ ] Multi-language support
 
-## API Integrations
-| Provider | Purpose | Status |
-|----------|---------|--------|
-| FMP | Quotes, profiles, ratios, metrics, growth | ✓ Working |
-| Polygon | Market data, news | ✓ Working |
-| Finnhub | Quotes, news, sentiment | ✓ Working |
-| NewsAPI | Market news search | ✓ Working |
-| Alpaca | Paper trading account | ✓ Working |
-| Emergent LLM | GPT-5.2 chatbot | ✓ Working |
-
 ## Test Status
-- Backend: 100% (19/19 tests passed)
-- Frontend: 100% (All pages functional)
+- Backend: 100% (22/22 tests passed)
+- Frontend: 100% (All features working)
+- Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
 ## Notes
-- Trading signals may show 0 in "Hot" category if no stocks meet high threshold criteria (expected behavior)
-- Alpaca returns 500 if API keys invalid (expected behavior)
-- Backtesting uses simulated results (real historical data implementation pending)
-- Alerts stored in local state (persistent DB storage pending)
+- Hot/Bullish categories may show 0 if no stocks meet high threshold criteria (expected behavior)
+- FMP API rate limits may cause some stocks to have incomplete data (<80% completeness)
+- Investment signals are cached in MongoDB and refreshed on demand
+- Background refresh processes stocks in batches of 10 with 0.5s delays
