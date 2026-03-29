@@ -102,6 +102,10 @@ class TradingSignal(BaseModel):
     reasoning: str
     indicators: Dict[str, Any] = {}
     category: str
+    # News sentiment fields
+    news_sentiment: Optional[str] = None  # Bullish, Bearish, Neutral, etc.
+    news_impact: Optional[int] = None  # -10 to +10
+    news_headlines: Optional[List[Dict]] = None  # Recent headlines with sentiment
 
 class InvestmentSignal(BaseModel):
     symbol: str
@@ -407,6 +411,23 @@ class MultiAPIClient:
             params={"symbol": symbol, "token": config.FINNHUB_API_KEY}
         )
     
+    # FMP News Methods
+    async def fmp_news(self, symbol: str, limit: int = 10) -> Optional[List]:
+        """Get FMP stock news for a symbol"""
+        return await self._request(
+            f"{self.fmp_url}/stock-news",
+            headers={"apikey": config.FMP_API_KEY},
+            params={"symbol": symbol, "limit": limit}
+        )
+    
+    async def fmp_general_news(self, limit: int = 20) -> Optional[List]:
+        """Get FMP general news"""
+        return await self._request(
+            f"{self.fmp_url}/general-news",
+            headers={"apikey": config.FMP_API_KEY},
+            params={"limit": limit}
+        )
+    
     # NewsAPI Methods
     async def newsapi_search(self, query: str, limit: int = 10) -> Optional[List]:
         data = await self._request(
@@ -625,10 +646,28 @@ class UniverseManager:
         "DCI", "ENS", "AAON", "AOS", "WTS", "FELE", "BMI", "LNN", "SXI", "MATW",
         "ROLL", "TRS", "SXT", "PRLB", "ROCK", "IIVI", "MKSI", "ENTG", "TTC", "EAF",
         "TREX", "AZEK", "DOOR", "SITE", "SUM", "BLDR", "BLD", "IBP", "APOG", "AWI",
-        "TILE", "BECN", "PGTI", "GMS", "PATK", "JELD", "UFPI", "LGIH", "CVCO", "SKY"
+        "TILE", "BECN", "PGTI", "GMS", "PATK", "JELD", "UFPI", "LGIH", "CVCO", "SKY",
+        
+        # ============ DAY TRADING / HIGH VOLATILITY (60+) ============
+        # Meme stocks & retail favorites with high daily ranges
+        "GME", "AMC", "BBBY", "BB", "CLOV", "WISH", "WKHS", "SPCE", "HYMC", "MULN",
+        "TLRY", "SNDL", "CGC", "ACB", "CRON", "HEXO", "OGI", "VFF", "KERN", "GRWG",
+        # High beta tech with massive intraday moves
+        "NVDA", "AMD", "TSLA", "COIN", "MSTR", "RIOT", "MARA", "BITF", "CLSK", "BTBT",
+        "HIVE", "HUT", "GREE", "CORZ", "CIFR", "DGII", "SDIG", "IREN", "WULF", "BTDR",
+        # Biotech runners (FDA plays, volatile)
+        "MRNA", "BNTX", "NVAX", "VXRT", "ATOS", "SESN", "CRVS", "OCGN", "INO", "SRNE",
+        "NRXP", "CEMI", "PRPH", "ADGI", "ABOS", "CABA", "HOOK", "CALT", "GRPH", "ONCR",
+        # SPACs & recent IPOs with high volatility
+        "DWAC", "PHUN", "BKKT", "IRNT", "TMC", "VLTA", "DNA", "PAYO", "BIRD", "OPAD",
+        # Leveraged ETFs for day trading (3x)
+        "TQQQ", "SQQQ", "SPXL", "SPXS", "UPRO", "UVXY", "SOXL", "SOXS", "LABU", "LABD",
+        "FAS", "FAZ", "TNA", "TZA", "NUGT", "DUST", "JNUG", "JDST", "ERX", "ERY",
+        # High volume large caps for scalping
+        "AAPL", "SPY", "QQQ", "META", "AMZN", "GOOG", "MSFT", "NFLX", "BABA", "PYPL"
     ]
     
-    # ETFs for sector exposure
+    # ETFs for sector exposure + Leveraged for day trading
     CORE_ETFS = [
         "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "VEA", "VWO", "EFA", "EEM",
         "XLF", "XLK", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE",
@@ -639,7 +678,11 @@ class UniverseManager:
         "VNQ", "IYR", "XLRE", "SCHH", "RWR", "ICF", "USRT", "REZ", "HOMZ", "REET",
         "ARKK", "ARKG", "ARKF", "ARKW", "ARKQ", "ARKX", "IZRL", "PRNT", "CTRU", "KOMP",
         "ICLN", "TAN", "QCLN", "PBW", "SMOG", "ACES", "FAN", "LIT", "DRIV", "IDRV",
-        "SKYY", "CLOU", "WCLD", "IGV", "CIBR", "HACK", "FINX", "IPAY", "BOTZ", "ROBO"
+        "SKYY", "CLOU", "WCLD", "IGV", "CIBR", "HACK", "FINX", "IPAY", "BOTZ", "ROBO",
+        # Leveraged & Inverse ETFs for day trading
+        "TQQQ", "SQQQ", "SPXL", "SPXS", "UPRO", "UVXY", "SOXL", "SOXS", "LABD",
+        "FAS", "FAZ", "TNA", "TZA", "NUGT", "DUST", "JNUG", "JDST", "ERX", "ERY",
+        "TVIX", "VXX", "VIXY", "SVXY", "TECL", "TECS", "FNGU", "FNGD", "WEBL", "WEBS"
     ]
     
     # Market cap tiers
@@ -1056,6 +1099,21 @@ class TradingEngine:
             # Build reasoning
             reasoning = "; ".join(confluence_factors) if confluence_factors else "Technical setup"
             
+            # ===== GET NEWS SENTIMENT =====
+            news_data = await news_engine.get_news_sentiment_score(symbol)
+            news_sentiment = news_data.get('overall_sentiment', 'Neutral')
+            news_impact = news_data.get('sentiment_impact', 0)
+            
+            # Adjust confidence based on news sentiment
+            if news_impact > 5:
+                confidence = min(confidence + 0.05, 0.95)  # Boost for very positive news
+                reasoning += f"; News sentiment: {news_sentiment} (+{news_impact})"
+            elif news_impact < -5:
+                confidence = max(confidence - 0.05, 0.50)  # Reduce for very negative news
+                reasoning += f"; News sentiment: {news_sentiment} ({news_impact})"
+            elif news_impact != 0:
+                reasoning += f"; News: {news_sentiment}"
+            
             # ===== CREATE SIGNAL =====
             signal = TradingSignal(
                 symbol=symbol,
@@ -1080,7 +1138,10 @@ class TradingEngine:
                     "confluence_score": confluence_score,
                     "structure_type": structure["type"]
                 },
-                category=category
+                category=category,
+                news_sentiment=news_sentiment,
+                news_impact=news_impact,
+                news_headlines=news_data.get('recent_headlines', [])[:3]
             )
             
             analysis["included"] = True
@@ -1593,11 +1654,13 @@ enhanced_investment_engine = EnhancedInvestmentEngine(api_client, db)
 class NewsSentimentEngine:
     """News aggregation and sentiment analysis"""
     
-    POSITIVE_WORDS = ['surge', 'jump', 'beat', 'exceed', 'upgrade', 'buy', 'bullish', 'growth', 'profit', 'gain', 'rally', 'breakthrough']
-    NEGATIVE_WORDS = ['drop', 'fall', 'miss', 'downgrade', 'sell', 'bearish', 'loss', 'decline', 'crash', 'warning', 'lawsuit', 'investigation']
+    POSITIVE_WORDS = ['surge', 'jump', 'beat', 'exceed', 'upgrade', 'buy', 'bullish', 'growth', 'profit', 'gain', 'rally', 'breakthrough', 'record', 'strong', 'soar', 'outperform', 'positive', 'boost', 'upside']
+    NEGATIVE_WORDS = ['drop', 'fall', 'miss', 'downgrade', 'sell', 'bearish', 'loss', 'decline', 'crash', 'warning', 'lawsuit', 'investigation', 'weak', 'plunge', 'risk', 'concern', 'fear', 'cut', 'layoff', 'recall']
     
     def analyze_sentiment(self, text: str) -> Tuple[str, float]:
         """Simple rule-based sentiment analysis"""
+        if not text:
+            return "Neutral", 0.5
         text_lower = text.lower()
         pos_count = sum(1 for w in self.POSITIVE_WORDS if w in text_lower)
         neg_count = sum(1 for w in self.NEGATIVE_WORDS if w in text_lower)
@@ -1613,24 +1676,130 @@ class NewsSentimentEngine:
             return "Negative", 1 - score
         return "Neutral", 0.5
     
+    async def get_news_sentiment_score(self, symbol: str) -> Dict[str, Any]:
+        """Get aggregated news sentiment score for a symbol - used by trading/investment engines"""
+        news_items = []
+        sentiments = []
+        
+        # Try FMP news first (primary source)
+        fmp_news = await api_client.fmp_news(symbol, limit=10)
+        if fmp_news and isinstance(fmp_news, list):
+            for item in fmp_news[:10]:
+                headline = item.get('title', '') or item.get('text', '')
+                sentiment, score = self.analyze_sentiment(headline)
+                sentiments.append((sentiment, score))
+                news_items.append({
+                    'title': headline[:100],
+                    'sentiment': sentiment,
+                    'score': score
+                })
+        
+        # Fallback to Finnhub if no FMP news
+        if len(sentiments) < 3:
+            finnhub_news = await api_client.finnhub_news(symbol)
+            if finnhub_news:
+                for item in finnhub_news[:5]:
+                    headline = item.get('headline', '')
+                    sentiment, score = self.analyze_sentiment(headline)
+                    sentiments.append((sentiment, score))
+                    news_items.append({
+                        'title': headline[:100],
+                        'sentiment': sentiment,
+                        'score': score
+                    })
+        
+        if not sentiments:
+            return {
+                'overall_sentiment': 'Neutral',
+                'sentiment_score': 0.5,
+                'news_count': 0,
+                'positive_count': 0,
+                'negative_count': 0,
+                'sentiment_impact': 0,  # -10 to +10 scale for scoring
+                'recent_headlines': []
+            }
+        
+        # Calculate aggregate sentiment
+        avg_score = sum(s[1] for s in sentiments) / len(sentiments)
+        positive_count = sum(1 for s in sentiments if s[0] == 'Positive')
+        negative_count = sum(1 for s in sentiments if s[0] == 'Negative')
+        
+        # Calculate sentiment impact on score (-10 to +10)
+        # Positive news boosts, negative news penalizes
+        sentiment_impact = 0
+        if positive_count > negative_count * 2:
+            sentiment_impact = min(10, (positive_count - negative_count) * 2)
+        elif negative_count > positive_count * 2:
+            sentiment_impact = max(-10, -(negative_count - positive_count) * 2)
+        elif positive_count > negative_count:
+            sentiment_impact = min(5, positive_count - negative_count)
+        elif negative_count > positive_count:
+            sentiment_impact = max(-5, -(negative_count - positive_count))
+        
+        # Determine overall sentiment
+        if positive_count > negative_count + 2:
+            overall = 'Bullish'
+        elif negative_count > positive_count + 2:
+            overall = 'Bearish'
+        elif positive_count > negative_count:
+            overall = 'Slightly Positive'
+        elif negative_count > positive_count:
+            overall = 'Slightly Negative'
+        else:
+            overall = 'Neutral'
+        
+        return {
+            'overall_sentiment': overall,
+            'sentiment_score': avg_score,
+            'news_count': len(sentiments),
+            'positive_count': positive_count,
+            'negative_count': negative_count,
+            'sentiment_impact': sentiment_impact,
+            'recent_headlines': news_items[:5]
+        }
+    
     async def get_news_for_symbol(self, symbol: str) -> List[NewsItem]:
         """Get news for a specific symbol"""
         news_items = []
         
-        finnhub_news = await api_client.finnhub_news(symbol)
-        if finnhub_news:
-            for item in finnhub_news[:5]:
-                sentiment, score = self.analyze_sentiment(item.get('headline', ''))
+        # Try FMP news first
+        fmp_news = await api_client.fmp_news(symbol, limit=10)
+        if fmp_news and isinstance(fmp_news, list):
+            for item in fmp_news[:5]:
+                headline = item.get('title', '') or item.get('text', '')
+                sentiment, score = self.analyze_sentiment(headline)
+                pub_date = item.get('publishedDate', '') or item.get('published', '')
                 news_items.append(NewsItem(
-                    title=item.get('headline', ''),
-                    source=item.get('source', 'Unknown'),
+                    title=headline,
+                    source=item.get('site', 'FMP'),
                     url=item.get('url', ''),
-                    published=item.get('datetime', ''),
+                    published=str(pub_date),
                     sentiment=sentiment,
                     sentiment_score=score,
-                    summary=item.get('summary', ''),
+                    summary=item.get('text', '')[:300] if item.get('text') else '',
                     symbols=[symbol]
                 ))
+        
+        # Add Finnhub news
+        if len(news_items) < 5:
+            finnhub_news = await api_client.finnhub_news(symbol)
+            if finnhub_news:
+                for item in finnhub_news[:5]:
+                    sentiment, score = self.analyze_sentiment(item.get('headline', ''))
+                    # Convert Unix timestamp to ISO string if needed
+                    pub_date = item.get('datetime', '')
+                    if isinstance(pub_date, (int, float)):
+                        pub_date = datetime.fromtimestamp(pub_date, tz=timezone.utc).isoformat()
+                    news_items.append(NewsItem(
+                        title=item.get('headline', ''),
+                        source=item.get('source', 'Unknown'),
+                        url=item.get('url', ''),
+                        published=str(pub_date),
+                        sentiment=sentiment,
+                        sentiment_score=score,
+                        summary=item.get('summary', ''),
+                        symbols=[symbol]
+                    ))
         
         if len(news_items) < 5:
             polygon_news = await api_client.polygon_news(symbol, limit=5)
@@ -1641,7 +1810,7 @@ class NewsSentimentEngine:
                         title=item.get('title', ''),
                         source=item.get('publisher', {}).get('name', 'Unknown'),
                         url=item.get('article_url', ''),
-                        published=item.get('published_utc', ''),
+                        published=str(item.get('published_utc', '')),
                         sentiment=sentiment,
                         sentiment_score=score,
                         summary=item.get('description', ''),

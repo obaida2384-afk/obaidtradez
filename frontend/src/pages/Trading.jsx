@@ -70,6 +70,31 @@ const CategoryBadge = ({ category }) => {
   );
 };
 
+// News Sentiment Badge
+const NewsSentimentBadge = ({ sentiment, impact }) => {
+  if (!sentiment || sentiment === 'Neutral') return null;
+  
+  const config = {
+    "Bullish": { class: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", icon: "📈" },
+    "Slightly Positive": { class: "bg-green-500/20 text-green-400 border-green-500/30", icon: "👍" },
+    "Bearish": { class: "bg-red-500/20 text-red-400 border-red-500/30", icon: "📉" },
+    "Slightly Negative": { class: "bg-orange-500/20 text-orange-400 border-orange-500/30", icon: "👎" },
+    "Neutral": { class: "bg-slate-500/20 text-slate-400 border-slate-500/30", icon: "➖" }
+  }[sentiment] || { class: "bg-slate-500/20 text-slate-400 border-slate-500/30", icon: "📰" };
+  
+  return (
+    <span className={`text-[10px] font-medium px-2 py-0.5 rounded border flex items-center gap-1 ${config.class}`}>
+      <span>{config.icon}</span>
+      <span>News: {sentiment}</span>
+      {impact !== 0 && impact !== undefined && (
+        <span className={impact > 0 ? 'text-emerald-400' : 'text-red-400'}>
+          ({impact > 0 ? '+' : ''}{impact})
+        </span>
+      )}
+    </span>
+  );
+};
+
 // Top Trade Card - Premium display for best setups
 const TopTradeCard = memo(({ signal, rank, livePrice }) => {
   const displayPrice = livePrice?.price || signal.price;
@@ -102,6 +127,13 @@ const TopTradeCard = memo(({ signal, rank, livePrice }) => {
         </div>
       </div>
       
+      {/* News Sentiment Badge */}
+      {signal.news_sentiment && signal.news_sentiment !== 'Neutral' && (
+        <div className="mb-3">
+          <NewsSentimentBadge sentiment={signal.news_sentiment} impact={signal.news_impact} />
+        </div>
+      )}
+      
       {/* Trade Setup - Prominent Display */}
       <div className="grid grid-cols-4 gap-2 mb-3 p-3 rounded bg-slate-900/50 border border-slate-800">
         <div className="text-center">
@@ -133,6 +165,26 @@ const TopTradeCard = memo(({ signal, rank, livePrice }) => {
       <p className="text-xs text-slate-400 leading-relaxed">
         <span className="text-slate-500">Why: </span>{signal.reasoning}
       </p>
+      
+      {/* Recent News Headlines */}
+      {signal.news_headlines && signal.news_headlines.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-800">
+          <p className="text-[10px] text-slate-500 uppercase mb-2">Recent News</p>
+          <div className="space-y-1">
+            {signal.news_headlines.slice(0, 2).map((headline, idx) => (
+              <div key={idx} className="flex items-start gap-2">
+                <span className={`text-[10px] ${
+                  headline.sentiment === 'Positive' ? 'text-emerald-400' : 
+                  headline.sentiment === 'Negative' ? 'text-red-400' : 'text-slate-400'
+                }`}>
+                  {headline.sentiment === 'Positive' ? '↑' : headline.sentiment === 'Negative' ? '↓' : '•'}
+                </span>
+                <p className="text-[10px] text-slate-400 line-clamp-1">{headline.title}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
   );
 });
