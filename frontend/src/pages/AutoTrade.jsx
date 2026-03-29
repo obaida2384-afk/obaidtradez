@@ -406,6 +406,151 @@ const QuickTradeForm = ({ onSubmit, loading, riskyStocks = [] }) => {
   );
 };
 
+// Recommended Trades Component - Shows safe, high-quality stocks
+const RecommendedTrades = ({ onQueueTrade, loading, token }) => {
+  const [recommended, setRecommended] = useState([]);
+  const [safeStocks, setSafeStocks] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [category, setCategory] = useState("bullish");
+  
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoadingData(true);
+      try {
+        const headers = { Authorization: `Bearer ${token}` };
+        
+        const [recRes, safeRes] = await Promise.all([
+          fetch(`${API}/paper/recommended-trades?limit=20`, { headers }),
+          fetch(`${API}/paper/safe-stocks?category=${category}&limit=50`, { headers })
+        ]);
+        
+        if (recRes.ok) {
+          const data = await recRes.json();
+          setRecommended(data.recommended || []);
+        }
+        if (safeRes.ok) {
+          const data = await safeRes.json();
+          setSafeStocks(data.stocks || []);
+        }
+      } catch (error) {
+        console.error("Error fetching recommended:", error);
+      }
+      setLoadingData(false);
+    };
+    
+    fetchData();
+  }, [token, category]);
+  
+  const handleQuickQueue = (stock) => {
+    onQueueTrade({
+      symbol: stock.symbol,
+      side: "buy",
+      qty: 1,
+      reason: stock.reasoning || `${stock.investment_category || 'Buy'} signal`,
+      strategy: stock.source === "investment" ? "value" : "momentum"
+    });
+  };
+  
+  if (loadingData) {
+    return (
+      <Card className="terminal-card p-8 text-center">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-amber-400" />
+        <p className="text-slate-400">Loading recommended trades...</p>
+      </Card>
+    );
+  }
+  
+  return (
+    <div className="space-y-4">
+      {/* Top Recommendations */}
+      <Card className="terminal-card p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Zap className="w-5 h-5 text-amber-400" />
+          <h3 className="font-semibold text-white">Top Trading Recommendations</h3>
+          <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
+            Safe Stocks Only
+          </Badge>
+        </div>
+        
+        {recommended.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {recommended.slice(0, 6).map((stock, idx) => (
+              <div 
+                key={stock.symbol || idx}
+                className="p-3 rounded-lg bg-slate-900/50 border border-slate-800 hover:border-amber-500/30 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono font-bold text-white">{stock.symbol}</span>
+                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">
+                    {stock.investment_category || stock.signal}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-400 line-clamp-2 mb-2">{stock.name}</p>
+                {stock.investment_score && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] text-slate-500">Score:</span>
+                    <span className="text-xs font-mono text-amber-400">{stock.investment_score?.toFixed(0)}</span>
+                  </div>
+                )}
+                <Button 
+                  size="sm" 
+                  className="w-full bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 text-xs"
+                  onClick={() => handleQuickQueue(stock)}
+                  disabled={loading}
+                >
+                  <TrendingUp className="w-3 h-3 mr-1" /> Quick Buy
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-500 text-sm text-center py-4">No recommendations available</p>
+        )}
+      </Card>
+      
+      {/* Safe Stocks Browser */}
+      <Card className="terminal-card p-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Shield className="w-5 h-5 text-emerald-400" />
+            <h3 className="font-semibold text-white">Browse Safe Stocks</h3>
+          </div>
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger className="w-32 bg-slate-900 border-slate-700 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hot">Hot</SelectItem>
+              <SelectItem value="bullish">Bullish</SelectItem>
+              <SelectItem value="undervalued">Undervalued</SelectItem>
+              <SelectItem value="buy">All Buy</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-64 overflow-y-auto">
+          {safeStocks.map((stock, idx) => (
+            <button
+              key={stock.symbol || idx}
+              onClick={() => handleQuickQueue(stock)}
+              disabled={loading}
+              className="p-2 rounded bg-slate-900/50 border border-slate-800 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-colors text-left"
+            >
+              <span className="font-mono text-xs text-white block">{stock.symbol}</span>
+              <span className="text-[10px] text-slate-500 block truncate">{stock.name}</span>
+              <span className="text-[10px] text-emerald-400">{stock.overall_score?.toFixed(0)} pts</span>
+            </button>
+          ))}
+        </div>
+        
+        {safeStocks.length === 0 && (
+          <p className="text-slate-500 text-sm text-center py-4">No stocks in this category</p>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 const AutoTrade = () => {
   const { token } = useAuth();
   const [settings, setSettings] = useState(null);
@@ -416,7 +561,7 @@ const AutoTrade = () => {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("queue");
+  const [activeTab, setActiveTab] = useState("recommended");
   const [statusFilter, setStatusFilter] = useState("");
   const [marketStatus, setMarketStatus] = useState(null);
   const [riskyStocks, setRiskyStocks] = useState([]);
@@ -879,6 +1024,9 @@ const AutoTrade = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex items-center justify-between mb-4">
           <TabsList className="bg-slate-900 border border-slate-800">
+            <TabsTrigger value="recommended" className="data-[state=active]:bg-slate-800">
+              <Zap className="w-4 h-4 mr-1" /> Recommended
+            </TabsTrigger>
             <TabsTrigger value="queue" className="data-[state=active]:bg-slate-800">
               <Clock className="w-4 h-4 mr-1" /> Queue
             </TabsTrigger>
@@ -908,6 +1056,10 @@ const AutoTrade = () => {
             </Select>
           )}
         </div>
+
+        <TabsContent value="recommended" className="mt-0">
+          <RecommendedTrades onQueueTrade={queueTrade} loading={actionLoading} token={token} />
+        </TabsContent>
 
         <TabsContent value="queue" className="mt-0">
           {/* Live Price Indicator */}

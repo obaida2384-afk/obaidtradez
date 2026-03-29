@@ -2038,24 +2038,34 @@ async def scan_investments(auth: bool = Depends(verify_access)):
                 upsert=True
             )
     
-    # Categorize results
+    # Categorize results - return ALL stocks in each category
     hot = [s for s in signals if s.get("category") == "Hot"]
     bullish = [s for s in signals if s.get("category") == "Bullish"]
     undervalued = [s for s in signals if s.get("category") == "Undervalued"]
     bearish = [s for s in signals if s.get("category") == "Bearish"]
     overpriced = [s for s in signals if s.get("category") == "Overpriced"]
     watch = [s for s in signals if s.get("category") == "Watch"]
+    avoid = [s for s in signals if s.get("signal") == "Sell"]
     
     return {
-        "hot": sorted(hot, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
-        "bullish": sorted(bullish, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
-        "undervalued": sorted(undervalued, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
-        "watch": sorted(watch, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
-        "bearish": bearish[:15],
-        "overpriced": overpriced[:15],
-        "avoid": [s for s in signals if s.get("signal") == "Sell"][:15],
+        "hot": sorted(hot, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "bullish": sorted(bullish, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "undervalued": sorted(undervalued, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "watch": sorted(watch, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "bearish": sorted(bearish, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "overpriced": sorted(overpriced, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "avoid": sorted(avoid, key=lambda x: x.get("overall_score", 0), reverse=True),
         "all": sorted(signals, key=lambda x: x.get("overall_score", 0), reverse=True),
-        "total_analyzed": len(signals)
+        "total_analyzed": len(signals),
+        "category_counts": {
+            "hot": len(hot),
+            "bullish": len(bullish),
+            "undervalued": len(undervalued),
+            "watch": len(watch),
+            "bearish": len(bearish),
+            "overpriced": len(overpriced),
+            "avoid": len(avoid)
+        }
     }
 
 @api_router.get("/investments/browse")
@@ -4149,6 +4159,101 @@ async def check_symbol_risk(symbol: str, auth: bool = Depends(verify_access)):
         "is_risky": is_risky,
         "can_auto_trade": not is_risky,
         "message": f"{symbol_upper} is {'BLOCKED (high-risk)' if is_risky else 'ALLOWED'} for auto-trading"
+    }
+
+@api_router.get("/paper/safe-stocks")
+async def get_safe_tradeable_stocks(
+    category: Optional[str] = Query(default=None, description="Filter by category: hot, bullish, undervalued"),
+    limit: int = Query(default=100, ge=10, le=500),
+    auth: bool = Depends(verify_access)
+):
+    """Get list of safe (non-risky) stocks suitable for auto-trading with investment signals"""
+    # Get all investment signals
+    cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1)
+    all_signals = await cursor.to_list(length=2000)
+    
+    # Filter out risky stocks
+    safe_signals = [
+        s for s in all_signals 
+        if s.get("symbol", "").upper() not in PaperExecutionEngine.RISKY_STOCKS
+    ]
+    
+    # Filter by category if specified
+    if category:
+        category_lower = category.lower()
+        if category_lower == "hot":
+            safe_signals = [s for s in safe_signals if s.get("category") == "Hot"]
+        elif category_lower == "bullish":
+            safe_signals = [s for s in safe_signals if s.get("category") in ["Hot", "Bullish"]]
+        elif category_lower == "undervalued":
+            safe_signals = [s for s in safe_signals if s.get("category") == "Undervalued"]
+        elif category_lower == "buy":
+            safe_signals = [s for s in safe_signals if s.get("signal") == "Buy"]
+    
+    # Limit results
+    safe_signals = safe_signals[:limit]
+    
+    return {
+        "stocks": safe_signals,
+        "count": len(safe_signals),
+        "total_safe": len([s for s in all_signals if s.get("symbol", "").upper() not in PaperExecutionEngine.RISKY_STOCKS]),
+        "total_risky_excluded": len(PaperExecutionEngine.RISKY_STOCKS),
+        "category_filter": category
+    }
+
+@api_router.get("/paper/recommended-trades")
+async def get_recommended_trades(
+    limit: int = Query(default=20, ge=5, le=50),
+    auth: bool = Depends(verify_access)
+):
+    """Get recommended trades for Auto Trade - only safe, high-quality stocks"""
+    # Get trading signals
+    trading_data = await trading_engine.scan_trading_opportunities()
+    top_trades = trading_data.get("top_trades", [])
+    
+    # Get investment signals for context
+    cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1).limit(200)
+    investment_signals = {s["symbol"]: s for s in await cursor.to_list(length=200)}
+    
+    # Filter to only safe stocks and enrich with investment data
+    recommended = []
+    for trade in top_trades:
+        # Handle both dict and Pydantic model
+        if hasattr(trade, 'dict'):
+            trade_dict = trade.dict()
+        else:
+            trade_dict = trade
+            
+        symbol = trade_dict.get("symbol", "").upper()
+        if symbol not in PaperExecutionEngine.RISKY_STOCKS:
+            # Enrich with investment data
+            inv_data = investment_signals.get(symbol, {})
+            trade_dict["investment_score"] = inv_data.get("overall_score")
+            trade_dict["investment_category"] = inv_data.get("category")
+            trade_dict["is_safe"] = True
+            recommended.append(trade_dict)
+    
+    # Also add top investment ideas that are safe
+    for symbol, inv in list(investment_signals.items())[:30]:
+        if symbol not in PaperExecutionEngine.RISKY_STOCKS:
+            if symbol not in [r.get("symbol") for r in recommended]:
+                if inv.get("signal") == "Buy" and inv.get("overall_score", 0) >= 70:
+                    recommended.append({
+                        "symbol": symbol,
+                        "name": inv.get("name", symbol),
+                        "signal": "Buy",
+                        "confidence": inv.get("confidence", 0.7),
+                        "reasoning": inv.get("reasoning", "Strong fundamentals"),
+                        "investment_score": inv.get("overall_score"),
+                        "investment_category": inv.get("category"),
+                        "is_safe": True,
+                        "source": "investment"
+                    })
+    
+    return {
+        "recommended": recommended[:limit],
+        "count": len(recommended[:limit]),
+        "risky_excluded": len(PaperExecutionEngine.RISKY_STOCKS)
     }
 
 # ===================== LIVE PRICES =====================
