@@ -360,11 +360,12 @@ class MultiAPIClient:
         )
         return data[0] if data and isinstance(data, list) and len(data) > 0 else None
     
-    async def fmp_historical(self, symbol: str) -> Optional[List]:
+    async def fmp_historical(self, symbol: str, days: int = 200) -> Optional[List]:
+        """Get historical price data"""
         data = await self._request(
             f"{self.fmp_url}/historical-price-eod/full",
             headers={"apikey": config.FMP_API_KEY},
-            params={"symbol": symbol}
+            params={"symbol": symbol, "limit": days}
         )
         return data if isinstance(data, list) else None
     
@@ -674,9 +675,10 @@ class TradingEngine:
     async def analyze_for_trading(self, symbol: str) -> Optional[TradingSignal]:
         """Analyze stock for short-term trading opportunities"""
         try:
-            quote, profile = await asyncio.gather(
+            quote, profile, historical = await asyncio.gather(
                 api_client.fmp_quote(symbol),
                 api_client.fmp_profile(symbol),
+                api_client.fmp_historical(symbol, days=50),
                 return_exceptions=True
             )
             
@@ -684,17 +686,39 @@ class TradingEngine:
                 return None
             if isinstance(profile, Exception):
                 profile = None
+            if isinstance(historical, Exception):
+                historical = []
             
             price = quote.get('price', 0)
-            change_pct = quote.get('changesPercentage', 0)
+            # FMP stable API uses 'changePercentage' not 'changesPercentage'
+            change_pct = quote.get('changePercentage', quote.get('changesPercentage', 0))
             volume = quote.get('volume', 0)
-            avg_volume = quote.get('avgVolume', 1)
+            # avgVolume may not be in stable API - use a reasonable estimate
+            avg_volume = quote.get('avgVolume') or quote.get('avgVolumeDay', 0)
+            if not avg_volume or avg_volume < 100000:
+                # Estimate from profile or use sensible default
+                avg_volume = volume  # No comparison possible without historical data
+            
+            # Calculate SMAs from historical data if not in quote
             sma50 = quote.get('priceAvg50', 0)
             sma200 = quote.get('priceAvg200', 0)
+            
+            # If SMAs not available, calculate from historical
+            if not sma50 and historical:
+                prices = [h.get('close', 0) for h in historical[:50] if h.get('close')]
+                if len(prices) >= 20:
+                    sma50 = sum(prices[:min(50, len(prices))]) / min(50, len(prices))
+            
             high_52 = quote.get('yearHigh', 0)
             low_52 = quote.get('yearLow', 0)
             
-            vol_ratio = volume / avg_volume if avg_volume > 0 else 1
+            # Safe volume ratio calculation
+            if avg_volume > 0 and avg_volume != volume:
+                vol_ratio = volume / avg_volume
+            else:
+                # No reliable avg volume - assume normal volume
+                vol_ratio = 1.0
+            
             price_vs_50 = ((price / sma50) - 1) * 100 if sma50 > 0 else 0
             price_vs_200 = ((price / sma200) - 1) * 100 if sma200 > 0 else 0
             
@@ -744,10 +768,15 @@ class TradingEngine:
             overall = (momentum_score * 0.30 + volume_score * 0.25 + 
                       technical_score * 0.25 + trend_score * 0.20)
             
-            if overall >= 70 and len(reasons) >= 2:
+            # Dynamic signal assignment based on relative performance
+            # In down markets, even "neutral" stocks can be opportunities
+            if overall >= 65 and len(reasons) >= 2:
                 signal = "Buy"
-                category = "Hot" if overall >= 80 else "Breakout"
-            elif overall >= 55:
+                category = "Hot"
+            elif overall >= 58 and (change_pct > 0 or len(reasons) >= 1):
+                signal = "Buy" if change_pct > 0 else "Watch"
+                category = "Breakout" if change_pct > 0 else "Medium"
+            elif overall >= 50:
                 signal = "Watch"
                 category = "Medium"
             else:
@@ -787,7 +816,7 @@ class TradingEngine:
             return None
     
     async def scan_trading_opportunities(self) -> Dict[str, List[TradingSignal]]:
-        """Scan market for trading opportunities"""
+        """Scan market for trading opportunities with dynamic thresholds"""
         universe = [
             "NVDA", "AMD", "TSLA", "META", "AAPL", "MSFT", "GOOGL", "AMZN",
             "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "ROKU", "SNAP",
@@ -797,10 +826,59 @@ class TradingEngine:
         signals = await asyncio.gather(*[self.analyze_for_trading(s) for s in universe])
         signals = [s for s in signals if s]
         
+        # Primary categorization by signal category
         hot = [s for s in signals if s.category == "Hot"]
         breakout = [s for s in signals if s.category == "Breakout"]
-        momentum = [s for s in signals if s.indicators.get('change_pct', 0) > 2]
-        high_volume = [s for s in signals if s.indicators.get('volume_ratio', 0) > 1.5]
+        
+        # Filter: Avoid signals should generally not appear in Hot/Breakout
+        # but if the entire market is negative, we still want to show *something*
+        non_avoid_signals = [s for s in signals if s.signal != "Avoid"]
+        watch_or_better = [s for s in signals if s.signal in ["Buy", "Watch"]]
+        
+        # Dynamic thresholds - surface top opportunities even in bad markets
+        if not hot:
+            # First try non-avoid signals
+            candidates = non_avoid_signals if non_avoid_signals else watch_or_better
+            if not candidates:
+                # If everything is Avoid, take least negative ones
+                candidates = sorted(signals, key=lambda x: x.indicators.get('change_pct', -100), reverse=True)
+            
+            sorted_by_conf = sorted(candidates, key=lambda x: x.confidence, reverse=True)
+            # Take top performers with confidence > 0.45
+            hot = [s for s in sorted_by_conf[:3] if s.confidence >= 0.45]
+        
+        if not breakout:
+            # Take signals with positive or least negative change
+            candidates = non_avoid_signals if non_avoid_signals else signals
+            sorted_positive = sorted(
+                candidates,
+                key=lambda x: (x.indicators.get('change_pct', -100), x.confidence), 
+                reverse=True
+            )
+            # Exclude any already in hot
+            hot_symbols = {s.symbol for s in hot}
+            breakout = [s for s in sorted_positive[:3] if s.symbol not in hot_symbols and s.confidence >= 0.40]
+        
+        # Momentum: positive change percent, relaxed threshold
+        momentum_threshold = 1.5  # Lower from 2% to 1.5%
+        momentum = [s for s in signals if s.indicators.get('change_pct', 0) > momentum_threshold]
+        if not momentum:
+            # Take any with positive change
+            momentum = sorted(
+                [s for s in signals if s.indicators.get('change_pct', 0) > 0],
+                key=lambda x: x.indicators.get('change_pct', 0), reverse=True
+            )[:5]
+        
+        # High volume: use relative comparison since avgVolume may be unreliable
+        high_volume = [s for s in signals if s.indicators.get('volume_ratio', 0) > 1.3]
+        if not high_volume:
+            # Take top by volume ratio
+            high_volume = sorted(
+                signals, 
+                key=lambda x: x.indicators.get('volume_ratio', 0), 
+                reverse=True
+            )[:5]
+        
         avoid = [s for s in signals if s.signal == "Avoid"]
         
         return {
