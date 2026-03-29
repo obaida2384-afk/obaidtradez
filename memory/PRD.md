@@ -331,6 +331,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - 60+ high-volatility day trading stocks (GME, AMC, MARA, RIOT, etc.)
   - 30+ leveraged ETFs (TQQQ, SQQQ, SOXL, SOXS, LABU, LABD, etc.)
   - Meme stocks, biotech runners, SPACs, crypto-related stocks
+  - **1,097 stocks currently analyzed and cached**
 - [x] **News Sentiment Integration**:
   - FMP News API integration (primary source)
   - Finnhub and Polygon news fallback
@@ -339,6 +340,12 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Trading signals include news_sentiment, news_impact, news_headlines
   - UI displays "News: Bullish/Bearish/Slightly Positive/Negative (+/-X)" badges
   - Recent headlines section under each trading signal
+- [x] **Auto Trade Safety Controls**:
+  - **83 risky stocks blocked** from auto-trading
+  - Categories: Meme stocks, leveraged ETFs, SPACs, crypto-related, EV SPACs, biotech runners
+  - New endpoints: `/api/paper/risky-stocks`, `/api/paper/check-symbol/{symbol}`
+  - UI shows warning when entering risky stock in Quick Trade form
+  - Button changes to "Queue (Will Block)" for risky stocks
 
 ### P2 (Medium Priority)
 - [ ] Custom screener presets
@@ -352,21 +359,22 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_12)
+- Backend: 100% (All endpoints working - iteration_13)
 - Frontend: 100% (All features working, tested Mar 2026)
-- Trading Signals (Quality Engine): 100% - 35 stocks scanned, 4 quality signals, R:R > 2.0
+- Trading Signals (Quality Engine): 100% - selective signals with R:R > 2.0
 - Trading News Sentiment: 100% - news_sentiment, news_impact, news_headlines fields verified
-- Investment Engine: 100% - 305 stocks, balanced scoring (Quality 25%, Valuation 20%, Growth 20%)
+- Investment Engine: 100% - **1,097 stocks** analyzed (exceeded 700+ target)
 - Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
 - Risk Management: 100% (Position Size, Risk/Reward calculators working)
 - Backtesting: 100% (Real FMP historical data, 5 strategies)
 - Alerts: 100% (CRUD, Check Now, History, Reset - MongoDB persistence)
-- Watchlist: 100% (Add/Remove/Persist verified - iteration_12)
-- Portfolio Analytics: 100% (17/17 backend, 24/24 frontend - iteration_7)
-- Paper Execution: 100% (25/25 backend, all UI verified - iteration_8)
-- Real-time Price Streaming: 100% (14/14 backend, all UI verified - iteration_9)
-- News Sentiment: 100% (FMP + Finnhub + Polygon news integration - iteration_12)
-- Stock Universe: ~1,400 unique symbols (1,268 stocks + 124 ETFs)
+- Watchlist: 100% (Add/Remove/Persist verified - iteration_13)
+- Portfolio Analytics: 100% (17/17 backend, 24/24 frontend)
+- Paper Execution: 100% - **83 risky stocks blocked** (meme, leveraged ETFs, SPACs)
+- Real-time Price Streaming: 100% (all UI views)
+- News Sentiment: 100% (FMP + Finnhub + Polygon news integration)
+- Stock Universe: **1,097 stocks** cached (from ~1,400 symbol universe)
+- Risky Stocks Filter: **83 high-risk stocks blocked** from auto-trading
 - Access Code: `Bullishalmarkhan7.7`
 
 ## Notes
