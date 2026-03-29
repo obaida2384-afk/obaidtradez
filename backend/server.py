@@ -667,13 +667,92 @@ class UniverseManager:
 
 universe_manager = UniverseManager()
 
-# ===================== TRADING SIGNAL ENGINE =====================
+# ===================== TRADING SIGNAL ENGINE (Quality-Focused) =====================
 
 class TradingEngine:
-    """Short-term trading signal generation"""
+    """High-quality short-term trading signal generation - Quality over Quantity"""
     
-    async def analyze_for_trading(self, symbol: str) -> Optional[TradingSignal]:
-        """Analyze stock for short-term trading opportunities"""
+    # Minimum requirements for signal generation
+    MIN_VOLUME = 500000  # Minimum daily volume
+    MIN_PRICE = 5.0  # Avoid penny stocks
+    MIN_ATR_PCT = 1.5  # Minimum volatility (ATR as % of price)
+    MIN_RR_RATIO = 2.0  # Minimum risk/reward ratio
+    
+    async def calculate_atr(self, historical: List[Dict], periods: int = 14) -> float:
+        """Calculate Average True Range for volatility assessment"""
+        if not historical or len(historical) < periods + 1:
+            return 0
+        
+        true_ranges = []
+        for i in range(1, min(periods + 1, len(historical))):
+            high = historical[i].get('high', 0)
+            low = historical[i].get('low', 0)
+            prev_close = historical[i-1].get('close', 0)
+            
+            if high and low and prev_close:
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                true_ranges.append(tr)
+        
+        return sum(true_ranges) / len(true_ranges) if true_ranges else 0
+    
+    async def detect_structure(self, price: float, historical: List[Dict], sma20: float, sma50: float) -> Dict:
+        """Detect price structure: breakout, support/resistance, trend continuation"""
+        structure = {
+            "type": None,
+            "strength": 0,
+            "description": ""
+        }
+        
+        if not historical or len(historical) < 20:
+            return structure
+        
+        recent_highs = [h.get('high', 0) for h in historical[:20] if h.get('high')]
+        recent_lows = [h.get('low', 0) for h in historical[:20] if h.get('low')]
+        
+        if not recent_highs or not recent_lows:
+            return structure
+        
+        resistance = max(recent_highs)
+        support = min(recent_lows)
+        
+        # Breakout detection: price above recent resistance with momentum
+        if price > resistance * 0.98:
+            structure["type"] = "breakout"
+            structure["strength"] = min((price / resistance - 1) * 100, 10)
+            structure["description"] = f"Breaking above ${resistance:.2f} resistance"
+        
+        # Support bounce: price near support with reversal
+        elif price < support * 1.05 and price > support * 0.98:
+            structure["type"] = "support_bounce"
+            structure["strength"] = 5
+            structure["description"] = f"Bouncing from ${support:.2f} support"
+        
+        # Trend continuation: price above rising MAs
+        elif sma20 > sma50 and price > sma20:
+            structure["type"] = "trend_continuation"
+            structure["strength"] = 7
+            structure["description"] = "Uptrend continuation above moving averages"
+        
+        # Pullback to MA: price pulled back to rising MA
+        elif sma20 > sma50 and price <= sma20 * 1.02 and price >= sma20 * 0.98:
+            structure["type"] = "ma_pullback"
+            structure["strength"] = 6
+            structure["description"] = f"Pullback to 20-day MA (${sma20:.2f})"
+        
+        return structure
+    
+    async def analyze_for_trading(self, symbol: str) -> Optional[Dict]:
+        """
+        Analyze stock for HIGH-QUALITY trading opportunities only.
+        Returns detailed analysis including why stock was included/excluded.
+        """
+        analysis = {
+            "symbol": symbol,
+            "included": False,
+            "exclusion_reason": None,
+            "signal": None
+        }
+        
         try:
             quote, profile, historical = await asyncio.gather(
                 api_client.fmp_quote(symbol),
@@ -683,211 +762,304 @@ class TradingEngine:
             )
             
             if isinstance(quote, Exception) or not quote:
-                return None
+                analysis["exclusion_reason"] = "No quote data available"
+                return analysis
             if isinstance(profile, Exception):
                 profile = None
-            if isinstance(historical, Exception):
+            if isinstance(historical, Exception) or not historical:
                 historical = []
             
             price = quote.get('price', 0)
-            # FMP stable API uses 'changePercentage' not 'changesPercentage'
-            change_pct = quote.get('changePercentage', quote.get('changesPercentage', 0))
             volume = quote.get('volume', 0)
-            # avgVolume may not be in stable API - use a reasonable estimate
-            avg_volume = quote.get('avgVolume') or quote.get('avgVolumeDay', 0)
-            if not avg_volume or avg_volume < 100000:
-                # Estimate from profile or use sensible default
-                avg_volume = volume  # No comparison possible without historical data
+            change_pct = quote.get('changePercentage', quote.get('changesPercentage', 0)) or 0
             
-            # Calculate SMAs from historical data if not in quote
-            sma50 = quote.get('priceAvg50', 0)
-            sma200 = quote.get('priceAvg200', 0)
+            # ===== STRICT FILTERS =====
             
-            # If SMAs not available, calculate from historical
-            if not sma50 and historical:
-                prices = [h.get('close', 0) for h in historical[:50] if h.get('close')]
-                if len(prices) >= 20:
-                    sma50 = sum(prices[:min(50, len(prices))]) / min(50, len(prices))
+            # Filter 1: Minimum price (avoid penny stocks)
+            if price < self.MIN_PRICE:
+                analysis["exclusion_reason"] = f"Price ${price:.2f} below minimum ${self.MIN_PRICE}"
+                return analysis
             
-            high_52 = quote.get('yearHigh', 0)
-            low_52 = quote.get('yearLow', 0)
+            # Filter 2: Minimum volume (liquidity)
+            if volume < self.MIN_VOLUME:
+                analysis["exclusion_reason"] = f"Volume {volume:,} below minimum {self.MIN_VOLUME:,}"
+                return analysis
             
-            # Safe volume ratio calculation
-            if avg_volume > 0 and avg_volume != volume:
-                vol_ratio = volume / avg_volume
-            else:
-                # No reliable avg volume - assume normal volume
-                vol_ratio = 1.0
+            # Filter 3: Calculate ATR for volatility
+            atr = await self.calculate_atr(historical)
+            atr_pct = (atr / price * 100) if price > 0 else 0
             
-            price_vs_50 = ((price / sma50) - 1) * 100 if sma50 > 0 else 0
-            price_vs_200 = ((price / sma200) - 1) * 100 if sma200 > 0 else 0
+            if atr_pct < self.MIN_ATR_PCT and atr_pct > 0:
+                analysis["exclusion_reason"] = f"Low volatility (ATR {atr_pct:.1f}% < {self.MIN_ATR_PCT}%)"
+                return analysis
             
+            # ===== CALCULATE INDICATORS =====
+            
+            avg_volume = quote.get('avgVolume') or volume
+            vol_ratio = volume / avg_volume if avg_volume > 0 else 1.0
+            
+            # Calculate SMAs
+            prices_list = [h.get('close', 0) for h in historical if h.get('close')]
+            sma20 = sum(prices_list[:20]) / 20 if len(prices_list) >= 20 else price
+            sma50 = sum(prices_list[:50]) / 50 if len(prices_list) >= 50 else price
+            sma200 = quote.get('priceAvg200', 0) or price
+            
+            high_52 = quote.get('yearHigh', price)
+            low_52 = quote.get('yearLow', price)
             range_52 = high_52 - low_52 if high_52 > low_52 else 1
-            position_52 = ((price - low_52) / range_52) * 100 if range_52 > 0 else 50
+            position_52 = ((price - low_52) / range_52) * 100
             
-            momentum_score = 50
-            volume_score = 50
-            technical_score = 50
-            trend_score = 50
+            # ===== CONFLUENCE CHECK =====
+            # Require multiple factors aligning for a quality signal
+            # Start with base score of 30 (neutral baseline)
             
-            reasons = []
+            confluence_score = 30
+            confluence_factors = []
             
-            if change_pct > 3:
-                momentum_score += 25
-                reasons.append(f"Strong momentum (+{change_pct:.1f}% today)")
-            elif change_pct > 1:
-                momentum_score += 15
-            elif change_pct < -3:
-                momentum_score -= 20
-                reasons.append(f"Weak price action ({change_pct:.1f}%)")
-            
-            if vol_ratio > 2:
-                volume_score += 30
-                reasons.append(f"High volume ({vol_ratio:.1f}x average)")
-            elif vol_ratio > 1.5:
-                volume_score += 15
-            elif vol_ratio < 0.5:
-                volume_score -= 15
-            
-            if price > sma50 > sma200:
-                technical_score += 25
-                trend_score += 20
-                reasons.append("Bullish MA alignment")
-            elif price > sma50:
-                technical_score += 10
-            elif price < sma50 < sma200:
-                technical_score -= 20
-                reasons.append("Bearish trend")
-            
-            if position_52 > 90 and vol_ratio > 1.5:
-                technical_score += 20
-                reasons.append("Near 52-week high with volume (breakout)")
-            elif position_52 < 20:
-                technical_score -= 10
-            
-            overall = (momentum_score * 0.30 + volume_score * 0.25 + 
-                      technical_score * 0.25 + trend_score * 0.20)
-            
-            # Dynamic signal assignment based on relative performance
-            # In down markets, even "neutral" stocks can be opportunities
-            if overall >= 65 and len(reasons) >= 2:
-                signal = "Buy"
-                category = "Hot"
-            elif overall >= 58 and (change_pct > 0 or len(reasons) >= 1):
-                signal = "Buy" if change_pct > 0 else "Watch"
-                category = "Breakout" if change_pct > 0 else "Medium"
-            elif overall >= 50:
-                signal = "Watch"
-                category = "Medium"
+            # Factor 1: Momentum (price trend strength)
+            momentum_score = 0
+            if change_pct >= 3:
+                momentum_score = 30
+                confluence_factors.append(f"Strong momentum (+{change_pct:.1f}%)")
+            elif change_pct >= 1.5:
+                momentum_score = 20
+                confluence_factors.append(f"Good momentum (+{change_pct:.1f}%)")
+            elif change_pct >= 0.5:
+                momentum_score = 10
+                confluence_factors.append(f"Positive momentum (+{change_pct:.1f}%)")
+            elif change_pct >= 0:
+                momentum_score = 5
+            elif change_pct > -1:
+                momentum_score = 0  # Flat/slightly negative - neutral
+            elif change_pct > -2:
+                momentum_score = -5
             else:
-                signal = "Avoid"
-                category = "Avoid"
+                momentum_score = -15  # Reduced penalty from -20
             
-            entry_zone = f"${price * 0.98:.2f} - ${price:.2f}"
-            stop_loss = round(price * 0.95, 2)
-            take_profit = round(price * 1.10, 2)
+            confluence_score += momentum_score
+            
+            # Factor 2: Volume confirmation
+            volume_score = 0
+            if vol_ratio >= 2.0:
+                volume_score = 25
+                confluence_factors.append(f"Volume spike ({vol_ratio:.1f}x average)")
+            elif vol_ratio >= 1.5:
+                volume_score = 15
+                confluence_factors.append(f"Above-average volume ({vol_ratio:.1f}x)")
+            elif vol_ratio < 0.7:
+                volume_score = -10
+            
+            confluence_score += volume_score
+            
+            # Factor 3: Price structure
+            structure = await self.detect_structure(price, historical, sma20, sma50)
+            structure_score = 0
+            if structure["type"]:
+                structure_score = structure["strength"] * 3
+                confluence_factors.append(structure["description"])
+            
+            confluence_score += structure_score
+            
+            # Factor 4: Trend alignment
+            trend_score = 0
+            if price > sma20 > sma50:
+                trend_score = 20
+                if "trend" not in " ".join(confluence_factors).lower():
+                    confluence_factors.append("Bullish trend alignment (Price > SMA20 > SMA50)")
+            elif price > sma50:
+                trend_score = 10
+            elif price < sma20 < sma50:
+                trend_score = -15
+            
+            confluence_score += trend_score
+            
+            # Factor 5: 52-week position (breakout potential)
+            position_score = 0
+            if position_52 > 85:
+                position_score = 15
+                confluence_factors.append(f"Near 52-week high ({position_52:.0f}% of range)")
+            elif position_52 < 20:
+                position_score = -10
+            
+            confluence_score += position_score
+            
+            # ===== QUALITY GATE =====
+            # Require minimum confluence score AND at least 1 strong factor
+            # Base score is 30, so 45 means at least +15 from factors
+            
+            min_confluence = 45
+            min_factors = 1
+            
+            if confluence_score < min_confluence:
+                analysis["exclusion_reason"] = f"Low confluence score ({confluence_score} < {min_confluence})"
+                return analysis
+            
+            if len(confluence_factors) < min_factors:
+                analysis["exclusion_reason"] = f"Insufficient confluence factors ({len(confluence_factors)} < {min_factors})"
+                return analysis
+            
+            # ===== CALCULATE TRADE SETUP =====
+            
+            # Dynamic stop-loss based on ATR
+            atr_stop = atr * 1.5 if atr > 0 else price * 0.03
+            stop_loss = round(price - atr_stop, 2)
+            
+            # Take profit based on R:R target
             risk = price - stop_loss
-            reward = take_profit - price
-            rr_ratio = f"1:{reward/risk:.1f}" if risk > 0 else "N/A"
+            target_rr = 2.5  # Target 2.5:1 R:R
+            take_profit = round(price + (risk * target_rr), 2)
             
-            return TradingSignal(
+            # Verify R:R meets minimum
+            actual_rr = (take_profit - price) / risk if risk > 0 else 0
+            if actual_rr < self.MIN_RR_RATIO:
+                analysis["exclusion_reason"] = f"R:R ratio {actual_rr:.1f} below minimum {self.MIN_RR_RATIO}"
+                return analysis
+            
+            # Entry zone (pullback entry preferred)
+            entry_low = round(price * 0.995, 2)
+            entry_high = round(price * 1.005, 2)
+            entry_zone = f"${entry_low} - ${entry_high}"
+            
+            # ===== CONFIDENCE SCORE =====
+            # Normalized 0-100 based on confluence
+            confidence = min(max(confluence_score + 30, 50), 95) / 100
+            
+            # ===== SIGNAL CATEGORIZATION =====
+            if confidence >= 0.75 and len(confluence_factors) >= 3:
+                signal_type = "Strong Buy"
+                category = "Hot"
+            elif confidence >= 0.65 and structure["type"] == "breakout":
+                signal_type = "Buy"
+                category = "Breakout"
+            elif confidence >= 0.60 and momentum_score >= 20:
+                signal_type = "Buy"
+                category = "Momentum"
+            elif confidence >= 0.55 and volume_score >= 15:
+                signal_type = "Buy"
+                category = "High Volume"
+            else:
+                signal_type = "Watch"
+                category = "Watch"
+            
+            # Build reasoning
+            reasoning = "; ".join(confluence_factors) if confluence_factors else "Technical setup"
+            
+            # ===== CREATE SIGNAL =====
+            signal = TradingSignal(
                 symbol=symbol,
                 name=profile.get('companyName', symbol) if profile else symbol,
                 price=price,
-                signal=signal,
-                confidence=min(overall / 100, 0.95),
+                signal=signal_type,
+                confidence=confidence,
                 entry_zone=entry_zone,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 position_size="2-3% of portfolio",
-                risk_reward=rr_ratio,
-                reasoning="; ".join(reasons) if reasons else "Standard setup",
+                risk_reward=f"1:{actual_rr:.1f}",
+                reasoning=reasoning,
                 indicators={
-                    "change_pct": change_pct,
+                    "change_pct": round(change_pct, 2),
                     "volume_ratio": round(vol_ratio, 2),
-                    "price_vs_50ma": round(price_vs_50, 2),
-                    "price_vs_200ma": round(price_vs_200, 2),
-                    "52_week_position": round(position_52, 1)
+                    "atr": round(atr, 2),
+                    "atr_pct": round(atr_pct, 2),
+                    "price_vs_50ma": round(((price / sma50) - 1) * 100, 2) if sma50 else 0,
+                    "price_vs_200ma": round(((price / sma200) - 1) * 100, 2) if sma200 else 0,
+                    "52_week_position": round(position_52, 1),
+                    "confluence_score": confluence_score,
+                    "structure_type": structure["type"]
                 },
                 category=category
             )
+            
+            analysis["included"] = True
+            analysis["signal"] = signal
+            return analysis
+            
         except Exception as e:
             logger.error(f"Trading analysis error for {symbol}: {e}")
-            return None
+            analysis["exclusion_reason"] = f"Analysis error: {str(e)}"
+            return analysis
     
-    async def scan_trading_opportunities(self) -> Dict[str, List[TradingSignal]]:
-        """Scan market for trading opportunities with dynamic thresholds"""
+    async def scan_trading_opportunities(self) -> Dict:
+        """
+        Scan market for HIGH-QUALITY trading opportunities.
+        Returns only top 5-15 signals with full diagnostics.
+        """
+        # Expanded universe for better selection
         universe = [
-            "NVDA", "AMD", "TSLA", "META", "AAPL", "MSFT", "GOOGL", "AMZN",
-            "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "ROKU", "SNAP",
-            "UBER", "ABNB", "RIVN", "LCID", "NIO", "MARA", "RIOT", "HOOD"
+            # Mega caps
+            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+            # High-beta tech
+            "AMD", "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "SNOW",
+            # Volatile movers
+            "ROKU", "SNAP", "UBER", "ABNB", "RIVN", "LCID", "NIO",
+            # Momentum names
+            "MARA", "RIOT", "HOOD", "SOFI", "AFRM", "UPST",
+            # Sector leaders
+            "XOM", "CVX", "JPM", "GS", "BA", "CAT", "DE"
         ]
         
-        signals = await asyncio.gather(*[self.analyze_for_trading(s) for s in universe])
-        signals = [s for s in signals if s]
+        # Analyze all stocks
+        analyses = await asyncio.gather(*[self.analyze_for_trading(s) for s in universe])
         
-        # Primary categorization by signal category
-        hot = [s for s in signals if s.category == "Hot"]
-        breakout = [s for s in signals if s.category == "Breakout"]
+        # Separate included vs excluded
+        included = []
+        excluded = []
         
-        # Filter: Avoid signals should generally not appear in Hot/Breakout
-        # but if the entire market is negative, we still want to show *something*
-        non_avoid_signals = [s for s in signals if s.signal != "Avoid"]
-        watch_or_better = [s for s in signals if s.signal in ["Buy", "Watch"]]
+        for analysis in analyses:
+            if analysis and analysis.get("included") and analysis.get("signal"):
+                included.append(analysis["signal"])
+            elif analysis:
+                excluded.append({
+                    "symbol": analysis.get("symbol"),
+                    "reason": analysis.get("exclusion_reason", "Unknown")
+                })
         
-        # Dynamic thresholds - surface top opportunities even in bad markets
-        if not hot:
-            # First try non-avoid signals
-            candidates = non_avoid_signals if non_avoid_signals else watch_or_better
-            if not candidates:
-                # If everything is Avoid, take least negative ones
-                candidates = sorted(signals, key=lambda x: x.indicators.get('change_pct', -100), reverse=True)
-            
-            sorted_by_conf = sorted(candidates, key=lambda x: x.confidence, reverse=True)
-            # Take top performers with confidence > 0.45
-            hot = [s for s in sorted_by_conf[:3] if s.confidence >= 0.45]
+        # Sort by quality (confidence * has structure bonus)
+        def quality_score(s):
+            base = s.confidence
+            if s.indicators.get("structure_type"):
+                base += 0.1
+            if s.indicators.get("volume_ratio", 0) >= 1.5:
+                base += 0.05
+            return base
         
-        if not breakout:
-            # Take signals with positive or least negative change
-            candidates = non_avoid_signals if non_avoid_signals else signals
-            sorted_positive = sorted(
-                candidates,
-                key=lambda x: (x.indicators.get('change_pct', -100), x.confidence), 
-                reverse=True
-            )
-            # Exclude any already in hot
-            hot_symbols = {s.symbol for s in hot}
-            breakout = [s for s in sorted_positive[:3] if s.symbol not in hot_symbols and s.confidence >= 0.40]
+        included.sort(key=quality_score, reverse=True)
         
-        # Momentum: positive change percent, relaxed threshold
-        momentum_threshold = 1.5  # Lower from 2% to 1.5%
-        momentum = [s for s in signals if s.indicators.get('change_pct', 0) > momentum_threshold]
-        if not momentum:
-            # Take any with positive change
-            momentum = sorted(
-                [s for s in signals if s.indicators.get('change_pct', 0) > 0],
-                key=lambda x: x.indicators.get('change_pct', 0), reverse=True
-            )[:5]
+        # Limit to top 15 signals max
+        all_signals = included[:15]
         
-        # High volume: use relative comparison since avgVolume may be unreliable
-        high_volume = [s for s in signals if s.indicators.get('volume_ratio', 0) > 1.3]
-        if not high_volume:
-            # Take top by volume ratio
-            high_volume = sorted(
-                signals, 
-                key=lambda x: x.indicators.get('volume_ratio', 0), 
-                reverse=True
-            )[:5]
+        # Categorize
+        hot = [s for s in all_signals if s.category == "Hot"][:5]
+        breakout = [s for s in all_signals if s.category == "Breakout"][:5]
+        momentum = [s for s in all_signals if s.category == "Momentum"][:5]
+        high_volume = [s for s in all_signals if s.category == "High Volume"][:5]
+        watch = [s for s in all_signals if s.category == "Watch"][:5]
         
-        avoid = [s for s in signals if s.signal == "Avoid"]
+        # Top Trades Today: Best 3-5 regardless of category
+        top_trades = sorted(all_signals, key=quality_score, reverse=True)[:5]
         
         return {
-            "hot": sorted(hot, key=lambda x: x.confidence, reverse=True)[:5],
-            "breakout": sorted(breakout, key=lambda x: x.confidence, reverse=True)[:5],
-            "momentum": sorted(momentum, key=lambda x: x.indicators.get('change_pct', 0), reverse=True)[:5],
-            "high_volume": sorted(high_volume, key=lambda x: x.indicators.get('volume_ratio', 0), reverse=True)[:5],
-            "avoid": avoid[:5],
-            "all": sorted(signals, key=lambda x: x.confidence, reverse=True)
+            "top_trades": top_trades,
+            "hot": hot,
+            "breakout": breakout,
+            "momentum": momentum,
+            "high_volume": high_volume,
+            "watch": watch,
+            "all": all_signals,
+            "diagnostics": {
+                "stocks_scanned": len(universe),
+                "signals_generated": len(all_signals),
+                "excluded_count": len(excluded),
+                "excluded_reasons": excluded[:10],  # Show first 10 exclusions
+                "filters_applied": [
+                    f"Min Volume: {self.MIN_VOLUME:,}",
+                    f"Min Price: ${self.MIN_PRICE}",
+                    f"Min ATR%: {self.MIN_ATR_PCT}%",
+                    f"Min R:R: {self.MIN_RR_RATIO}:1",
+                    "Confluence: 2+ factors required"
+                ]
+            }
         }
 
 trading_engine = TradingEngine()

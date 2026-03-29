@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import { useLivePrices, LiveIndicator } from "../hooks/useLivePrices";
 import { 
   Zap, 
@@ -17,16 +18,23 @@ import {
   Loader2,
   RefreshCw,
   ChevronRight,
+  ChevronDown,
   Activity,
   BarChart2,
   Clock,
-  Star
+  Star,
+  Shield,
+  Info,
+  CheckCircle2,
+  XCircle,
+  Trophy
 } from "lucide-react";
 import { toast } from "sonner";
 
-// Signal Badge
+// Signal Badge - Enhanced with more signal types
 const SignalBadge = ({ signal, size = "sm" }) => {
   const config = {
+    "Strong Buy": { class: "bg-emerald-500/30 text-emerald-300 border-emerald-500/50", icon: CheckCircle2 },
     "Buy": { class: "signal-buy", icon: TrendingUp },
     "Watch": { class: "signal-watch", icon: Clock },
     "Avoid": { class: "signal-avoid", icon: TrendingDown }
@@ -36,20 +44,21 @@ const SignalBadge = ({ signal, size = "sm" }) => {
   const sizeClass = size === "lg" ? "text-sm px-3 py-1" : "text-xs px-2 py-0.5";
   
   return (
-    <span className={`font-medium rounded flex items-center gap-1 w-fit ${sizeClass} ${config.class}`}>
+    <span className={`font-medium rounded flex items-center gap-1 w-fit border ${sizeClass} ${config.class}`}>
       <Icon className="w-3 h-3" />
       {signal}
     </span>
   );
 };
 
-// Category Badge
+// Category Badge - Enhanced
 const CategoryBadge = ({ category }) => {
   const config = {
     "Hot": "bg-red-500/20 text-red-400 border-red-500/30",
     "Breakout": "bg-amber-500/20 text-amber-400 border-amber-500/30",
     "Momentum": "bg-blue-500/20 text-blue-400 border-blue-500/30",
-    "HighVolatility": "bg-purple-500/20 text-purple-400 border-purple-500/30",
+    "High Volume": "bg-purple-500/20 text-purple-400 border-purple-500/30",
+    "Watch": "bg-slate-500/20 text-slate-400 border-slate-500/30",
     "Medium": "bg-slate-500/20 text-slate-400 border-slate-500/30",
     "Avoid": "bg-red-500/20 text-red-400 border-red-500/30"
   }[category] || "bg-slate-500/20 text-slate-400 border-slate-500/30";
@@ -58,6 +67,145 @@ const CategoryBadge = ({ category }) => {
     <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${config}`}>
       {category}
     </span>
+  );
+};
+
+// Top Trade Card - Premium display for best setups
+const TopTradeCard = memo(({ signal, rank, livePrice }) => {
+  const displayPrice = livePrice?.price || signal.price;
+  const displayChange = livePrice?.change_pct ?? signal.indicators?.change_pct;
+  
+  // Parse R:R ratio
+  const rrMatch = signal.risk_reward?.match(/1:([\d.]+)/);
+  const rrValue = rrMatch ? parseFloat(rrMatch[1]) : 0;
+  
+  return (
+    <Card className="terminal-card p-4 border-amber-500/30 bg-gradient-to-r from-amber-500/5 to-transparent" data-testid={`top-trade-${rank}`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400 font-bold">
+            #{rank}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-bold text-lg text-white">{signal.symbol}</span>
+              <SignalBadge signal={signal.signal} />
+            </div>
+            <p className="text-xs text-slate-500">{signal.name}</p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="font-mono text-lg text-white">${displayPrice?.toFixed(2)}</p>
+          <p className={`text-sm font-mono ${displayChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {displayChange >= 0 ? '+' : ''}{displayChange?.toFixed(2)}%
+          </p>
+        </div>
+      </div>
+      
+      {/* Trade Setup - Prominent Display */}
+      <div className="grid grid-cols-4 gap-2 mb-3 p-3 rounded bg-slate-900/50 border border-slate-800">
+        <div className="text-center">
+          <p className="text-[10px] text-slate-500 uppercase">Entry</p>
+          <p className="text-sm font-mono text-emerald-400">{signal.entry_zone}</p>
+        </div>
+        <div className="text-center border-l border-slate-700">
+          <p className="text-[10px] text-slate-500 uppercase">Stop Loss</p>
+          <p className="text-sm font-mono text-red-400">${signal.stop_loss}</p>
+        </div>
+        <div className="text-center border-l border-slate-700">
+          <p className="text-[10px] text-slate-500 uppercase">Target</p>
+          <p className="text-sm font-mono text-emerald-400">${signal.take_profit}</p>
+        </div>
+        <div className="text-center border-l border-slate-700">
+          <p className="text-[10px] text-slate-500 uppercase">R:R</p>
+          <p className={`text-sm font-mono ${rrValue >= 2 ? 'text-emerald-400' : 'text-amber-400'}`}>
+            {signal.risk_reward}
+          </p>
+        </div>
+      </div>
+      
+      {/* Confidence & Reasoning */}
+      <div className="flex items-center gap-2 mb-2">
+        <Progress value={signal.confidence * 100} className="h-2 flex-1" />
+        <span className="text-xs font-mono text-slate-400">{(signal.confidence * 100).toFixed(0)}%</span>
+      </div>
+      
+      <p className="text-xs text-slate-400 leading-relaxed">
+        <span className="text-slate-500">Why: </span>{signal.reasoning}
+      </p>
+    </Card>
+  );
+});
+
+// Diagnostics Panel
+const DiagnosticsPanel = ({ diagnostics }) => {
+  const [expanded, setExpanded] = useState(false);
+  
+  if (!diagnostics) return null;
+  
+  return (
+    <Card className="terminal-card p-3 border-slate-700">
+      <button 
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Info className="w-4 h-4 text-slate-500" />
+          <span className="text-sm text-slate-400">Signal Quality Diagnostics</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500">
+            {diagnostics.signals_generated} signals from {diagnostics.stocks_scanned} stocks
+          </span>
+          {expanded ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
+        </div>
+      </button>
+      
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-slate-800 space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="p-2 rounded bg-slate-900">
+              <p className="text-xs text-slate-500">Scanned</p>
+              <p className="text-lg font-mono text-white">{diagnostics.stocks_scanned}</p>
+            </div>
+            <div className="p-2 rounded bg-slate-900">
+              <p className="text-xs text-slate-500">Passed Filters</p>
+              <p className="text-lg font-mono text-emerald-400">{diagnostics.signals_generated}</p>
+            </div>
+            <div className="p-2 rounded bg-slate-900">
+              <p className="text-xs text-slate-500">Excluded</p>
+              <p className="text-lg font-mono text-red-400">{diagnostics.excluded_count}</p>
+            </div>
+          </div>
+          
+          <div>
+            <p className="text-xs text-slate-500 mb-2">Filters Applied:</p>
+            <div className="flex flex-wrap gap-1">
+              {diagnostics.filters_applied?.map((filter, i) => (
+                <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                  {filter}
+                </span>
+              ))}
+            </div>
+          </div>
+          
+          {diagnostics.excluded_reasons?.length > 0 && (
+            <div>
+              <p className="text-xs text-slate-500 mb-2">Sample Exclusions:</p>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {diagnostics.excluded_reasons.slice(0, 5).map((item, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                    <span className="text-slate-400">{item.symbol}:</span>
+                    <span className="text-slate-500 truncate">{item.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 };
 
@@ -325,7 +473,7 @@ const Trading = () => {
       case "breakout": return signals.breakout || [];
       case "momentum": return signals.momentum || [];
       case "volume": return signals.high_volume || [];
-      case "avoid": return signals.avoid || [];
+      case "watch": return signals.watch || [];
       default: return signals.all || [];
     }
   };
@@ -401,6 +549,34 @@ const Trading = () => {
         </div>
       )}
 
+      {/* Diagnostics Panel */}
+      {signals?.diagnostics && (
+        <DiagnosticsPanel diagnostics={signals.diagnostics} />
+      )}
+
+      {/* TOP TRADES TODAY - Premium Section */}
+      {signals?.top_trades?.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Trophy className="w-5 h-5 text-amber-400" />
+            <h2 className="text-lg font-semibold text-white">Top Trades Today</h2>
+            <Badge variant="outline" className="border-amber-500/30 text-amber-400 text-xs">
+              Best Setups
+            </Badge>
+          </div>
+          <div className="grid gap-4">
+            {signals.top_trades.map((signal, index) => (
+              <TopTradeCard 
+                key={signal.symbol}
+                signal={signal}
+                rank={index + 1}
+                livePrice={livePrices[signal.symbol]}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Signal Categories */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="w-full justify-start bg-slate-900 border border-slate-800 p-1 h-auto flex-wrap">
@@ -416,8 +592,8 @@ const Trading = () => {
           <TabsTrigger value="volume" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400">
             <BarChart2 className="w-4 h-4 mr-1" /> High Volume ({signals?.high_volume?.length || 0})
           </TabsTrigger>
-          <TabsTrigger value="avoid" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-slate-400">
-            <AlertTriangle className="w-4 h-4 mr-1" /> Avoid ({signals?.avoid?.length || 0})
+          <TabsTrigger value="watch" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-slate-400">
+            <Clock className="w-4 h-4 mr-1" /> Watch ({signals?.watch?.length || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -437,7 +613,12 @@ const Trading = () => {
             ))}
             {getTabSignals().length === 0 && (
               <Card className="terminal-card p-8 text-center">
-                <p className="text-slate-500">No signals in this category</p>
+                <Shield className="w-10 h-10 mx-auto mb-3 text-slate-600" />
+                <p className="text-slate-400 mb-1">No signals meet quality threshold</p>
+                <p className="text-xs text-slate-600">
+                  Strict filters are applied to surface only high-quality setups.
+                  Check back during market hours for more opportunities.
+                </p>
               </Card>
             )}
           </div>
@@ -449,10 +630,11 @@ const Trading = () => {
         <div className="flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm text-amber-200 font-medium mb-1">Trading Risk Warning</p>
+            <p className="text-sm text-amber-200 font-medium mb-1">Quality-First Trading</p>
             <p className="text-xs text-amber-200/70">
-              Short-term trading carries significant risk. Always use stop-losses and never risk more than 
-              you can afford to lose. These signals are AI-generated and for educational purposes only.
+              These signals use strict confluence filters (momentum + volume + structure). 
+              Each setup includes entry, stop-loss, and take-profit with minimum 2:1 R:R.
+              Never risk more than 2-3% per trade.
             </p>
           </div>
         </div>
