@@ -1788,10 +1788,670 @@ async def search_symbols(q: str = Query(..., min_length=1), auth: bool = Depends
         pass
     return []
 
+# ===================== RISK MANAGEMENT =====================
+
+class RiskCalculator:
+    """Risk management calculations"""
+    
+    @staticmethod
+    def calculate_position_size(
+        account_value: float,
+        entry_price: float,
+        stop_loss_price: float,
+        risk_per_trade: float = 0.02,  # 2% risk per trade
+        max_position_pct: float = 0.10  # Max 10% of portfolio
+    ) -> Dict:
+        """Calculate optimal position size based on risk parameters"""
+        
+        risk_amount = account_value * risk_per_trade
+        risk_per_share = abs(entry_price - stop_loss_price)
+        
+        if risk_per_share <= 0:
+            return {"error": "Stop loss must be different from entry price"}
+        
+        shares = int(risk_amount / risk_per_share)
+        position_value = shares * entry_price
+        position_pct = position_value / account_value
+        
+        # Apply max position limit
+        if position_pct > max_position_pct:
+            shares = int((account_value * max_position_pct) / entry_price)
+            position_value = shares * entry_price
+            position_pct = position_value / account_value
+        
+        return {
+            "shares": shares,
+            "position_value": round(position_value, 2),
+            "position_pct": round(position_pct * 100, 2),
+            "risk_amount": round(shares * risk_per_share, 2),
+            "risk_pct": round((shares * risk_per_share / account_value) * 100, 2)
+        }
+    
+    @staticmethod
+    def calculate_risk_reward(
+        entry_price: float,
+        stop_loss_price: float,
+        take_profit_price: float
+    ) -> Dict:
+        """Calculate risk/reward ratio"""
+        
+        risk = abs(entry_price - stop_loss_price)
+        reward = abs(take_profit_price - entry_price)
+        
+        if risk <= 0:
+            return {"error": "Invalid stop loss"}
+        
+        ratio = reward / risk
+        
+        return {
+            "risk": round(risk, 2),
+            "reward": round(reward, 2),
+            "ratio": round(ratio, 2),
+            "ratio_display": f"1:{ratio:.1f}",
+            "risk_pct": round((risk / entry_price) * 100, 2),
+            "reward_pct": round((reward / entry_price) * 100, 2),
+            "quality": "Excellent" if ratio >= 3 else "Good" if ratio >= 2 else "Fair" if ratio >= 1.5 else "Poor"
+        }
+
+risk_calculator = RiskCalculator()
+
+class RiskSettingsModel(BaseModel):
+    max_position_size: float = Field(default=0.05, ge=0.01, le=0.25)
+    max_daily_loss: float = Field(default=0.02, ge=0.01, le=0.10)
+    max_weekly_loss: float = Field(default=0.05, ge=0.02, le=0.20)
+    max_drawdown: float = Field(default=0.10, ge=0.05, le=0.30)
+    min_confidence: float = Field(default=0.60, ge=0.40, le=0.90)
+    cash_buffer: float = Field(default=0.10, ge=0.0, le=0.50)
+    default_stop_loss_pct: float = Field(default=0.05, ge=0.01, le=0.15)
+    default_take_profit_pct: float = Field(default=0.10, ge=0.02, le=0.50)
+
+class PositionSizeRequest(BaseModel):
+    account_value: float
+    entry_price: float
+    stop_loss_price: float
+    risk_per_trade: Optional[float] = 0.02
+    max_position_pct: Optional[float] = 0.10
+
+class RiskRewardRequest(BaseModel):
+    entry_price: float
+    stop_loss_price: float
+    take_profit_price: float
+
+@api_router.post("/risk/position-size")
+async def calculate_position_size(request: PositionSizeRequest, auth: bool = Depends(verify_access)):
+    """Calculate optimal position size based on risk parameters"""
+    return risk_calculator.calculate_position_size(
+        account_value=request.account_value,
+        entry_price=request.entry_price,
+        stop_loss_price=request.stop_loss_price,
+        risk_per_trade=request.risk_per_trade,
+        max_position_pct=request.max_position_pct
+    )
+
+@api_router.post("/risk/risk-reward")
+async def calculate_risk_reward(request: RiskRewardRequest, auth: bool = Depends(verify_access)):
+    """Calculate risk/reward ratio"""
+    return risk_calculator.calculate_risk_reward(
+        entry_price=request.entry_price,
+        stop_loss_price=request.stop_loss_price,
+        take_profit_price=request.take_profit_price
+    )
+
+@api_router.get("/risk/settings")
+async def get_risk_settings(auth: bool = Depends(verify_access)):
+    """Get user's risk settings"""
+    settings = await db.risk_settings.find_one({"_id": "default"}, {"_id": 0})
+    if not settings:
+        settings = RiskSettingsModel().dict()
+    return settings
+
+@api_router.post("/risk/settings")
+async def save_risk_settings(settings: RiskSettingsModel, auth: bool = Depends(verify_access)):
+    """Save user's risk settings"""
+    await db.risk_settings.update_one(
+        {"_id": "default"},
+        {"$set": settings.dict()},
+        upsert=True
+    )
+    return {"success": True, "message": "Risk settings saved"}
+
+@api_router.get("/risk/daily-status")
+async def get_daily_risk_status(auth: bool = Depends(verify_access)):
+    """Get current daily risk status"""
+    # Get account info
+    account = await api_client.alpaca_account()
+    if not account:
+        return {
+            "account_value": 0,
+            "daily_pnl": 0,
+            "daily_pnl_pct": 0,
+            "can_trade": True,
+            "risk_status": "unknown"
+        }
+    
+    equity = float(account.get("equity", 0))
+    last_equity = float(account.get("last_equity", equity))
+    daily_pnl = equity - last_equity
+    daily_pnl_pct = (daily_pnl / last_equity * 100) if last_equity > 0 else 0
+    
+    # Get risk settings
+    settings = await db.risk_settings.find_one({"_id": "default"})
+    max_daily_loss = settings.get("max_daily_loss", 0.02) if settings else 0.02
+    
+    # Check if trading should be paused
+    can_trade = daily_pnl_pct > -(max_daily_loss * 100)
+    
+    return {
+        "account_value": round(equity, 2),
+        "daily_pnl": round(daily_pnl, 2),
+        "daily_pnl_pct": round(daily_pnl_pct, 2),
+        "max_daily_loss_pct": round(max_daily_loss * 100, 2),
+        "can_trade": can_trade,
+        "risk_status": "safe" if daily_pnl_pct > 0 else "caution" if can_trade else "stopped"
+    }
+
+# ===================== BACKTESTING =====================
+
+class BacktestRequest(BaseModel):
+    symbol: str
+    strategy: str = "momentum"  # momentum, mean_reversion, breakout, ma_crossover, value
+    period: str = "1y"  # 3m, 6m, 1y, 2y, 5y
+    initial_capital: float = 10000
+    stop_loss_pct: float = 0.05
+    take_profit_pct: float = 0.10
+
+class BacktestEngine:
+    """Simple backtesting engine using historical data"""
+    
+    PERIOD_DAYS = {
+        "3m": 90,
+        "6m": 180,
+        "1y": 365,
+        "2y": 730,
+        "5y": 1825
+    }
+    
+    async def get_historical_data(self, symbol: str, days: int) -> List[Dict]:
+        """Get historical price data"""
+        cache_key = f"historical_{symbol}_{days}"
+        cached = get_cached(cache_key, 3600)  # 1 hour cache
+        if cached:
+            return cached
+        
+        try:
+            # Try FMP first
+            data = await api_client.fmp_historical(symbol)
+            if data and len(data) > 0:
+                # Limit to requested days
+                data = data[:days] if len(data) > days else data
+                data = list(reversed(data))  # Oldest first
+                set_cached(cache_key, data)
+                return data
+        except Exception as e:
+            logger.error(f"Historical data error for {symbol}: {e}")
+        
+        return []
+    
+    async def run_backtest(self, request: BacktestRequest) -> Dict:
+        """Run a backtest simulation"""
+        days = self.PERIOD_DAYS.get(request.period, 365)
+        data = await self.get_historical_data(request.symbol.upper(), days)
+        
+        if len(data) < 20:
+            return {"error": f"Insufficient historical data for {request.symbol}"}
+        
+        # Initialize tracking
+        capital = request.initial_capital
+        position = None
+        trades = []
+        equity_curve = []
+        wins = 0
+        losses = 0
+        
+        # Calculate indicators
+        prices = [d.get("close", d.get("adjClose", 0)) for d in data]
+        
+        # Simple moving averages
+        def sma(data, period):
+            if len(data) < period:
+                return None
+            return sum(data[-period:]) / period
+        
+        for i in range(20, len(data)):
+            current_price = prices[i]
+            prev_price = prices[i-1]
+            
+            # Calculate signals based on strategy
+            signal = None
+            
+            if request.strategy == "momentum":
+                # Buy on strong upward momentum
+                change_5d = (current_price / prices[i-5] - 1) * 100 if prices[i-5] > 0 else 0
+                change_20d = (current_price / prices[i-20] - 1) * 100 if prices[i-20] > 0 else 0
+                
+                if position is None and change_5d > 3 and change_20d > 5:
+                    signal = "buy"
+                elif position and (change_5d < -2 or change_20d < 0):
+                    signal = "sell"
+            
+            elif request.strategy == "mean_reversion":
+                # Buy when oversold, sell when overbought
+                sma20 = sma(prices[:i+1], 20)
+                if sma20:
+                    deviation = (current_price / sma20 - 1) * 100
+                    if position is None and deviation < -5:
+                        signal = "buy"
+                    elif position and deviation > 3:
+                        signal = "sell"
+            
+            elif request.strategy == "breakout":
+                # Buy on breakout above 20-day high
+                high_20 = max(prices[i-20:i])
+                low_20 = min(prices[i-20:i])
+                
+                if position is None and current_price > high_20:
+                    signal = "buy"
+                elif position and current_price < low_20:
+                    signal = "sell"
+            
+            elif request.strategy == "ma_crossover":
+                # Buy when 10 SMA crosses above 30 SMA
+                sma10 = sma(prices[:i+1], 10)
+                sma30 = sma(prices[:i+1], 30) if len(prices[:i+1]) >= 30 else None
+                prev_sma10 = sma(prices[:i], 10)
+                prev_sma30 = sma(prices[:i], 30) if len(prices[:i]) >= 30 else None
+                
+                if sma10 and sma30 and prev_sma10 and prev_sma30:
+                    if position is None and sma10 > sma30 and prev_sma10 <= prev_sma30:
+                        signal = "buy"
+                    elif position and sma10 < sma30 and prev_sma10 >= prev_sma30:
+                        signal = "sell"
+            
+            elif request.strategy == "value":
+                # Simple value approach - buy dips, hold
+                sma50 = sma(prices[:i+1], 50) if len(prices[:i+1]) >= 50 else None
+                if sma50:
+                    if position is None and current_price < sma50 * 0.95:
+                        signal = "buy"
+                    elif position and current_price > position["entry"] * (1 + request.take_profit_pct):
+                        signal = "sell"
+            
+            # Check stop loss / take profit
+            if position:
+                pnl_pct = (current_price / position["entry"] - 1) * 100
+                if pnl_pct <= -request.stop_loss_pct * 100:
+                    signal = "sell"  # Stop loss hit
+                elif pnl_pct >= request.take_profit_pct * 100:
+                    signal = "sell"  # Take profit hit
+            
+            # Execute signals
+            if signal == "buy" and position is None:
+                shares = int(capital * 0.95 / current_price)  # Use 95% of capital
+                if shares > 0:
+                    position = {
+                        "entry": current_price,
+                        "shares": shares,
+                        "date": data[i].get("date", "")
+                    }
+                    capital -= shares * current_price
+            
+            elif signal == "sell" and position:
+                sale_value = position["shares"] * current_price
+                pnl = sale_value - (position["shares"] * position["entry"])
+                pnl_pct = (current_price / position["entry"] - 1) * 100
+                
+                trades.append({
+                    "entry_date": position["date"],
+                    "exit_date": data[i].get("date", ""),
+                    "entry_price": round(position["entry"], 2),
+                    "exit_price": round(current_price, 2),
+                    "shares": position["shares"],
+                    "pnl": round(pnl, 2),
+                    "pnl_pct": round(pnl_pct, 2)
+                })
+                
+                capital += sale_value
+                if pnl > 0:
+                    wins += 1
+                else:
+                    losses += 1
+                position = None
+            
+            # Track equity
+            current_equity = capital
+            if position:
+                current_equity += position["shares"] * current_price
+            
+            if i % 5 == 0:  # Sample every 5 days
+                equity_curve.append({
+                    "date": data[i].get("date", ""),
+                    "equity": round(current_equity, 2)
+                })
+        
+        # Close any open position
+        if position:
+            final_price = prices[-1]
+            sale_value = position["shares"] * final_price
+            pnl = sale_value - (position["shares"] * position["entry"])
+            trades.append({
+                "entry_date": position["date"],
+                "exit_date": data[-1].get("date", ""),
+                "entry_price": round(position["entry"], 2),
+                "exit_price": round(final_price, 2),
+                "shares": position["shares"],
+                "pnl": round(pnl, 2),
+                "pnl_pct": round((final_price / position["entry"] - 1) * 100, 2)
+            })
+            capital += sale_value
+            if pnl > 0:
+                wins += 1
+            else:
+                losses += 1
+        
+        # Calculate metrics
+        final_value = capital
+        total_return = ((final_value / request.initial_capital) - 1) * 100
+        total_trades = len(trades)
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        
+        # Calculate max drawdown
+        max_equity = request.initial_capital
+        max_drawdown = 0
+        for point in equity_curve:
+            if point["equity"] > max_equity:
+                max_equity = point["equity"]
+            drawdown = ((max_equity - point["equity"]) / max_equity) * 100
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+        
+        # Calculate Sharpe ratio (simplified)
+        if len(trades) > 1:
+            returns = [t["pnl_pct"] for t in trades]
+            avg_return = sum(returns) / len(returns)
+            variance = sum((r - avg_return) ** 2 for r in returns) / len(returns)
+            std_dev = variance ** 0.5
+            sharpe = (avg_return / std_dev) * (12 ** 0.5) if std_dev > 0 else 0
+        else:
+            sharpe = 0
+        
+        best_trade = max([t["pnl_pct"] for t in trades]) if trades else 0
+        worst_trade = min([t["pnl_pct"] for t in trades]) if trades else 0
+        
+        return {
+            "symbol": request.symbol.upper(),
+            "strategy": request.strategy,
+            "period": request.period,
+            "initial_capital": request.initial_capital,
+            "final_value": round(final_value, 2),
+            "total_return": round(total_return, 2),
+            "max_drawdown": round(max_drawdown, 2),
+            "sharpe_ratio": round(sharpe, 2),
+            "total_trades": total_trades,
+            "win_rate": round(win_rate, 1),
+            "wins": wins,
+            "losses": losses,
+            "best_trade": round(best_trade, 2),
+            "worst_trade": round(worst_trade, 2),
+            "trades": trades[-10:],  # Last 10 trades
+            "equity_curve": equity_curve
+        }
+
+backtest_engine = BacktestEngine()
+
+@api_router.post("/backtest/run")
+async def run_backtest(request: BacktestRequest, auth: bool = Depends(verify_access)):
+    """Run a backtest simulation"""
+    result = await backtest_engine.run_backtest(request)
+    
+    # Store backtest result
+    await db.backtests.insert_one({
+        "symbol": request.symbol.upper(),
+        "strategy": request.strategy,
+        "period": request.period,
+        "result": result,
+        "created_at": datetime.now(timezone.utc)
+    })
+    
+    return result
+
+@api_router.get("/backtest/history")
+async def get_backtest_history(
+    limit: int = Query(default=10, ge=1, le=50),
+    auth: bool = Depends(verify_access)
+):
+    """Get backtest history"""
+    cursor = db.backtests.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    results = await cursor.to_list(length=limit)
+    return results
+
+@api_router.get("/backtest/strategies")
+async def get_backtest_strategies(auth: bool = Depends(verify_access)):
+    """Get available backtest strategies"""
+    return [
+        {
+            "id": "momentum",
+            "name": "Momentum",
+            "description": "Buy on strong upward price momentum, sell on momentum reversal"
+        },
+        {
+            "id": "mean_reversion",
+            "name": "Mean Reversion",
+            "description": "Buy when price deviates below average, sell when it returns"
+        },
+        {
+            "id": "breakout",
+            "name": "Breakout",
+            "description": "Buy on breakout above 20-day high, sell on breakdown"
+        },
+        {
+            "id": "ma_crossover",
+            "name": "MA Crossover",
+            "description": "Buy when 10-day SMA crosses above 30-day SMA"
+        },
+        {
+            "id": "value",
+            "name": "Value",
+            "description": "Buy on significant dips below 50-day SMA, hold for target"
+        }
+    ]
+
+# ===================== ALERTS =====================
+
+class AlertType:
+    PRICE_ABOVE = "price_above"
+    PRICE_BELOW = "price_below"
+    CHANGE_PCT = "change_pct"
+    VOLUME_SPIKE = "volume_spike"
+    SIGNAL_CHANGE = "signal_change"
+
+class AlertModel(BaseModel):
+    symbol: str
+    alert_type: str
+    value: float
+    enabled: bool = True
+    note: Optional[str] = None
+
+class AlertUpdateModel(BaseModel):
+    enabled: Optional[bool] = None
+    value: Optional[float] = None
+    note: Optional[str] = None
+
+@api_router.get("/alerts")
+async def get_alerts(auth: bool = Depends(verify_access)):
+    """Get all alerts"""
+    cursor = db.alerts.find({}, {"_id": 0}).sort("created_at", -1)
+    alerts = await cursor.to_list(length=100)
+    return alerts
+
+@api_router.post("/alerts")
+async def create_alert(alert: AlertModel, auth: bool = Depends(verify_access)):
+    """Create a new alert"""
+    alert_data = alert.dict()
+    alert_data["id"] = str(uuid.uuid4())
+    alert_data["symbol"] = alert.symbol.upper()
+    alert_data["created_at"] = datetime.now(timezone.utc).isoformat()
+    alert_data["triggered"] = False
+    alert_data["triggered_at"] = None
+    
+    await db.alerts.insert_one(alert_data)
+    
+    # Remove MongoDB _id before returning
+    alert_data.pop("_id", None)
+    return alert_data
+
+@api_router.put("/alerts/{alert_id}")
+async def update_alert(alert_id: str, update: AlertUpdateModel, auth: bool = Depends(verify_access)):
+    """Update an alert"""
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    
+    if update_data:
+        await db.alerts.update_one(
+            {"id": alert_id},
+            {"$set": update_data}
+        )
+    
+    updated = await db.alerts.find_one({"id": alert_id}, {"_id": 0})
+    return updated
+
+@api_router.delete("/alerts/{alert_id}")
+async def delete_alert(alert_id: str, auth: bool = Depends(verify_access)):
+    """Delete an alert"""
+    result = await db.alerts.delete_one({"id": alert_id})
+    return {"success": result.deleted_count > 0}
+
+@api_router.get("/alerts/check")
+async def check_alerts(auth: bool = Depends(verify_access)):
+    """Check all alerts against current prices and return triggered ones"""
+    triggered = []
+    
+    # Get all enabled alerts
+    cursor = db.alerts.find({"enabled": True, "triggered": False})
+    alerts = await cursor.to_list(length=100)
+    
+    if not alerts:
+        return {"triggered": [], "checked": 0}
+    
+    # Group by symbol
+    symbols = list(set(a["symbol"] for a in alerts))
+    
+    # Get current prices
+    quotes = {}
+    for symbol in symbols:
+        quote = await api_client.fmp_quote(symbol)
+        if quote:
+            quotes[symbol] = quote
+    
+    # Check each alert
+    for alert in alerts:
+        symbol = alert["symbol"]
+        quote = quotes.get(symbol)
+        
+        if not quote:
+            continue
+        
+        current_price = quote.get("price", 0)
+        change_pct = quote.get("changesPercentage", 0)
+        volume = quote.get("volume", 0)
+        avg_volume = quote.get("avgVolume", 1)
+        
+        should_trigger = False
+        trigger_message = ""
+        
+        if alert["alert_type"] == AlertType.PRICE_ABOVE:
+            if current_price >= alert["value"]:
+                should_trigger = True
+                trigger_message = f"{symbol} reached ${current_price:.2f} (target: ${alert['value']:.2f})"
+        
+        elif alert["alert_type"] == AlertType.PRICE_BELOW:
+            if current_price <= alert["value"]:
+                should_trigger = True
+                trigger_message = f"{symbol} dropped to ${current_price:.2f} (target: ${alert['value']:.2f})"
+        
+        elif alert["alert_type"] == AlertType.CHANGE_PCT:
+            if abs(change_pct) >= alert["value"]:
+                should_trigger = True
+                trigger_message = f"{symbol} moved {change_pct:+.1f}% (threshold: {alert['value']}%)"
+        
+        elif alert["alert_type"] == AlertType.VOLUME_SPIKE:
+            vol_ratio = volume / avg_volume if avg_volume > 0 else 1
+            if vol_ratio >= alert["value"]:
+                should_trigger = True
+                trigger_message = f"{symbol} volume spike: {vol_ratio:.1f}x average"
+        
+        if should_trigger:
+            # Mark as triggered
+            await db.alerts.update_one(
+                {"id": alert["id"]},
+                {
+                    "$set": {
+                        "triggered": True,
+                        "triggered_at": datetime.now(timezone.utc).isoformat(),
+                        "trigger_price": current_price,
+                        "trigger_message": trigger_message
+                    }
+                }
+            )
+            
+            # Add to alert history
+            await db.alert_history.insert_one({
+                "alert_id": alert["id"],
+                "symbol": symbol,
+                "alert_type": alert["alert_type"],
+                "value": alert["value"],
+                "trigger_price": current_price,
+                "trigger_message": trigger_message,
+                "triggered_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            triggered.append({
+                "id": alert["id"],
+                "symbol": symbol,
+                "message": trigger_message,
+                "price": current_price
+            })
+    
+    return {"triggered": triggered, "checked": len(alerts)}
+
+@api_router.get("/alerts/history")
+async def get_alert_history(
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: bool = Depends(verify_access)
+):
+    """Get alert trigger history"""
+    cursor = db.alert_history.find({}, {"_id": 0}).sort("triggered_at", -1).limit(limit)
+    history = await cursor.to_list(length=limit)
+    return history
+
+@api_router.post("/alerts/{alert_id}/reset")
+async def reset_alert(alert_id: str, auth: bool = Depends(verify_access)):
+    """Reset a triggered alert so it can trigger again"""
+    await db.alerts.update_one(
+        {"id": alert_id},
+        {
+            "$set": {
+                "triggered": False,
+                "triggered_at": None,
+                "trigger_price": None,
+                "trigger_message": None
+            }
+        }
+    )
+    return {"success": True}
+
+@api_router.get("/alerts/types")
+async def get_alert_types(auth: bool = Depends(verify_access)):
+    """Get available alert types"""
+    return [
+        {"id": "price_above", "name": "Price Above", "description": "Trigger when price rises above target", "unit": "$"},
+        {"id": "price_below", "name": "Price Below", "description": "Trigger when price drops below target", "unit": "$"},
+        {"id": "change_pct", "name": "% Change", "description": "Trigger on daily percentage change", "unit": "%"},
+        {"id": "volume_spike", "name": "Volume Spike", "description": "Trigger when volume exceeds X times average", "unit": "x"}
+    ]
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "2.0.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "2.1.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)
