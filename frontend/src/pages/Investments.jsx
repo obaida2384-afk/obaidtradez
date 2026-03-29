@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo, useRef, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth, API } from "../App";
 import { Card } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { useLivePrices, LiveIndicator } from "../hooks/useLivePrices";
 import { 
   PiggyBank,
   TrendingUp, 
@@ -110,9 +111,25 @@ const CompletenessIndicator = ({ value }) => {
   );
 };
 
-// Investment Signal Card
-const InvestmentCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchlistToggle }) => {
+// Investment Signal Card - memoized to prevent re-renders on 270+ cards
+const InvestmentCard = memo(({ signal, expanded, onToggle, token, inWatchlist, onWatchlistToggle, livePrice }) => {
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const prevPriceRef = useRef(null);
+  
+  // Use live price if available
+  const displayPrice = livePrice?.price || signal.price;
+  const displayChangePct = livePrice?.change_pct;
+  
+  // Flash effect on price change
+  useEffect(() => {
+    if (prevPriceRef.current !== null && prevPriceRef.current !== displayPrice && displayPrice > 0) {
+      setFlash(displayPrice > prevPriceRef.current ? "up" : "down");
+      const timeout = setTimeout(() => setFlash(null), 500);
+      return () => clearTimeout(timeout);
+    }
+    prevPriceRef.current = displayPrice;
+  }, [displayPrice]);
   
   const getScoreColor = (score) => {
     if (score >= 70) return "text-emerald-400";
@@ -163,6 +180,12 @@ const InvestmentCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatc
     }
   };
   
+  const flashClass = flash === "up" 
+    ? "bg-emerald-500/20" 
+    : flash === "down" 
+      ? "bg-red-500/20" 
+      : "";
+  
   return (
     <Card 
       className={`terminal-card overflow-hidden transition-all ${expanded ? 'border-blue-500/50' : 'hover:border-slate-600'}`}
@@ -180,6 +203,7 @@ const InvestmentCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatc
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono font-bold text-lg text-white">{signal.symbol}</span>
+                {livePrice && <LiveIndicator active={true} />}
                 <CategoryBadge category={signal.category} />
                 <button
                   onClick={handleWatchlistClick}
@@ -208,9 +232,13 @@ const InvestmentCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatc
               </div>
             </div>
           </div>
-          <div className="text-right">
-            <p className="font-mono text-lg text-white">${signal.price?.toFixed(2)}</p>
-            {signal.upside_potential && (
+          <div className={`text-right transition-all duration-300 rounded p-1 -m-1 ${flashClass}`}>
+            <p className="font-mono text-lg text-white">${displayPrice?.toFixed(2)}</p>
+            {displayChangePct !== undefined ? (
+              <p className={`text-sm font-mono ${displayChangePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {displayChangePct >= 0 ? '+' : ''}{displayChangePct.toFixed(2)}%
+              </p>
+            ) : signal.upside_potential && (
               <p className={`text-sm font-mono ${signal.upside_potential.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
                 {signal.upside_potential} upside
               </p>
@@ -474,7 +502,7 @@ const InvestmentCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatc
       )}
     </Card>
   );
-};
+});
 
 // Filter Panel
 const FilterPanel = ({ filters, setFilters, filterOptions, onApply, onReset }) => {
@@ -697,6 +725,26 @@ const Investments = () => {
   });
   const { token } = useAuth();
   const [searchParams] = useSearchParams();
+
+  // Get visible symbols for live price streaming - limit to current page to avoid overload
+  const visibleSymbols = useMemo(() => {
+    if (activeTab === "browse") {
+      return browseData?.signals?.map(s => s.symbol) || [];
+    } else {
+      // Category tabs - limit to first 30 visible
+      const categorySignals = {
+        hot: signals?.hot || [],
+        bullish: signals?.bullish || [],
+        undervalued: signals?.undervalued || [],
+        watch: signals?.watch || [],
+        bearish: [...(signals?.bearish || []), ...(signals?.overpriced || [])]
+      }[activeTab] || [];
+      return categorySignals.slice(0, 30).map(s => s.symbol);
+    }
+  }, [activeTab, browseData?.signals, signals]);
+  
+  // Live prices - 20s interval for investment view (longer hold periods = less frequent updates needed)
+  const { prices: livePrices, loading: pricesLoading } = useLivePrices(visibleSymbols, 20000, visibleSymbols.length > 0);
 
   const fetchWatchlist = useCallback(async () => {
     try {
@@ -959,8 +1007,17 @@ const Investments = () => {
             token={token}
             inWatchlist={watchlistSymbols.has(searchResult.symbol)}
             onWatchlistToggle={handleWatchlistToggle}
+            livePrice={livePrices[searchResult.symbol]}
           />
         </section>
+      )}
+
+      {/* Live Price Indicator */}
+      {visibleSymbols.length > 0 && Object.keys(livePrices).length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <LiveIndicator active={true} />
+          <span>Live prices • Updates every 20s • Showing {Object.keys(livePrices).length} prices</span>
+        </div>
       )}
 
       {/* Main Tabs */}
@@ -1021,6 +1078,7 @@ const Investments = () => {
                 token={token}
                 inWatchlist={watchlistSymbols.has(signal.symbol)}
                 onWatchlistToggle={handleWatchlistToggle}
+                livePrice={livePrices[signal.symbol]}
               />
             ))}
             {(!browseData?.signals || browseData.signals.length === 0) && (
@@ -1052,6 +1110,7 @@ const Investments = () => {
                   token={token}
                   inWatchlist={watchlistSymbols.has(signal.symbol)}
                   onWatchlistToggle={handleWatchlistToggle}
+                  livePrice={livePrices[signal.symbol]}
                 />
               ))}
               {getTabSignals().length === 0 && (

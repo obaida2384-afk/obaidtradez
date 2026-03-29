@@ -3487,42 +3487,57 @@ class LivePriceService:
                     continue
             symbols_to_fetch.append(symbol)
         
-        # Fetch missing symbols in batches
+        # Fetch missing symbols - FMP stable API requires individual calls
         if symbols_to_fetch:
-            # Use FMP batch quote endpoint
-            batch_size = 50
-            for i in range(0, len(symbols_to_fetch), batch_size):
-                batch = symbols_to_fetch[i:i + batch_size]
+            fmp_key = os.environ.get("FMP_API_KEY", "")
+            
+            async def fetch_single(client: httpx.AsyncClient, symbol: str):
                 try:
-                    symbols_str = ",".join(batch)
-                    async with httpx.AsyncClient() as client:
-                        response = await client.get(
-                            f"https://financialmodelingprep.com/api/v3/quote/{symbols_str}",
-                            params={"apikey": os.environ.get("FMP_API_KEY", "")},
-                            timeout=10.0
-                        )
-                        if response.status_code == 200:
-                            quotes = response.json()
-                            for quote in quotes:
-                                symbol = quote.get("symbol", "")
-                                price_data = {
-                                    "symbol": symbol,
-                                    "price": quote.get("price", 0),
-                                    "change": quote.get("change", 0),
-                                    "change_pct": quote.get("changesPercentage", 0),
-                                    "day_high": quote.get("dayHigh", 0),
-                                    "day_low": quote.get("dayLow", 0),
-                                    "volume": quote.get("volume", 0),
-                                    "avg_volume": quote.get("avgVolume", 0),
-                                    "open": quote.get("open", 0),
-                                    "previous_close": quote.get("previousClose", 0),
-                                    "timestamp": current_time
-                                }
-                                self.cache[symbol] = price_data
-                                self.last_fetch[symbol] = current_time
-                                results[symbol] = price_data
+                    response = await client.get(
+                        "https://financialmodelingprep.com/stable/quote",
+                        headers={"apikey": fmp_key},
+                        params={"symbol": symbol},
+                        timeout=10.0
+                    )
+                    if response.status_code == 200:
+                        quotes = response.json()
+                        if quotes:
+                            return quotes[0]
                 except Exception as e:
-                    logger.error(f"Batch quote error: {e}")
+                    logger.error(f"Quote fetch error for {symbol}: {e}")
+                return None
+            
+            # Batch requests in groups of 10 to avoid rate limiting
+            batch_size = 10
+            async with httpx.AsyncClient() as client:
+                for i in range(0, len(symbols_to_fetch), batch_size):
+                    batch = symbols_to_fetch[i:i + batch_size]
+                    tasks = [fetch_single(client, symbol) for symbol in batch]
+                    responses = await asyncio.gather(*tasks)
+                    
+                    for quote in responses:
+                        if quote:
+                            symbol = quote.get("symbol", "")
+                            price_data = {
+                                "symbol": symbol,
+                                "price": quote.get("price", 0),
+                                "change": quote.get("change", 0),
+                                "change_pct": quote.get("changePercentage", 0),
+                                "day_high": quote.get("dayHigh", 0),
+                                "day_low": quote.get("dayLow", 0),
+                                "volume": quote.get("volume", 0),
+                                "avg_volume": quote.get("avgVolume", 0),
+                                "open": quote.get("open", 0),
+                                "previous_close": quote.get("previousClose", 0),
+                                "timestamp": current_time
+                            }
+                            self.cache[symbol] = price_data
+                            self.last_fetch[symbol] = current_time
+                            results[symbol] = price_data
+                    
+                    # Small delay between batches to avoid rate limiting
+                    if i + batch_size < len(symbols_to_fetch):
+                        await asyncio.sleep(0.1)
         
         return results
     
@@ -3545,14 +3560,7 @@ async def get_batch_prices(
     prices = await live_price_service.get_batch_quotes(symbols)
     return {"prices": prices, "count": len(prices)}
 
-@api_router.get("/prices/{symbol}")
-async def get_single_price(symbol: str, auth: bool = Depends(verify_access)):
-    """Get live price for a single symbol"""
-    quote = await live_price_service.get_single_quote(symbol)
-    if quote:
-        return quote
-    return {"symbol": symbol.upper(), "price": 0, "change": 0, "change_pct": 0}
-
+# NOTE: Specific routes must come BEFORE parameterized routes to avoid matching issues
 @api_router.get("/prices/watchlist")
 async def get_watchlist_prices(auth: bool = Depends(verify_access)):
     """Get live prices for all watchlist symbols"""
@@ -3577,6 +3585,14 @@ async def get_positions_prices(auth: bool = Depends(verify_access)):
     symbols = [pos.get("symbol", "") for pos in positions if pos.get("symbol")]
     prices = await live_price_service.get_batch_quotes(symbols)
     return {"prices": prices, "count": len(prices)}
+
+@api_router.get("/prices/{symbol}")
+async def get_single_price(symbol: str, auth: bool = Depends(verify_access)):
+    """Get live price for a single symbol"""
+    quote = await live_price_service.get_single_quote(symbol)
+    if quote:
+        return quote
+    return {"symbol": symbol.upper(), "price": 0, "change": 0, "change_pct": 0}
 
 # Health check (no auth required)
 @api_router.get("/")

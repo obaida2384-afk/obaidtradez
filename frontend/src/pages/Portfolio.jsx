@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo, useRef } from "react";
 import { useAuth, API } from "../App";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { usePositionsPrices, LiveIndicator } from "../hooks/useLivePrices";
 import { 
   Wallet,
   TrendingUp,
@@ -459,6 +460,9 @@ const Portfolio = () => {
   const [activeTab, setActiveTab] = useState("overview");
   const { token } = useAuth();
 
+  // Live prices for positions - 15s interval
+  const { prices: livePrices, loading: pricesLoading } = usePositionsPrices(15000, positions.length > 0);
+
   const fetchPortfolio = useCallback(async () => {
     setLoading(true);
     try {
@@ -709,27 +713,53 @@ const Portfolio = () => {
       {/* Current Positions */}
       {positions.length > 0 && (
         <Card className="terminal-card overflow-hidden">
-          <div className="p-4 border-b border-slate-800">
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
             <h3 className="text-lg font-display font-semibold text-white">
               Current Positions ({positions.length})
             </h3>
+            {Object.keys(livePrices).length > 0 && (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <LiveIndicator active={true} />
+                <span>Live</span>
+              </div>
+            )}
           </div>
           <div className="divide-y divide-slate-800">
             {positions.map((pos) => {
-              const unrealizedPL = parseFloat(pos.unrealized_pl || 0);
-              const unrealizedPLPct = parseFloat(pos.unrealized_plpc || 0) * 100;
+              const livePrice = livePrices[pos.symbol];
+              const currentPrice = livePrice?.price || parseFloat(pos.current_price || 0);
+              const entryPrice = parseFloat(pos.avg_entry_price || 0);
+              const qty = parseFloat(pos.qty || 0);
+              
+              // Calculate P&L from live price if available
+              const marketValue = livePrice?.price ? livePrice.price * qty : parseFloat(pos.market_value || 0);
+              const costBasis = entryPrice * qty;
+              const unrealizedPL = marketValue - costBasis;
+              const unrealizedPLPct = costBasis > 0 ? ((marketValue / costBasis) - 1) * 100 : 0;
               const isPositive = unrealizedPL >= 0;
               
               return (
                 <div key={pos.symbol} className="p-4 flex items-center justify-between">
-                  <div>
-                    <span className="font-mono font-bold text-white">{pos.symbol}</span>
-                    <p className="text-xs text-slate-500">
-                      {parseFloat(pos.qty).toFixed(2)} shares @ ${parseFloat(pos.avg_entry_price).toFixed(2)}
-                    </p>
+                  <div className="flex items-center gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-white">{pos.symbol}</span>
+                        {livePrice && <LiveIndicator active={true} />}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {qty.toFixed(2)} shares @ ${entryPrice.toFixed(2)}
+                      </p>
+                    </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-mono text-white">${parseFloat(pos.market_value).toLocaleString()}</p>
+                    <div className="flex items-center gap-2 justify-end">
+                      <p className="font-mono text-white">${marketValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                      {livePrice && (
+                        <span className={`text-xs font-mono ${livePrice.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {livePrice.change_pct >= 0 ? '↑' : '↓'}{Math.abs(livePrice.change_pct).toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
                     <p className={`text-sm font-mono ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                       {isPositive ? '+' : ''}{unrealizedPLPct.toFixed(2)}% (${unrealizedPL.toFixed(2)})
                     </p>

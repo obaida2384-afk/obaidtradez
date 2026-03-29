@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo, useRef } from "react";
 import { useAuth, API } from "../App";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useLivePrices, usePositionsPrices, LiveIndicator } from "../hooks/useLivePrices";
 import { 
   Bot,
   Shield,
@@ -55,12 +56,15 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-// Trade card component
-const TradeCard = ({ trade, onApprove, onReject, onCancel, onExecute, loading }) => {
+// Trade card component - memoized
+const TradeCard = memo(({ trade, onApprove, onReject, onCancel, onExecute, loading, livePrice }) => {
   const isPending = trade.status === "pending";
   const isApproved = trade.status === "approved";
   const canExecute = isApproved;
   const canCancel = isPending || isApproved;
+  
+  // Use live price if available
+  const displayPrice = livePrice?.price || trade.entry_price;
   
   return (
     <Card className="terminal-card p-4" data-testid={`trade-card-${trade.id}`}>
@@ -78,10 +82,12 @@ const TradeCard = ({ trade, onApprove, onReject, onCancel, onExecute, loading })
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono font-bold text-lg text-white">{trade.symbol}</span>
+              {livePrice && <LiveIndicator active={true} />}
               <StatusBadge status={trade.status} />
             </div>
             <p className="text-xs text-slate-500">
               {trade.side.toUpperCase()} • {trade.qty ? `${trade.qty} shares` : `$${trade.notional}`}
+              {livePrice && ` • Live: $${livePrice.price.toFixed(2)}`}
             </p>
           </div>
         </div>
@@ -203,7 +209,7 @@ const TradeCard = ({ trade, onApprove, onReject, onCancel, onExecute, loading })
       </div>
     </Card>
   );
-};
+});
 
 // Audit log entry component
 const AuditEntry = ({ entry }) => {
@@ -334,6 +340,13 @@ const AutoTrade = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("queue");
   const [statusFilter, setStatusFilter] = useState("");
+
+  // Get symbols from queue for live prices
+  const queueSymbols = trades.map(t => t.symbol).filter(Boolean);
+  const { prices: queuePrices } = useLivePrices(queueSymbols, 12000, queueSymbols.length > 0);
+  
+  // Live prices for positions
+  const { prices: positionPrices } = usePositionsPrices(15000, positions.length > 0);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -751,6 +764,13 @@ const AutoTrade = () => {
         </div>
 
         <TabsContent value="queue" className="mt-0">
+          {/* Live Price Indicator */}
+          {queueSymbols.length > 0 && Object.keys(queuePrices).length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
+              <LiveIndicator active={true} />
+              <span>Live prices • Updates every 12s</span>
+            </div>
+          )}
           {trades.length > 0 ? (
             <div className="space-y-3">
               {trades.filter(t => t.status !== 'executed').map(trade => (
@@ -762,6 +782,7 @@ const AutoTrade = () => {
                   onCancel={handleCancel}
                   onExecute={handleExecute}
                   loading={actionLoading}
+                  livePrice={queuePrices[trade.symbol]}
                 />
               ))}
             </div>
@@ -786,6 +807,7 @@ const AutoTrade = () => {
                   onCancel={handleCancel}
                   onExecute={handleExecute}
                   loading={actionLoading}
+                  livePrice={queuePrices[trade.symbol]}
                 />
               ))}
             </div>
@@ -801,22 +823,48 @@ const AutoTrade = () => {
         <TabsContent value="positions" className="mt-0">
           {positions.length > 0 ? (
             <Card className="terminal-card overflow-hidden">
+              <div className="p-3 border-b border-slate-800 flex items-center justify-between">
+                <span className="text-sm text-slate-400">Positions ({positions.length})</span>
+                {Object.keys(positionPrices).length > 0 && (
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <LiveIndicator active={true} />
+                    <span>Live</span>
+                  </div>
+                )}
+              </div>
               <div className="divide-y divide-slate-800">
                 {positions.map((pos) => {
-                  const unrealizedPL = parseFloat(pos.unrealized_pl || 0);
-                  const unrealizedPLPct = parseFloat(pos.unrealized_plpc || 0) * 100;
+                  const livePrice = positionPrices[pos.symbol];
+                  const qty = parseFloat(pos.qty || 0);
+                  const entryPrice = parseFloat(pos.avg_entry_price || 0);
+                  const marketValue = livePrice?.price ? livePrice.price * qty : parseFloat(pos.market_value || 0);
+                  const costBasis = entryPrice * qty;
+                  const unrealizedPL = marketValue - costBasis;
+                  const unrealizedPLPct = costBasis > 0 ? ((marketValue / costBasis) - 1) * 100 : 0;
                   const isPositive = unrealizedPL >= 0;
                   
                   return (
                     <div key={pos.symbol} className="p-4 flex items-center justify-between">
-                      <div>
-                        <span className="font-mono font-bold text-white">{pos.symbol}</span>
-                        <p className="text-xs text-slate-500">
-                          {parseFloat(pos.qty).toFixed(2)} shares @ ${parseFloat(pos.avg_entry_price).toFixed(2)}
-                        </p>
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-white">{pos.symbol}</span>
+                            {livePrice && <LiveIndicator active={true} />}
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            {qty.toFixed(2)} shares @ ${entryPrice.toFixed(2)}
+                          </p>
+                        </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-mono text-white">${parseFloat(pos.market_value).toLocaleString()}</p>
+                        <div className="flex items-center gap-2 justify-end">
+                          <p className="font-mono text-white">${marketValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                          {livePrice && (
+                            <span className={`text-xs font-mono ${livePrice.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {livePrice.change_pct >= 0 ? '↑' : '↓'}{Math.abs(livePrice.change_pct).toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
                         <p className={`text-sm font-mono ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                           {isPositive ? '+' : ''}{unrealizedPLPct.toFixed(2)}% (${unrealizedPL.toFixed(2)})
                         </p>

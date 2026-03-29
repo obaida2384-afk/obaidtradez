@@ -265,6 +265,9 @@ const Watchlist = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState("");
+  
+  // Live price streaming for watchlist - 15s interval
+  const { prices: livePrices, loading: pricesLoading } = useWatchlistPrices(15000, items.length > 0);
 
   const fetchWatchlist = useCallback(async () => {
     try {
@@ -507,6 +510,14 @@ const Watchlist = () => {
         </div>
       )}
 
+      {/* Live Price Indicator */}
+      {items.length > 0 && Object.keys(livePrices).length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <LiveIndicator active={true} />
+          <span>Live prices • Updates every 15s</span>
+        </div>
+      )}
+
       {/* Watchlist Items */}
       {filteredItems.length > 0 ? (
         <div className="space-y-3">
@@ -516,6 +527,7 @@ const Watchlist = () => {
               item={item}
               onRemove={handleRemove}
               onUpdateNote={handleUpdateNote}
+              livePrice={livePrices[item.symbol]}
             />
           ))}
         </div>

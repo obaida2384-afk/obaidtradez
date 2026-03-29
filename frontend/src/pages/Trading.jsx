@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, memo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth, API } from "../App";
 import { Card } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useLivePrices, LiveIndicator } from "../hooks/useLivePrices";
 import { 
   Zap, 
   TrendingUp, 
@@ -60,10 +61,26 @@ const CategoryBadge = ({ category }) => {
   );
 };
 
-// Trading Signal Card
-const TradingCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchlistToggle }) => {
-  const changeColor = signal.indicators?.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
+// Trading Signal Card - memoized to prevent unnecessary re-renders
+const TradingCard = memo(({ signal, expanded, onToggle, token, inWatchlist, onWatchlistToggle, livePrice }) => {
+  const [flash, setFlash] = useState(null);
+  const prevPriceRef = useRef(null);
+  
+  // Use live price if available
+  const displayPrice = livePrice?.price || signal.price;
+  const displayChange = livePrice?.change_pct ?? signal.indicators?.change_pct;
+  const changeColor = displayChange >= 0 ? 'text-emerald-400' : 'text-red-400';
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  
+  // Flash effect on price change
+  useEffect(() => {
+    if (prevPriceRef.current !== null && prevPriceRef.current !== displayPrice && displayPrice > 0) {
+      setFlash(displayPrice > prevPriceRef.current ? "up" : "down");
+      const timeout = setTimeout(() => setFlash(null), 500);
+      return () => clearTimeout(timeout);
+    }
+    prevPriceRef.current = displayPrice;
+  }, [displayPrice]);
 
   const handleWatchlistClick = async (e) => {
     e.stopPropagation();
@@ -99,6 +116,12 @@ const TradingCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchli
     }
   };
   
+  const flashClass = flash === "up" 
+    ? "bg-emerald-500/20" 
+    : flash === "down" 
+      ? "bg-red-500/20" 
+      : "";
+  
   return (
     <Card 
       className={`terminal-card overflow-hidden transition-all ${expanded ? 'border-blue-500/50' : 'hover:border-slate-600'}`}
@@ -113,6 +136,7 @@ const TradingCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchli
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono font-bold text-lg text-white">{signal.symbol}</span>
+                {livePrice && <LiveIndicator active={true} />}
                 <CategoryBadge category={signal.category} />
                 <button
                   onClick={handleWatchlistClick}
@@ -130,10 +154,10 @@ const TradingCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchli
               <p className="text-xs text-slate-500 truncate max-w-[200px]">{signal.name}</p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="font-mono text-lg text-white">${signal.price?.toFixed(2)}</p>
+          <div className={`text-right transition-all duration-300 rounded p-1 -m-1 ${flashClass}`}>
+            <p className="font-mono text-lg text-white">${displayPrice?.toFixed(2)}</p>
             <p className={`text-sm font-mono ${changeColor}`}>
-              {signal.indicators?.change_pct >= 0 ? '+' : ''}{signal.indicators?.change_pct?.toFixed(2)}%
+              {displayChange >= 0 ? '+' : ''}{displayChange?.toFixed(2)}%
             </p>
           </div>
         </div>
@@ -205,7 +229,7 @@ const TradingCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchli
       )}
     </Card>
   );
-};
+});
 
 const Trading = () => {
   const [signals, setSignals] = useState(null);
@@ -218,6 +242,10 @@ const Trading = () => {
   const [watchlistSymbols, setWatchlistSymbols] = useState(new Set());
   const { token } = useAuth();
   const [searchParams] = useSearchParams();
+
+  // Extract all symbols from signals for live price streaming
+  const allSymbols = signals?.all?.map(s => s.symbol) || [];
+  const { prices: livePrices, loading: pricesLoading } = useLivePrices(allSymbols, 12000, allSymbols.length > 0);
 
   useEffect(() => {
     fetchSignals();
@@ -360,8 +388,17 @@ const Trading = () => {
             token={token}
             inWatchlist={watchlistSymbols.has(searchResult.symbol)}
             onWatchlistToggle={handleWatchlistToggle}
+            livePrice={livePrices[searchResult.symbol]}
           />
         </section>
+      )}
+
+      {/* Live Price Indicator */}
+      {allSymbols.length > 0 && Object.keys(livePrices).length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <LiveIndicator active={true} />
+          <span>Live prices • Updates every 12s</span>
+        </div>
       )}
 
       {/* Signal Categories */}
@@ -395,6 +432,7 @@ const Trading = () => {
                 token={token}
                 inWatchlist={watchlistSymbols.has(signal.symbol)}
                 onWatchlistToggle={handleWatchlistToggle}
+                livePrice={livePrices[signal.symbol]}
               />
             ))}
             {getTabSignals().length === 0 && (
