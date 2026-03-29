@@ -348,18 +348,16 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Button changes to "Queue (Will Block)" for risky stocks
 
 ### Phase 9 - UI Features (Mar 2026)
-- [x] **Decision Clarity UI** on Investment cards:
-  - "Why It's Strong" (green) - Bull case bullet points
-  - "Biggest Risk" (amber) - Biggest weakness/risk
-  - "Valuation Verdict" (blue) - Status, Fair Value, Upside
-- [x] **Custom Screener Presets** (8 presets):
-  - Value Picks, Growth Stocks, Quality Dividend, Safe Havens
-  - Bargain Hunters, Tech Leaders, Healthcare Picks, Financial Fortress
-  - Auto-apply filters on preset click
-- [x] **CSV Export** across 3 pages:
-  - Investments page (header Export button)
-  - Portfolio page (positions section, conditional on positions existing)
-  - AutoTrade page (Executed tab Export button)
+- [x] **Decision Clarity UI** on Investment cards
+- [x] **Custom Screener Presets** (8 presets)
+- [x] **CSV Export** across 3 pages
+- [x] **Full Universe Trading Signals** — expanded from 35 to 1,420 stocks
+  - Background batching with MongoDB caching (same pattern as investments)
+  - `/api/trading/refresh` endpoint for background scan
+  - Refresh button on Trading page
+  - "Browse All" tab added to view all 195+ signals
+  - Excluded stock search shows proper exclusion reason instead of NaN
+  - Categories: Hot (69), Breakout (5), Momentum (24), Watch (97)
 
 ### P2 (Medium Priority)
 - [ ] Compare stocks side-by-side

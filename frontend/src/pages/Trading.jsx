@@ -619,15 +619,40 @@ const Trading = () => {
       {searchResult && (
         <section>
           <h2 className="text-sm font-medium text-slate-400 mb-3">Search Result</h2>
-          <TradingCard 
-            signal={searchResult}
-            expanded={expandedCard === searchResult.symbol}
-            onToggle={() => setExpandedCard(expandedCard === searchResult.symbol ? null : searchResult.symbol)}
-            token={token}
-            inWatchlist={watchlistSymbols.has(searchResult.symbol)}
-            onWatchlistToggle={handleWatchlistToggle}
-            livePrice={livePrices[searchResult.symbol]}
-          />
+          {searchResult.included === false ? (
+            <Card className="terminal-card p-4 border-red-500/20 bg-red-500/5">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm text-red-300 font-medium mb-1">{searchResult.symbol || searchSymbol} — Excluded</p>
+                  <p className="text-xs text-slate-400">{searchResult.exclusion_reason || "Does not meet quality thresholds for trading signals."}</p>
+                </div>
+              </div>
+            </Card>
+          ) : searchResult.signal ? (
+            <TradingCard 
+              signal={searchResult.signal}
+              expanded={expandedCard === (searchResult.signal?.symbol || searchResult.symbol)}
+              onToggle={() => {
+                const sym = searchResult.signal?.symbol || searchResult.symbol;
+                setExpandedCard(expandedCard === sym ? null : sym);
+              }}
+              token={token}
+              inWatchlist={watchlistSymbols.has(searchResult.signal?.symbol || searchResult.symbol)}
+              onWatchlistToggle={handleWatchlistToggle}
+              livePrice={livePrices[searchResult.signal?.symbol || searchResult.symbol]}
+            />
+          ) : (
+            <TradingCard 
+              signal={searchResult}
+              expanded={expandedCard === searchResult.symbol}
+              onToggle={() => setExpandedCard(expandedCard === searchResult.symbol ? null : searchResult.symbol)}
+              token={token}
+              inWatchlist={watchlistSymbols.has(searchResult.symbol)}
+              onWatchlistToggle={handleWatchlistToggle}
+              livePrice={livePrices[searchResult.symbol]}
+            />
+          )}
         </section>
       )}
 
@@ -684,6 +709,9 @@ const Trading = () => {
           </TabsTrigger>
           <TabsTrigger value="watch" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-slate-400">
             <Clock className="w-4 h-4 mr-1" /> Watch ({signals?.watch?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="all" className="data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400">
+            <BarChart2 className="w-4 h-4 mr-1" /> Browse All ({signals?.all?.length || 0})
           </TabsTrigger>
         </TabsList>
 
