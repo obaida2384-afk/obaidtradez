@@ -11,7 +11,7 @@ from datetime import datetime
 import time
 
 class AlphaLensAPITester:
-    def __init__(self, base_url="https://fintech-agent-obaid.preview.emergentagent.com"):
+    def __init__(self, base_url="https://obaid-tradez-preview.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.tests_run = 0

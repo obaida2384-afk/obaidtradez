@@ -30,9 +30,42 @@ import {
   Building2,
   Globe,
   Gauge,
-  Star
+  Star,
+  Download
 } from "lucide-react";
 import { toast } from "sonner";
+
+// CSV Export Utility
+const exportToCSV = (data, filename, columns) => {
+  if (!data || data.length === 0) {
+    toast.error("No data to export");
+    return;
+  }
+  
+  const headers = columns.map(col => col.label).join(',');
+  const rows = data.map(item => {
+    return columns.map(col => {
+      let value = col.accessor(item);
+      if (typeof value === 'string' && value.includes(',')) {
+        value = `"${value}"`;
+      }
+      return value ?? '';
+    }).join(',');
+  });
+  
+  const csv = [headers, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${filename}_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  toast.success(`Exported ${data.length} rows to ${filename}.csv`);
+};
 
 // Score Bar
 const ScoreBar = ({ label, score }) => {
@@ -269,6 +302,85 @@ const InvestmentCard = memo(({ signal, expanded, onToggle, token, inWatchlist, o
       
       {expanded && (
         <div className="px-4 pb-4 pt-2 border-t border-slate-800 space-y-4">
+          {/* ====== DECISION CLARITY SECTION ====== */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Why This Is Strong */}
+            <div className="p-3 rounded-lg bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/30">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                  <TrendingUp className="w-3 h-3 text-emerald-400" />
+                </div>
+                <p className="text-xs font-semibold text-emerald-400">Why It's Strong</p>
+              </div>
+              {signal.bull_case?.length > 0 ? (
+                <ul className="space-y-1">
+                  {signal.bull_case.slice(0, 3).map((item, i) => (
+                    <li key={i} className="text-xs text-slate-300 flex items-start gap-1.5">
+                      <span className="text-emerald-400 mt-0.5">✓</span> 
+                      <span className="line-clamp-2">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-slate-500">Strong fundamentals</p>
+              )}
+            </div>
+            
+            {/* Biggest Risk */}
+            <div className="p-3 rounded-lg bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/30">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center">
+                  <AlertTriangle className="w-3 h-3 text-amber-400" />
+                </div>
+                <p className="text-xs font-semibold text-amber-400">Biggest Risk</p>
+              </div>
+              {signal.score_drivers?.biggest_weakness ? (
+                <p className="text-xs text-slate-300">{signal.score_drivers.biggest_weakness}</p>
+              ) : signal.bear_case?.length > 0 ? (
+                <p className="text-xs text-slate-300">{signal.bear_case[0]}</p>
+              ) : signal.risks?.length > 0 ? (
+                <p className="text-xs text-slate-300">{signal.risks[0]}</p>
+              ) : (
+                <p className="text-xs text-slate-500">No major risks identified</p>
+              )}
+            </div>
+            
+            {/* Valuation Verdict */}
+            <div className="p-3 rounded-lg bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/30">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
+                  <DollarSign className="w-3 h-3 text-blue-400" />
+                </div>
+                <p className="text-xs font-semibold text-blue-400">Valuation Verdict</p>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Status:</span>
+                  <span className={`text-xs font-medium ${
+                    signal.valuation_summary?.classification?.includes('Under') ? 'text-emerald-400' : 
+                    signal.valuation_summary?.classification?.includes('Over') ? 'text-red-400' : 'text-slate-300'
+                  }`}>
+                    {signal.valuation_summary?.classification || 'Fair Value'}
+                  </span>
+                </div>
+                {signal.intrinsic_value && signal.price && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">Fair Value:</span>
+                    <span className="text-xs font-mono text-white">${signal.intrinsic_value?.toFixed(2)}</span>
+                  </div>
+                )}
+                {signal.upside_potential && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">Upside:</span>
+                    <span className={`text-xs font-mono ${signal.upside_potential.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {signal.upside_potential}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          
           {/* Score Breakdown */}
           <div>
             <p className="text-xs text-slate-500 mb-3">Score Breakdown</p>
@@ -507,22 +619,116 @@ const InvestmentCard = memo(({ signal, expanded, onToggle, token, inWatchlist, o
 });
 
 // Filter Panel
+// Screener Presets
+const SCREENER_PRESETS = {
+  "value_picks": {
+    name: "Value Picks",
+    icon: "💎",
+    description: "Undervalued stocks with strong fundamentals",
+    filters: { minValuation: 70, minQuality: 60, signal: "Buy" }
+  },
+  "growth_stocks": {
+    name: "Growth Stocks",
+    icon: "🚀",
+    description: "High growth companies with momentum",
+    filters: { minGrowth: 70, minScore: 60 }
+  },
+  "dividend_quality": {
+    name: "Quality Dividend",
+    icon: "💰",
+    description: "High-quality dividend payers",
+    filters: { minQuality: 75, minScore: 65 }
+  },
+  "safe_havens": {
+    name: "Safe Havens",
+    icon: "🛡️",
+    description: "Low-risk, stable investments",
+    filters: { minScore: 70, minQuality: 70, minValuation: 50 }
+  },
+  "bargain_hunters": {
+    name: "Bargain Hunters",
+    icon: "🔍",
+    description: "Deep value opportunities",
+    filters: { minValuation: 80, signal: "Buy" }
+  },
+  "tech_leaders": {
+    name: "Tech Leaders",
+    icon: "💻",
+    description: "Top technology stocks",
+    filters: { sector: "Technology", minScore: 60 }
+  },
+  "healthcare_picks": {
+    name: "Healthcare Picks",
+    icon: "🏥",
+    description: "Healthcare & biotech opportunities",
+    filters: { sector: "Healthcare", minScore: 55 }
+  },
+  "financial_strength": {
+    name: "Financial Fortress",
+    icon: "🏦",
+    description: "Companies with rock-solid balance sheets",
+    filters: { minQuality: 80, minScore: 65 }
+  }
+};
+
 const FilterPanel = ({ filters, setFilters, filterOptions, onApply, onReset }) => {
+  const [activePreset, setActivePreset] = useState(null);
+  
+  const applyPreset = (presetKey) => {
+    const preset = SCREENER_PRESETS[presetKey];
+    if (preset) {
+      setFilters({
+        ...filters,
+        ...preset.filters
+      });
+      setActivePreset(presetKey);
+      // Auto-apply after selecting preset
+      setTimeout(() => onApply(), 100);
+    }
+  };
+  
+  const handleReset = () => {
+    setActivePreset(null);
+    onReset();
+  };
+  
   return (
     <Card className="terminal-card p-4 mb-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-medium text-white">Filters</span>
+          <span className="text-sm font-medium text-white">Filters & Presets</span>
           {filterOptions?.total_signals > 0 && (
             <Badge variant="outline" className="text-xs border-slate-700">
               {filterOptions.total_signals} stocks
             </Badge>
           )}
         </div>
-        <Button variant="ghost" size="sm" onClick={onReset} className="text-slate-400 hover:text-white">
+        <Button variant="ghost" size="sm" onClick={handleReset} className="text-slate-400 hover:text-white">
           <X className="w-3 h-3 mr-1" /> Reset
         </Button>
+      </div>
+      
+      {/* Screener Presets */}
+      <div className="mb-4">
+        <label className="text-xs text-slate-500 mb-2 block">Quick Presets</label>
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(SCREENER_PRESETS).map(([key, preset]) => (
+            <button
+              key={key}
+              onClick={() => applyPreset(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                activePreset === key 
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' 
+                  : 'bg-slate-900 text-slate-400 border border-slate-700 hover:border-slate-600 hover:text-white'
+              }`}
+              title={preset.description}
+            >
+              <span>{preset.icon}</span>
+              <span>{preset.name}</span>
+            </button>
+          ))}
+        </div>
       </div>
       
       <div className="grid md:grid-cols-4 gap-4">
@@ -994,6 +1200,33 @@ const Investments = () => {
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? "Scanning..." : "Refresh"}
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={() => {
+              const currentTab = signals[activeTab] || [];
+              exportToCSV(currentTab, `investment_ideas_${activeTab}`, [
+                { label: 'Symbol', accessor: (s) => s.symbol },
+                { label: 'Name', accessor: (s) => s.name },
+                { label: 'Sector', accessor: (s) => s.sector },
+                { label: 'Signal', accessor: (s) => s.signal },
+                { label: 'Category', accessor: (s) => s.category },
+                { label: 'Overall Score', accessor: (s) => s.overall_score?.toFixed(1) },
+                { label: 'Valuation Score', accessor: (s) => s.valuation_score?.toFixed(1) },
+                { label: 'Quality Score', accessor: (s) => s.quality_score?.toFixed(1) },
+                { label: 'Growth Score', accessor: (s) => s.growth_score?.toFixed(1) },
+                { label: 'Price', accessor: (s) => s.price?.toFixed(2) },
+                { label: 'Fair Value', accessor: (s) => s.intrinsic_value?.toFixed(2) },
+                { label: 'Upside', accessor: (s) => s.upside_potential },
+                { label: 'Market Cap', accessor: (s) => s.market_cap_label },
+                { label: 'Confidence', accessor: (s) => (s.confidence * 100).toFixed(0) + '%' }
+              ]);
+            }}
+            className="border-slate-700"
+            data-testid="export-csv-btn"
+          >
+            <Download className="w-4 h-4 mr-1" />
+            Export
           </Button>
         </div>
       </div>

@@ -7,7 +7,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://fintech-agent-obaid.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://obaid-tradez-preview.preview.emergentagent.com')
 ACCESS_CODE = "Bullishalmarkhan7.7"
 
 

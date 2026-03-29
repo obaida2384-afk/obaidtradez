@@ -19,7 +19,8 @@ import {
   LineChart as LineChartIcon,
   Activity,
   Target,
-  AlertTriangle
+  AlertTriangle,
+  Download
 } from "lucide-react";
 import {
   LineChart,
@@ -73,6 +74,44 @@ const CustomTooltip = ({ active, payload, label }) => {
     );
   }
   return null;
+};
+
+// CSV Export Utility
+const exportToCSV = (data, filename, columns) => {
+  if (!data || data.length === 0) {
+    toast.error("No data to export");
+    return;
+  }
+  
+  // Create header row
+  const headers = columns.map(col => col.label).join(',');
+  
+  // Create data rows
+  const rows = data.map(item => {
+    return columns.map(col => {
+      let value = col.accessor(item);
+      // Handle strings with commas by wrapping in quotes
+      if (typeof value === 'string' && value.includes(',')) {
+        value = `"${value}"`;
+      }
+      return value ?? '';
+    }).join(',');
+  });
+  
+  const csv = [headers, ...rows].join('\n');
+  
+  // Create blob and download
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${filename}_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  toast.success(`Exported ${data.length} rows to ${filename}.csv`);
 };
 
 // Equity Chart Component
@@ -717,12 +756,32 @@ const Portfolio = () => {
             <h3 className="text-lg font-display font-semibold text-white">
               Current Positions ({positions.length})
             </h3>
-            {Object.keys(livePrices).length > 0 && (
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <LiveIndicator active={true} />
-                <span>Live</span>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => exportToCSV(positions, 'portfolio_positions', [
+                  { label: 'Symbol', accessor: (p) => p.symbol },
+                  { label: 'Quantity', accessor: (p) => p.qty },
+                  { label: 'Entry Price', accessor: (p) => parseFloat(p.avg_entry_price || 0).toFixed(2) },
+                  { label: 'Current Price', accessor: (p) => parseFloat(p.current_price || 0).toFixed(2) },
+                  { label: 'Market Value', accessor: (p) => parseFloat(p.market_value || 0).toFixed(2) },
+                  { label: 'Unrealized P&L', accessor: (p) => parseFloat(p.unrealized_pl || 0).toFixed(2) },
+                  { label: 'P&L %', accessor: (p) => parseFloat(p.unrealized_plpc || 0).toFixed(2) },
+                  { label: 'Side', accessor: (p) => p.side }
+                ])}
+                className="text-xs border-slate-700 text-slate-400 hover:text-white"
+              >
+                <Download className="w-3 h-3 mr-1" />
+                Export CSV
+              </Button>
+              {Object.keys(livePrices).length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <LiveIndicator active={true} />
+                  <span>Live</span>
+                </div>
+              )}
+            </div>
           </div>
           <div className="divide-y divide-slate-800">
             {positions.map((pos) => {

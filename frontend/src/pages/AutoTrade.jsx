@@ -33,9 +33,42 @@ import {
   Sun,
   Moon,
   Sunrise,
-  Sunset
+  Sunset,
+  Download
 } from "lucide-react";
 import { toast } from "sonner";
+
+// CSV Export Utility
+const exportToCSV = (data, filename, columns) => {
+  if (!data || data.length === 0) {
+    toast.error("No data to export");
+    return;
+  }
+  
+  const headers = columns.map(col => col.label).join(',');
+  const rows = data.map(item => {
+    return columns.map(col => {
+      let value = col.accessor(item);
+      if (typeof value === 'string' && value.includes(',')) {
+        value = `"${value}"`;
+      }
+      return value ?? '';
+    }).join(',');
+  });
+  
+  const csv = [headers, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${filename}_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  toast.success(`Exported ${data.length} rows to ${filename}.csv`);
+};
 
 // Market Status Badge Component
 const MarketStatusBadge = ({ status, extended }) => {
@@ -1096,6 +1129,26 @@ const AutoTrade = () => {
         <TabsContent value="executed" className="mt-0">
           {trades.filter(t => t.status === 'executed').length > 0 ? (
             <div className="space-y-3">
+              <div className="flex justify-end mb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportToCSV(trades.filter(t => t.status === 'executed'), 'executed_trades', [
+                    { label: 'Symbol', accessor: (t) => t.symbol },
+                    { label: 'Side', accessor: (t) => t.side },
+                    { label: 'Quantity', accessor: (t) => t.qty },
+                    { label: 'Price', accessor: (t) => t.executed_price?.toFixed(2) || t.price?.toFixed(2) },
+                    { label: 'Strategy', accessor: (t) => t.strategy },
+                    { label: 'Status', accessor: (t) => t.status },
+                    { label: 'Reason', accessor: (t) => t.reason },
+                    { label: 'Executed At', accessor: (t) => t.executed_at || t.created_at }
+                  ])}
+                  className="text-xs border-slate-700 text-slate-400 hover:text-white"
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  Export Trades
+                </Button>
+              </div>
               {trades.filter(t => t.status === 'executed').map(trade => (
                 <TradeCard
                   key={trade.id}
