@@ -3458,10 +3458,130 @@ async def get_paper_stats(auth: bool = Depends(verify_access)):
         "total": sum(stats.values())
     }
 
+# ===================== LIVE PRICES =====================
+
+class LivePriceService:
+    """Service for fetching live prices efficiently"""
+    
+    def __init__(self):
+        self.cache = {}
+        self.cache_ttl = 5  # 5 seconds cache
+        self.last_fetch = {}
+    
+    async def get_batch_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Get quotes for multiple symbols efficiently"""
+        if not symbols:
+            return {}
+        
+        results = {}
+        symbols_to_fetch = []
+        current_time = datetime.now(timezone.utc).timestamp()
+        
+        # Check cache first
+        for symbol in symbols:
+            symbol = symbol.upper()
+            if symbol in self.cache:
+                cache_time = self.last_fetch.get(symbol, 0)
+                if current_time - cache_time < self.cache_ttl:
+                    results[symbol] = self.cache[symbol]
+                    continue
+            symbols_to_fetch.append(symbol)
+        
+        # Fetch missing symbols in batches
+        if symbols_to_fetch:
+            # Use FMP batch quote endpoint
+            batch_size = 50
+            for i in range(0, len(symbols_to_fetch), batch_size):
+                batch = symbols_to_fetch[i:i + batch_size]
+                try:
+                    symbols_str = ",".join(batch)
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            f"https://financialmodelingprep.com/api/v3/quote/{symbols_str}",
+                            params={"apikey": os.environ.get("FMP_API_KEY", "")},
+                            timeout=10.0
+                        )
+                        if response.status_code == 200:
+                            quotes = response.json()
+                            for quote in quotes:
+                                symbol = quote.get("symbol", "")
+                                price_data = {
+                                    "symbol": symbol,
+                                    "price": quote.get("price", 0),
+                                    "change": quote.get("change", 0),
+                                    "change_pct": quote.get("changesPercentage", 0),
+                                    "day_high": quote.get("dayHigh", 0),
+                                    "day_low": quote.get("dayLow", 0),
+                                    "volume": quote.get("volume", 0),
+                                    "avg_volume": quote.get("avgVolume", 0),
+                                    "open": quote.get("open", 0),
+                                    "previous_close": quote.get("previousClose", 0),
+                                    "timestamp": current_time
+                                }
+                                self.cache[symbol] = price_data
+                                self.last_fetch[symbol] = current_time
+                                results[symbol] = price_data
+                except Exception as e:
+                    logger.error(f"Batch quote error: {e}")
+        
+        return results
+    
+    async def get_single_quote(self, symbol: str) -> Optional[Dict]:
+        """Get a single quote"""
+        results = await self.get_batch_quotes([symbol])
+        return results.get(symbol.upper())
+
+live_price_service = LivePriceService()
+
+@api_router.post("/prices/batch")
+async def get_batch_prices(
+    symbols: List[str],
+    auth: bool = Depends(verify_access)
+):
+    """Get live prices for multiple symbols"""
+    if len(symbols) > 100:
+        symbols = symbols[:100]  # Limit to 100 symbols
+    
+    prices = await live_price_service.get_batch_quotes(symbols)
+    return {"prices": prices, "count": len(prices)}
+
+@api_router.get("/prices/{symbol}")
+async def get_single_price(symbol: str, auth: bool = Depends(verify_access)):
+    """Get live price for a single symbol"""
+    quote = await live_price_service.get_single_quote(symbol)
+    if quote:
+        return quote
+    return {"symbol": symbol.upper(), "price": 0, "change": 0, "change_pct": 0}
+
+@api_router.get("/prices/watchlist")
+async def get_watchlist_prices(auth: bool = Depends(verify_access)):
+    """Get live prices for all watchlist symbols"""
+    cursor = db.watchlist.find({}, {"symbol": 1, "_id": 0})
+    items = await cursor.to_list(length=100)
+    
+    if not items:
+        return {"prices": {}, "count": 0}
+    
+    symbols = [item["symbol"] for item in items]
+    prices = await live_price_service.get_batch_quotes(symbols)
+    return {"prices": prices, "count": len(prices)}
+
+@api_router.get("/prices/positions")
+async def get_positions_prices(auth: bool = Depends(verify_access)):
+    """Get live prices for all position symbols"""
+    positions = await api_client.alpaca_positions() or []
+    
+    if not positions:
+        return {"prices": {}, "count": 0}
+    
+    symbols = [pos.get("symbol", "") for pos in positions if pos.get("symbol")]
+    prices = await live_price_service.get_batch_quotes(symbols)
+    return {"prices": prices, "count": len(prices)}
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "2.4.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "2.5.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)

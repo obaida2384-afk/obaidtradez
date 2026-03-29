@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { useWatchlistPrices, LiveIndicator } from "../hooks/useLivePrices";
 import { 
   Star,
   Plus,
@@ -58,16 +59,37 @@ const getSignalStyle = (signal) => {
 };
 
 // Watchlist item card
-const WatchlistCard = ({ item, onRemove, onUpdateNote }) => {
+const WatchlistCard = ({ item, onRemove, onUpdateNote, livePrice }) => {
   const [editingNote, setEditingNote] = useState(false);
   const [note, setNote] = useState(item.note || "");
-  const changePct = typeof item.change_pct === 'number' ? item.change_pct : parseFloat(item.change_pct) || 0;
-  const isPositive = changePct >= 0;
+  const [flash, setFlash] = useState(null);
+  const prevPriceRef = useState(null);
+  
+  // Use live price if available, otherwise fall back to item price
+  const displayPrice = livePrice?.price || item.price || 0;
+  const displayChange = livePrice?.change_pct ?? (typeof item.change_pct === 'number' ? item.change_pct : parseFloat(item.change_pct) || 0);
+  const isPositive = displayChange >= 0;
+
+  // Flash effect on price change
+  useEffect(() => {
+    if (prevPriceRef.current !== null && prevPriceRef.current !== displayPrice && displayPrice > 0) {
+      setFlash(displayPrice > prevPriceRef.current ? "up" : "down");
+      const timeout = setTimeout(() => setFlash(null), 500);
+      return () => clearTimeout(timeout);
+    }
+    prevPriceRef.current = displayPrice;
+  }, [displayPrice]);
 
   const handleSaveNote = () => {
     onUpdateNote(item.symbol, note);
     setEditingNote(false);
   };
+
+  const flashClass = flash === "up" 
+    ? "bg-emerald-500/20" 
+    : flash === "down" 
+      ? "bg-red-500/20" 
+      : "";
 
   return (
     <Card 
@@ -79,6 +101,7 @@ const WatchlistCard = ({ item, onRemove, onUpdateNote }) => {
           <div className="flex items-center gap-3 mb-2">
             <div className="flex items-center gap-2">
               <span className="font-mono text-xl font-bold text-white">{item.symbol}</span>
+              {livePrice && <LiveIndicator active={true} />}
               {item.score !== null && (
                 <div className={`px-2 py-0.5 rounded text-sm font-bold ${
                   item.score >= 70 ? 'bg-emerald-500/20 text-emerald-400' :
@@ -97,15 +120,15 @@ const WatchlistCard = ({ item, onRemove, onUpdateNote }) => {
           <p className="text-sm text-slate-400 mb-3">{item.name}</p>
           
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
+            <div className={`transition-all duration-300 rounded p-1 -m-1 ${flashClass}`}>
               <p className="text-xs text-slate-500">Price</p>
-              <p className="font-mono text-lg text-white">${item.price?.toFixed(2) || '—'}</p>
+              <p className="font-mono text-lg text-white">${displayPrice?.toFixed(2) || '—'}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">Change</p>
               <div className={`flex items-center gap-1 ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                 {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                <span className="font-mono text-lg">{isPositive ? '+' : ''}{changePct.toFixed(2)}%</span>
+                <span className="font-mono text-lg">{isPositive ? '+' : ''}{displayChange.toFixed(2)}%</span>
               </div>
             </div>
             <div>
