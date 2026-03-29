@@ -286,10 +286,12 @@ const TradingCard = memo(({ signal, expanded, onToggle, token, inWatchlist, onWa
                 <span className="font-mono font-bold text-lg text-white">{signal.symbol}</span>
                 {livePrice && <LiveIndicator active={true} />}
                 <CategoryBadge category={signal.category} />
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={handleWatchlistClick}
-                  disabled={watchlistLoading}
-                  className={`p-1 rounded transition-colors ${inWatchlist ? 'text-amber-400' : 'text-slate-600 hover:text-amber-400'}`}
+                  onKeyDown={(e) => e.key === 'Enter' && handleWatchlistClick(e)}
+                  className={`p-1 rounded transition-colors cursor-pointer ${watchlistLoading ? 'opacity-50' : ''} ${inWatchlist ? 'text-amber-400' : 'text-slate-600 hover:text-amber-400'}`}
                   data-testid={`watchlist-btn-${signal.symbol}`}
                 >
                   {watchlistLoading ? (
@@ -297,7 +299,7 @@ const TradingCard = memo(({ signal, expanded, onToggle, token, inWatchlist, onWa
                   ) : (
                     <Star className={`w-4 h-4 ${inWatchlist ? 'fill-current' : ''}`} />
                   )}
-                </button>
+                </div>
               </div>
               <p className="text-xs text-slate-500 truncate max-w-[200px]">{signal.name}</p>
             </div>
