@@ -1937,31 +1937,49 @@ async def refresh_universe(background_tasks: BackgroundTasks, auth: bool = Depen
 @api_router.post("/investments/refresh")
 async def refresh_investment_signals(
     background_tasks: BackgroundTasks,
-    limit: int = Query(default=300, ge=50, le=1000),
+    limit: int = Query(default=1000, ge=100, le=1500),
     auth: bool = Depends(verify_access)
 ):
-    """Trigger investment signals refresh using enhanced engine"""
+    """Trigger investment signals refresh for 1000+ stocks using enhanced engine"""
     
     async def refresh_with_enhanced_engine(limit: int):
-        """Background task to refresh signals using enhanced engine"""
+        """Background task to refresh signals using enhanced engine with rate limit handling"""
         symbols = universe_manager.CORE_UNIVERSE[:limit]
-        logger.info(f"Enhanced refresh: analyzing {len(symbols)} stocks...")
+        logger.info(f"Enhanced refresh: analyzing {len(symbols)} stocks in batches...")
         
-        signals = await enhanced_investment_engine.batch_analyze(symbols, batch_size=10)
+        all_signals = []
+        batch_size = 5  # Smaller batch to avoid rate limits
+        delay_between_batches = 1.5  # Longer delay between batches
         
-        # Store in MongoDB
-        for signal in signals:
-            await db.investment_signals.update_one(
-                {"symbol": signal.symbol},
-                {"$set": convert_to_legacy_format(signal)},
-                upsert=True
-            )
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            try:
+                batch_signals = await enhanced_investment_engine.batch_analyze(batch, batch_size=batch_size)
+                all_signals.extend(batch_signals)
+                
+                # Store each batch immediately to preserve progress
+                for signal in batch_signals:
+                    await db.investment_signals.update_one(
+                        {"symbol": signal.symbol},
+                        {"$set": convert_to_legacy_format(signal)},
+                        upsert=True
+                    )
+                
+                logger.info(f"Processed batch {i//batch_size + 1}/{(len(symbols) + batch_size - 1)//batch_size}, total signals: {len(all_signals)}")
+                
+            except Exception as e:
+                logger.error(f"Batch {i//batch_size + 1} failed: {e}")
+                continue
+            
+            # Delay between batches to avoid rate limits
+            if i + batch_size < len(symbols):
+                await asyncio.sleep(delay_between_batches)
         
-        logger.info(f"Stored {len(signals)} enhanced investment signals")
-        return len(signals)
+        logger.info(f"Completed refresh: {len(all_signals)} investment signals stored")
+        return len(all_signals)
     
     background_tasks.add_task(refresh_with_enhanced_engine, limit)
-    return {"message": f"Refreshing signals for up to {limit} stocks with enhanced engine", "status": "processing"}
+    return {"message": f"Refreshing signals for up to {limit} stocks with enhanced engine (background task)", "status": "processing"}
 
 # Trading
 @api_router.get("/trading/scan")
@@ -1985,9 +2003,9 @@ async def scan_investments(auth: bool = Depends(verify_access)):
     total = await db.investment_signals.count_documents({})
     
     if total > 50:
-        # Use cached data
-        cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1).limit(300)
-        all_signals = await cursor.to_list(length=300)
+        # Use cached data - get all available (up to 1500)
+        cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1).limit(1500)
+        all_signals = await cursor.to_list(length=1500)
         
         # Apply dynamic percentile-based categorization
         for i, s in enumerate(all_signals):
@@ -2005,8 +2023,8 @@ async def scan_investments(auth: bool = Depends(verify_access)):
         
         signals = all_signals
     else:
-        # Analyze on demand
-        universe = universe_manager.CORE_UNIVERSE[:100]
+        # Analyze on demand - use larger universe
+        universe = universe_manager.CORE_UNIVERSE[:500]
         logger.info(f"No cache, analyzing {len(universe)} stocks on demand...")
         
         analyzed = await enhanced_investment_engine.batch_analyze(universe, batch_size=10)
@@ -3508,6 +3526,28 @@ class PaperTradeModel(BaseModel):
 class PaperExecutionEngine:
     """Paper trading execution engine with safety controls"""
     
+    # Risky stocks to exclude from auto-trading (meme stocks, high-volatility, leveraged ETFs)
+    RISKY_STOCKS = {
+        # Meme stocks
+        "GME", "AMC", "BBBY", "BB", "CLOV", "WISH", "WKHS", "SPCE", "HYMC", "MULN",
+        # Cannabis stocks (highly volatile)
+        "TLRY", "SNDL", "CGC", "ACB", "CRON", "HEXO", "OGI", "VFF",
+        # Crypto-related (extreme volatility)
+        "MSTR", "RIOT", "MARA", "BITF", "CLSK", "BTBT", "HIVE", "HUT", "COIN",
+        # SPACs & speculative
+        "DWAC", "PHUN", "BKKT", "IRNT", "TMC", "DNA",
+        # Leveraged ETFs (NOT for holding)
+        "TQQQ", "SQQQ", "SPXL", "SPXS", "UPRO", "UVXY", "SOXL", "SOXS", "LABU", "LABD",
+        "FAS", "FAZ", "TNA", "TZA", "NUGT", "DUST", "JNUG", "JDST", "ERX", "ERY",
+        "TVIX", "VXX", "VIXY", "SVXY", "TECL", "TECS", "FNGU", "FNGD", "WEBL", "WEBS",
+        # Penny stocks / high-risk biotech
+        "ATOS", "SESN", "CRVS", "OCGN", "INO", "SRNE", "NRXP", "VXRT",
+        # EV SPACs (mostly unprofitable)
+        "LCID", "RIVN", "FSR", "ARVL", "GOEV", "RIDE", "NKLA", "HYLN",
+        # Other high-risk
+        "WISH", "OPEN", "HOOD", "UPST", "AFRM"
+    }
+    
     def __init__(self):
         # Use consistent env var names - ALPACA_BASE_URL and ALPACA_SECRET_KEY
         self.alpaca_url = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2")
@@ -3576,6 +3616,11 @@ class PaperExecutionEngine:
         """Check all risk controls before execution"""
         settings = await self.get_system_settings()
         violations = []
+        
+        # 0. Risky stock check (FIRST CHECK - block high-risk stocks)
+        symbol = trade.get("symbol", "").upper()
+        if symbol in self.RISKY_STOCKS:
+            violations.append(f"{symbol} is a high-risk stock (meme/leveraged/speculative) - blocked for safety")
         
         # 1. Kill switch check
         if settings.get("kill_switch", False):
@@ -4084,6 +4129,27 @@ async def get_market_status(auth: bool = Depends(verify_access)):
     )
     
     return market_status
+
+@api_router.get("/paper/risky-stocks")
+async def get_risky_stocks(auth: bool = Depends(verify_access)):
+    """Get list of risky stocks that are blocked from auto-trading"""
+    return {
+        "risky_stocks": list(PaperExecutionEngine.RISKY_STOCKS),
+        "count": len(PaperExecutionEngine.RISKY_STOCKS),
+        "reason": "These stocks are blocked from auto-trading due to high volatility, speculative nature, or leveraged structure"
+    }
+
+@api_router.get("/paper/check-symbol/{symbol}")
+async def check_symbol_risk(symbol: str, auth: bool = Depends(verify_access)):
+    """Check if a symbol is considered risky"""
+    symbol_upper = symbol.upper()
+    is_risky = symbol_upper in PaperExecutionEngine.RISKY_STOCKS
+    return {
+        "symbol": symbol_upper,
+        "is_risky": is_risky,
+        "can_auto_trade": not is_risky,
+        "message": f"{symbol_upper} is {'BLOCKED (high-risk)' if is_risky else 'ALLOWED'} for auto-trading"
+    }
 
 # ===================== LIVE PRICES =====================
 

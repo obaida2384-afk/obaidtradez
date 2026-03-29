@@ -294,7 +294,7 @@ const AuditEntry = ({ entry }) => {
 };
 
 // Quick trade form component
-const QuickTradeForm = ({ onSubmit, loading }) => {
+const QuickTradeForm = ({ onSubmit, loading, riskyStocks = [] }) => {
   const [form, setForm] = useState({
     symbol: "",
     side: "buy",
@@ -302,6 +302,8 @@ const QuickTradeForm = ({ onSubmit, loading }) => {
     reason: "",
     strategy: "manual"
   });
+  
+  const isRiskyStock = riskyStocks.includes(form.symbol.toUpperCase());
   
   const handleSubmit = () => {
     if (!form.symbol.trim()) {
@@ -311,6 +313,11 @@ const QuickTradeForm = ({ onSubmit, loading }) => {
     if (!form.qty || parseFloat(form.qty) <= 0) {
       toast.error("Quantity must be greater than 0");
       return;
+    }
+    
+    // Warn about risky stocks
+    if (isRiskyStock) {
+      toast.warning(`${form.symbol.toUpperCase()} is a high-risk stock. Trade will be blocked by safety controls.`);
     }
     
     onSubmit({
@@ -326,13 +333,31 @@ const QuickTradeForm = ({ onSubmit, loading }) => {
   
   return (
     <div className="space-y-4">
+      {/* Risky Stock Warning */}
+      {isRiskyStock && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+          <AlertOctagon className="w-5 h-5 text-red-400" />
+          <div>
+            <p className="text-sm font-medium text-red-400">High-Risk Stock Detected</p>
+            <p className="text-xs text-red-400/70">
+              {form.symbol.toUpperCase()} is a meme/leveraged/speculative stock. Trades will be blocked by safety controls.
+            </p>
+          </div>
+        </div>
+      )}
+      
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Input
-          value={form.symbol}
-          onChange={(e) => setForm({...form, symbol: e.target.value.toUpperCase()})}
-          placeholder="Symbol"
-          className="bg-slate-900 border-slate-700 font-mono"
-        />
+        <div className="relative">
+          <Input
+            value={form.symbol}
+            onChange={(e) => setForm({...form, symbol: e.target.value.toUpperCase()})}
+            placeholder="Symbol"
+            className={`bg-slate-900 border-slate-700 font-mono ${isRiskyStock ? 'border-red-500/50 text-red-400' : ''}`}
+          />
+          {isRiskyStock && (
+            <AlertTriangle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-400" />
+          )}
+        </div>
         <Select value={form.side} onValueChange={(v) => setForm({...form, side: v})}>
           <SelectTrigger className="bg-slate-900 border-slate-700">
             <SelectValue />
@@ -368,9 +393,13 @@ const QuickTradeForm = ({ onSubmit, loading }) => {
           placeholder="Reason for trade (optional)"
           className="flex-1 bg-slate-900 border-slate-700"
         />
-        <Button onClick={handleSubmit} disabled={loading} className="bg-amber-600 hover:bg-amber-500">
+        <Button 
+          onClick={handleSubmit} 
+          disabled={loading} 
+          className={isRiskyStock ? "bg-red-600 hover:bg-red-500" : "bg-amber-600 hover:bg-amber-500"}
+        >
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4 mr-1" />}
-          Queue Trade
+          {isRiskyStock ? "Queue (Will Block)" : "Queue Trade"}
         </Button>
       </div>
     </div>
@@ -390,6 +419,7 @@ const AutoTrade = () => {
   const [activeTab, setActiveTab] = useState("queue");
   const [statusFilter, setStatusFilter] = useState("");
   const [marketStatus, setMarketStatus] = useState(null);
+  const [riskyStocks, setRiskyStocks] = useState([]);
 
   // Get symbols from queue for live prices
   const queueSymbols = trades.map(t => t.symbol).filter(Boolean);
@@ -403,14 +433,15 @@ const AutoTrade = () => {
     try {
       const headers = { Authorization: `Bearer ${token}` };
       
-      const [settingsRes, tradesRes, statsRes, auditRes, accountRes, positionsRes, marketRes] = await Promise.all([
+      const [settingsRes, tradesRes, statsRes, auditRes, accountRes, positionsRes, marketRes, riskyRes] = await Promise.all([
         fetch(`${API}/paper/settings`, { headers }),
         fetch(`${API}/paper/queue${statusFilter ? `?status=${statusFilter}` : ''}`, { headers }),
         fetch(`${API}/paper/stats`, { headers }),
         fetch(`${API}/paper/audit?limit=30`, { headers }),
         fetch(`${API}/account`, { headers }),
         fetch(`${API}/positions`, { headers }),
-        fetch(`${API}/paper/market-status`, { headers })
+        fetch(`${API}/paper/market-status`, { headers }),
+        fetch(`${API}/paper/risky-stocks`, { headers })
       ]);
       
       if (settingsRes.ok) setSettings(await settingsRes.json());
@@ -419,6 +450,10 @@ const AutoTrade = () => {
       if (auditRes.ok) setAuditLog(await auditRes.json());
       if (accountRes.ok) setAccount(await accountRes.json());
       if (positionsRes.ok) setPositions(await positionsRes.json());
+      if (riskyRes.ok) {
+        const riskyData = await riskyRes.json();
+        setRiskyStocks(riskyData.risky_stocks || []);
+      }
       if (marketRes.ok) setMarketStatus(await marketRes.json());
     } catch (error) {
       console.error("Fetch error:", error);
@@ -835,8 +870,9 @@ const AutoTrade = () => {
         <div className="flex items-center gap-3 mb-4">
           <Clock className="w-5 h-5 text-amber-400" />
           <h2 className="font-display font-semibold text-white">Queue New Trade</h2>
+          <span className="text-xs text-slate-500">({riskyStocks.length} high-risk stocks blocked)</span>
         </div>
-        <QuickTradeForm onSubmit={queueTrade} loading={actionLoading} />
+        <QuickTradeForm onSubmit={queueTrade} loading={actionLoading} riskyStocks={riskyStocks} />
       </Card>
 
       {/* Tabs */}
