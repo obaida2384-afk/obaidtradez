@@ -2944,10 +2944,524 @@ async def get_portfolio_analytics(
         "strategy_performance": strategy_performance
     }
 
+# ===================== PAPER EXECUTION =====================
+
+class OrderStatus:
+    PENDING = "pending"
+    APPROVED = "approved"
+    EXECUTING = "executing"
+    EXECUTED = "executed"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+class OrderSide:
+    BUY = "buy"
+    SELL = "sell"
+
+class PaperTradeModel(BaseModel):
+    symbol: str
+    side: str = "buy"
+    qty: Optional[float] = None
+    notional: Optional[float] = None  # Dollar amount
+    reason: str = ""
+    strategy: str = "manual"
+    confidence: Optional[float] = None
+    entry_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    signal_data: Optional[Dict] = None
+
+class PaperExecutionEngine:
+    """Paper trading execution engine with safety controls"""
+    
+    def __init__(self):
+        self.alpaca_url = os.environ.get("ALPACA_API_URL", "https://paper-api.alpaca.markets")
+        self.alpaca_key = os.environ.get("ALPACA_API_KEY", "")
+        self.alpaca_secret = os.environ.get("ALPACA_API_SECRET", "")
+        self.headers = {
+            "APCA-API-KEY-ID": self.alpaca_key,
+            "APCA-API-SECRET-KEY": self.alpaca_secret,
+            "Content-Type": "application/json"
+        }
+    
+    async def get_system_settings(self) -> Dict:
+        """Get paper execution system settings"""
+        settings = await db.paper_execution_settings.find_one({"_id": "default"}, {"_id": 0})
+        if not settings:
+            # Default settings: SAFE MODE
+            settings = {
+                "kill_switch": False,
+                "auto_execution": False,  # OFF by default
+                "manual_approval": True,   # ON by default
+                "min_confidence": 0.60,
+                "max_position_pct": 0.05,
+                "cash_buffer": 0.10,
+                "max_daily_loss_pct": 0.02,
+                "block_extended_hours": True,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.paper_execution_settings.insert_one({"_id": "default", **settings})
+        return settings
+    
+    async def update_system_settings(self, settings: Dict) -> Dict:
+        """Update paper execution settings"""
+        settings["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.paper_execution_settings.update_one(
+            {"_id": "default"},
+            {"$set": settings},
+            upsert=True
+        )
+        return settings
+    
+    async def get_kill_switch_state(self) -> bool:
+        """Check if kill switch is active"""
+        settings = await self.get_system_settings()
+        return settings.get("kill_switch", False)
+    
+    async def set_kill_switch(self, active: bool) -> Dict:
+        """Set kill switch state"""
+        await db.paper_execution_settings.update_one(
+            {"_id": "default"},
+            {"$set": {"kill_switch": active, "kill_switch_updated": datetime.now(timezone.utc).isoformat()}},
+            upsert=True
+        )
+        
+        # Log kill switch action
+        await db.paper_audit_log.insert_one({
+            "action": "kill_switch_toggle",
+            "active": active,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {"kill_switch": active}
+    
+    async def check_risk_controls(self, trade: Dict, account: Dict) -> Dict:
+        """Check all risk controls before execution"""
+        settings = await self.get_system_settings()
+        violations = []
+        
+        # 1. Kill switch check
+        if settings.get("kill_switch", False):
+            violations.append("Kill switch is active")
+        
+        # 2. Auto execution disabled check
+        if not settings.get("auto_execution", False) and trade.get("auto_submitted", False):
+            violations.append("Auto execution is disabled")
+        
+        # 3. Confidence check
+        confidence = trade.get("confidence")
+        if confidence is None:
+            confidence = 1.0  # Default to 1.0 if not specified
+        min_confidence = settings.get("min_confidence", 0.60)
+        if confidence < min_confidence:
+            violations.append(f"Confidence {confidence:.2f} below minimum {min_confidence:.2f}")
+        
+        # 4. Position size check
+        if account:
+            equity = float(account.get("equity", 0))
+            max_position_pct = settings.get("max_position_pct", 0.05)
+            notional = trade.get("notional") or (trade.get("qty", 0) * trade.get("entry_price", 0))
+            
+            if equity > 0 and notional > 0:
+                position_pct = notional / equity
+                if position_pct > max_position_pct:
+                    violations.append(f"Position size {position_pct:.1%} exceeds max {max_position_pct:.1%}")
+        
+        # 5. Cash buffer check
+        if account:
+            cash = float(account.get("cash", 0))
+            equity = float(account.get("equity", 0))
+            cash_buffer = settings.get("cash_buffer", 0.10)
+            notional = trade.get("notional") or (trade.get("qty", 0) * trade.get("entry_price", 0))
+            
+            if equity > 0:
+                remaining_cash_pct = (cash - notional) / equity
+                if remaining_cash_pct < cash_buffer:
+                    violations.append(f"Trade would reduce cash below buffer ({cash_buffer:.0%})")
+        
+        # 6. Daily loss limit check
+        if account:
+            equity = float(account.get("equity", 0))
+            last_equity = float(account.get("last_equity", equity))
+            if last_equity > 0:
+                daily_pnl_pct = (equity - last_equity) / last_equity
+                max_daily_loss = settings.get("max_daily_loss_pct", 0.02)
+                if daily_pnl_pct < -max_daily_loss:
+                    violations.append(f"Daily loss limit ({max_daily_loss:.0%}) exceeded")
+        
+        # 7. Extended hours check
+        if settings.get("block_extended_hours", True):
+            now = datetime.now(timezone.utc)
+            # Market hours: 9:30 AM - 4:00 PM ET (simplified check)
+            hour = now.hour - 5  # Rough ET conversion
+            if hour < 9 or hour >= 16:
+                violations.append("Extended hours trading is blocked")
+        
+        return {
+            "passed": len(violations) == 0,
+            "violations": violations
+        }
+    
+    async def queue_trade(self, trade_data: Dict) -> Dict:
+        """Add a trade to the queue for review"""
+        settings = await self.get_system_settings()
+        
+        trade = {
+            "id": str(uuid.uuid4()),
+            "symbol": trade_data["symbol"].upper(),
+            "side": trade_data.get("side", "buy"),
+            "qty": trade_data.get("qty"),
+            "notional": trade_data.get("notional"),
+            "reason": trade_data.get("reason", ""),
+            "strategy": trade_data.get("strategy", "manual"),
+            "confidence": trade_data.get("confidence"),
+            "entry_price": trade_data.get("entry_price"),
+            "stop_loss": trade_data.get("stop_loss"),
+            "take_profit": trade_data.get("take_profit"),
+            "signal_data": trade_data.get("signal_data"),
+            "status": OrderStatus.PENDING,
+            "auto_submitted": trade_data.get("auto_submitted", False),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status_history": [
+                {"status": OrderStatus.PENDING, "timestamp": datetime.now(timezone.utc).isoformat()}
+            ]
+        }
+        
+        await db.paper_trade_queue.insert_one(trade)
+        trade.pop("_id", None)
+        
+        # Log the queue action
+        await self._log_audit("trade_queued", trade["id"], trade)
+        
+        return trade
+    
+    async def approve_trade(self, trade_id: str) -> Dict:
+        """Approve a pending trade for execution"""
+        trade = await db.paper_trade_queue.find_one({"id": trade_id})
+        if not trade:
+            return {"success": False, "error": "Trade not found"}
+        
+        if trade["status"] != OrderStatus.PENDING:
+            return {"success": False, "error": f"Trade is not pending (status: {trade['status']})"}
+        
+        # Update status to approved
+        await db.paper_trade_queue.update_one(
+            {"id": trade_id},
+            {
+                "$set": {"status": OrderStatus.APPROVED, "approved_at": datetime.now(timezone.utc).isoformat()},
+                "$push": {"status_history": {"status": OrderStatus.APPROVED, "timestamp": datetime.now(timezone.utc).isoformat()}}
+            }
+        )
+        
+        await self._log_audit("trade_approved", trade_id, {"symbol": trade["symbol"]})
+        
+        return {"success": True, "trade_id": trade_id, "status": OrderStatus.APPROVED}
+    
+    async def reject_trade(self, trade_id: str, reason: str = "") -> Dict:
+        """Reject a pending trade"""
+        trade = await db.paper_trade_queue.find_one({"id": trade_id})
+        if not trade:
+            return {"success": False, "error": "Trade not found"}
+        
+        await db.paper_trade_queue.update_one(
+            {"id": trade_id},
+            {
+                "$set": {"status": OrderStatus.REJECTED, "rejection_reason": reason, "rejected_at": datetime.now(timezone.utc).isoformat()},
+                "$push": {"status_history": {"status": OrderStatus.REJECTED, "timestamp": datetime.now(timezone.utc).isoformat(), "reason": reason}}
+            }
+        )
+        
+        await self._log_audit("trade_rejected", trade_id, {"symbol": trade["symbol"], "reason": reason})
+        
+        return {"success": True, "trade_id": trade_id, "status": OrderStatus.REJECTED}
+    
+    async def cancel_trade(self, trade_id: str) -> Dict:
+        """Cancel a pending or approved trade"""
+        trade = await db.paper_trade_queue.find_one({"id": trade_id})
+        if not trade:
+            return {"success": False, "error": "Trade not found"}
+        
+        if trade["status"] in [OrderStatus.EXECUTED, OrderStatus.FAILED]:
+            return {"success": False, "error": f"Cannot cancel {trade['status']} trade"}
+        
+        await db.paper_trade_queue.update_one(
+            {"id": trade_id},
+            {
+                "$set": {"status": OrderStatus.CANCELLED, "cancelled_at": datetime.now(timezone.utc).isoformat()},
+                "$push": {"status_history": {"status": OrderStatus.CANCELLED, "timestamp": datetime.now(timezone.utc).isoformat()}}
+            }
+        )
+        
+        await self._log_audit("trade_cancelled", trade_id, {"symbol": trade["symbol"]})
+        
+        return {"success": True, "trade_id": trade_id, "status": OrderStatus.CANCELLED}
+    
+    async def execute_trade(self, trade_id: str) -> Dict:
+        """Execute an approved trade on Alpaca Paper"""
+        trade = await db.paper_trade_queue.find_one({"id": trade_id})
+        if not trade:
+            return {"success": False, "error": "Trade not found"}
+        
+        if trade["status"] != OrderStatus.APPROVED:
+            return {"success": False, "error": f"Trade must be approved first (status: {trade['status']})"}
+        
+        # Check risk controls
+        account = await api_client.alpaca_account()
+        risk_check = await self.check_risk_controls(trade, account)
+        
+        if not risk_check["passed"]:
+            # Mark as failed with risk violations
+            await db.paper_trade_queue.update_one(
+                {"id": trade_id},
+                {
+                    "$set": {
+                        "status": OrderStatus.FAILED,
+                        "failure_reason": f"Risk violations: {', '.join(risk_check['violations'])}",
+                        "failed_at": datetime.now(timezone.utc).isoformat()
+                    },
+                    "$push": {"status_history": {"status": OrderStatus.FAILED, "timestamp": datetime.now(timezone.utc).isoformat(), "violations": risk_check["violations"]}}
+                }
+            )
+            await self._log_audit("trade_blocked", trade_id, {"violations": risk_check["violations"]})
+            return {"success": False, "error": "Risk controls failed", "violations": risk_check["violations"]}
+        
+        # Update status to executing
+        await db.paper_trade_queue.update_one(
+            {"id": trade_id},
+            {
+                "$set": {"status": OrderStatus.EXECUTING},
+                "$push": {"status_history": {"status": OrderStatus.EXECUTING, "timestamp": datetime.now(timezone.utc).isoformat()}}
+            }
+        )
+        
+        # Submit to Alpaca Paper
+        try:
+            order_data = {
+                "symbol": trade["symbol"],
+                "side": trade["side"],
+                "type": "market",
+                "time_in_force": "day"
+            }
+            
+            if trade.get("qty"):
+                order_data["qty"] = str(trade["qty"])
+            elif trade.get("notional"):
+                order_data["notional"] = str(trade["notional"])
+            else:
+                return {"success": False, "error": "No quantity or notional specified"}
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.alpaca_url}/v2/orders",
+                    headers=self.headers,
+                    json=order_data
+                )
+                
+                if response.status_code in [200, 201]:
+                    alpaca_order = response.json()
+                    
+                    # Update with execution details
+                    await db.paper_trade_queue.update_one(
+                        {"id": trade_id},
+                        {
+                            "$set": {
+                                "status": OrderStatus.EXECUTED,
+                                "alpaca_order_id": alpaca_order.get("id"),
+                                "alpaca_status": alpaca_order.get("status"),
+                                "filled_qty": alpaca_order.get("filled_qty"),
+                                "filled_avg_price": alpaca_order.get("filled_avg_price"),
+                                "executed_at": datetime.now(timezone.utc).isoformat()
+                            },
+                            "$push": {"status_history": {"status": OrderStatus.EXECUTED, "timestamp": datetime.now(timezone.utc).isoformat(), "alpaca_order_id": alpaca_order.get("id")}}
+                        }
+                    )
+                    
+                    await self._log_audit("trade_executed", trade_id, {
+                        "symbol": trade["symbol"],
+                        "alpaca_order_id": alpaca_order.get("id"),
+                        "filled_qty": alpaca_order.get("filled_qty")
+                    })
+                    
+                    return {"success": True, "trade_id": trade_id, "alpaca_order": alpaca_order}
+                else:
+                    error_msg = response.text
+                    await db.paper_trade_queue.update_one(
+                        {"id": trade_id},
+                        {
+                            "$set": {
+                                "status": OrderStatus.FAILED,
+                                "failure_reason": f"Alpaca error: {error_msg}",
+                                "failed_at": datetime.now(timezone.utc).isoformat()
+                            },
+                            "$push": {"status_history": {"status": OrderStatus.FAILED, "timestamp": datetime.now(timezone.utc).isoformat(), "error": error_msg}}
+                        }
+                    )
+                    
+                    await self._log_audit("trade_failed", trade_id, {"error": error_msg})
+                    
+                    return {"success": False, "error": f"Alpaca error: {error_msg}"}
+        
+        except Exception as e:
+            error_msg = str(e)
+            await db.paper_trade_queue.update_one(
+                {"id": trade_id},
+                {
+                    "$set": {
+                        "status": OrderStatus.FAILED,
+                        "failure_reason": error_msg,
+                        "failed_at": datetime.now(timezone.utc).isoformat()
+                    },
+                    "$push": {"status_history": {"status": OrderStatus.FAILED, "timestamp": datetime.now(timezone.utc).isoformat(), "error": error_msg}}
+                }
+            )
+            
+            await self._log_audit("trade_error", trade_id, {"error": error_msg})
+            
+            return {"success": False, "error": error_msg}
+    
+    async def get_trade_queue(self, status: Optional[str] = None) -> List[Dict]:
+        """Get trades from queue, optionally filtered by status"""
+        query = {}
+        if status:
+            query["status"] = status
+        
+        cursor = db.paper_trade_queue.find(query, {"_id": 0}).sort("created_at", -1)
+        trades = await cursor.to_list(length=100)
+        return trades
+    
+    async def get_trade_by_id(self, trade_id: str) -> Optional[Dict]:
+        """Get a specific trade by ID"""
+        trade = await db.paper_trade_queue.find_one({"id": trade_id}, {"_id": 0})
+        return trade
+    
+    async def get_audit_log(self, limit: int = 50) -> List[Dict]:
+        """Get audit log entries"""
+        cursor = db.paper_audit_log.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit)
+        logs = await cursor.to_list(length=limit)
+        return logs
+    
+    async def _log_audit(self, action: str, trade_id: str, data: Dict):
+        """Log an audit entry"""
+        await db.paper_audit_log.insert_one({
+            "action": action,
+            "trade_id": trade_id,
+            "data": data,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+
+paper_execution = PaperExecutionEngine()
+
+# Paper Execution Endpoints
+
+@api_router.get("/paper/settings")
+async def get_paper_settings(auth: bool = Depends(verify_access)):
+    """Get paper execution settings"""
+    return await paper_execution.get_system_settings()
+
+@api_router.post("/paper/settings")
+async def update_paper_settings(settings: Dict, auth: bool = Depends(verify_access)):
+    """Update paper execution settings"""
+    # Remove protected fields
+    settings.pop("_id", None)
+    settings.pop("created_at", None)
+    return await paper_execution.update_system_settings(settings)
+
+@api_router.get("/paper/kill-switch")
+async def get_kill_switch(auth: bool = Depends(verify_access)):
+    """Get kill switch state"""
+    active = await paper_execution.get_kill_switch_state()
+    return {"kill_switch": active}
+
+@api_router.post("/paper/kill-switch")
+async def set_kill_switch(active: bool = True, auth: bool = Depends(verify_access)):
+    """Set kill switch state"""
+    return await paper_execution.set_kill_switch(active)
+
+@api_router.post("/paper/queue")
+async def queue_paper_trade(trade: PaperTradeModel, auth: bool = Depends(verify_access)):
+    """Queue a trade for review"""
+    return await paper_execution.queue_trade(trade.dict())
+
+@api_router.get("/paper/queue")
+async def get_paper_queue(
+    status: Optional[str] = Query(default=None),
+    auth: bool = Depends(verify_access)
+):
+    """Get trade queue"""
+    return await paper_execution.get_trade_queue(status)
+
+@api_router.get("/paper/trade/{trade_id}")
+async def get_paper_trade(trade_id: str, auth: bool = Depends(verify_access)):
+    """Get a specific trade"""
+    trade = await paper_execution.get_trade_by_id(trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    return trade
+
+@api_router.post("/paper/trade/{trade_id}/approve")
+async def approve_paper_trade(trade_id: str, auth: bool = Depends(verify_access)):
+    """Approve a pending trade"""
+    return await paper_execution.approve_trade(trade_id)
+
+@api_router.post("/paper/trade/{trade_id}/reject")
+async def reject_paper_trade(
+    trade_id: str,
+    reason: str = Query(default=""),
+    auth: bool = Depends(verify_access)
+):
+    """Reject a pending trade"""
+    return await paper_execution.reject_trade(trade_id, reason)
+
+@api_router.post("/paper/trade/{trade_id}/cancel")
+async def cancel_paper_trade(trade_id: str, auth: bool = Depends(verify_access)):
+    """Cancel a pending or approved trade"""
+    return await paper_execution.cancel_trade(trade_id)
+
+@api_router.post("/paper/trade/{trade_id}/execute")
+async def execute_paper_trade(trade_id: str, auth: bool = Depends(verify_access)):
+    """Execute an approved trade"""
+    return await paper_execution.execute_trade(trade_id)
+
+@api_router.post("/paper/risk-check")
+async def check_risk(trade: PaperTradeModel, auth: bool = Depends(verify_access)):
+    """Check risk controls for a potential trade"""
+    account = await api_client.alpaca_account()
+    return await paper_execution.check_risk_controls(trade.dict(), account)
+
+@api_router.get("/paper/audit")
+async def get_paper_audit(
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: bool = Depends(verify_access)
+):
+    """Get paper execution audit log"""
+    return await paper_execution.get_audit_log(limit)
+
+@api_router.get("/paper/stats")
+async def get_paper_stats(auth: bool = Depends(verify_access)):
+    """Get paper execution statistics"""
+    pipeline = [
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+    ]
+    stats_cursor = db.paper_trade_queue.aggregate(pipeline)
+    stats_list = await stats_cursor.to_list(length=20)
+    
+    stats = {item["_id"]: item["count"] for item in stats_list}
+    
+    return {
+        "pending": stats.get(OrderStatus.PENDING, 0),
+        "approved": stats.get(OrderStatus.APPROVED, 0),
+        "executed": stats.get(OrderStatus.EXECUTED, 0),
+        "rejected": stats.get(OrderStatus.REJECTED, 0),
+        "cancelled": stats.get(OrderStatus.CANCELLED, 0),
+        "failed": stats.get(OrderStatus.FAILED, 0),
+        "total": sum(stats.values())
+    }
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "2.3.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "2.4.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)
