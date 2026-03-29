@@ -18,8 +18,10 @@ import {
   ChevronRight,
   Activity,
   BarChart2,
-  Clock
+  Clock,
+  Star
 } from "lucide-react";
+import { toast } from "sonner";
 
 // Signal Badge
 const SignalBadge = ({ signal, size = "sm" }) => {
@@ -59,8 +61,43 @@ const CategoryBadge = ({ category }) => {
 };
 
 // Trading Signal Card
-const TradingCard = ({ signal, expanded, onToggle }) => {
+const TradingCard = ({ signal, expanded, onToggle, token, inWatchlist, onWatchlistToggle }) => {
   const changeColor = signal.indicators?.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+
+  const handleWatchlistClick = async (e) => {
+    e.stopPropagation();
+    setWatchlistLoading(true);
+    try {
+      if (inWatchlist) {
+        const response = await fetch(`${API}/watchlist/${signal.symbol}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.ok) {
+          toast.success(`${signal.symbol} removed from watchlist`);
+          onWatchlistToggle(signal.symbol, false);
+        }
+      } else {
+        const response = await fetch(`${API}/watchlist`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ symbol: signal.symbol, source: "trading" })
+        });
+        if (response.ok) {
+          toast.success(`${signal.symbol} added to watchlist`);
+          onWatchlistToggle(signal.symbol, true);
+        }
+      }
+    } catch (error) {
+      toast.error("Failed to update watchlist");
+    } finally {
+      setWatchlistLoading(false);
+    }
+  };
   
   return (
     <Card 
@@ -77,6 +114,18 @@ const TradingCard = ({ signal, expanded, onToggle }) => {
               <div className="flex items-center gap-2">
                 <span className="font-mono font-bold text-lg text-white">{signal.symbol}</span>
                 <CategoryBadge category={signal.category} />
+                <button
+                  onClick={handleWatchlistClick}
+                  disabled={watchlistLoading}
+                  className={`p-1 rounded transition-colors ${inWatchlist ? 'text-amber-400' : 'text-slate-600 hover:text-amber-400'}`}
+                  data-testid={`watchlist-btn-${signal.symbol}`}
+                >
+                  {watchlistLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Star className={`w-4 h-4 ${inWatchlist ? 'fill-current' : ''}`} />
+                  )}
+                </button>
               </div>
               <p className="text-xs text-slate-500 truncate max-w-[200px]">{signal.name}</p>
             </div>
@@ -166,17 +215,45 @@ const Trading = () => {
   const [searching, setSearching] = useState(false);
   const [expandedCard, setExpandedCard] = useState(null);
   const [activeTab, setActiveTab] = useState("hot");
+  const [watchlistSymbols, setWatchlistSymbols] = useState(new Set());
   const { token } = useAuth();
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
     fetchSignals();
+    fetchWatchlist();
     const symbol = searchParams.get("symbol");
     if (symbol) {
       setSearchSymbol(symbol);
       searchStock(symbol);
     }
   }, []);
+
+  const fetchWatchlist = async () => {
+    try {
+      const response = await fetch(`${API}/watchlist`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const items = await response.json();
+        setWatchlistSymbols(new Set(items.map(i => i.symbol)));
+      }
+    } catch (error) {
+      console.error("Error fetching watchlist:", error);
+    }
+  };
+
+  const handleWatchlistToggle = (symbol, added) => {
+    setWatchlistSymbols(prev => {
+      const newSet = new Set(prev);
+      if (added) {
+        newSet.add(symbol);
+      } else {
+        newSet.delete(symbol);
+      }
+      return newSet;
+    });
+  };
 
   const fetchSignals = async () => {
     try {
@@ -280,6 +357,9 @@ const Trading = () => {
             signal={searchResult}
             expanded={expandedCard === searchResult.symbol}
             onToggle={() => setExpandedCard(expandedCard === searchResult.symbol ? null : searchResult.symbol)}
+            token={token}
+            inWatchlist={watchlistSymbols.has(searchResult.symbol)}
+            onWatchlistToggle={handleWatchlistToggle}
           />
         </section>
       )}
@@ -312,6 +392,9 @@ const Trading = () => {
                 signal={signal}
                 expanded={expandedCard === signal.symbol}
                 onToggle={() => setExpandedCard(expandedCard === signal.symbol ? null : signal.symbol)}
+                token={token}
+                inWatchlist={watchlistSymbols.has(signal.symbol)}
+                onWatchlistToggle={handleWatchlistToggle}
               />
             ))}
             {getTabSignals().length === 0 && (

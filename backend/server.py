@@ -2448,10 +2448,148 @@ async def get_alert_types(auth: bool = Depends(verify_access)):
         {"id": "volume_spike", "name": "Volume Spike", "description": "Trigger when volume exceeds X times average", "unit": "x"}
     ]
 
+# ===================== WATCHLIST =====================
+
+class WatchlistAddModel(BaseModel):
+    symbol: str
+    source: str = "manual"  # manual, trading, investments
+    note: Optional[str] = None
+
+@api_router.get("/watchlist")
+async def get_watchlist(auth: bool = Depends(verify_access)):
+    """Get all watchlist items with current data"""
+    cursor = db.watchlist.find({}, {"_id": 0}).sort("added_at", -1)
+    items = await cursor.to_list(length=100)
+    
+    if not items:
+        return []
+    
+    # Enrich with current data
+    enriched = []
+    for item in items:
+        symbol = item["symbol"]
+        
+        # Get cached investment signal if available
+        signal = await db.investment_signals.find_one({"symbol": symbol}, {"_id": 0})
+        
+        # Get current quote
+        quote = await api_client.fmp_quote(symbol)
+        
+        enriched_item = {
+            "id": item["id"],
+            "symbol": symbol,
+            "source": item.get("source", "manual"),
+            "note": item.get("note"),
+            "added_at": item["added_at"],
+            # Quote data
+            "name": quote.get("name", item.get("name", symbol)) if quote else item.get("name", symbol),
+            "price": quote.get("price", 0) if quote else 0,
+            "change": quote.get("change", 0) if quote else 0,
+            "change_pct": quote.get("changesPercentage", 0) if quote else 0,
+            # Signal data (if available)
+            "score": signal.get("total_score", 0) if signal else None,
+            "signal": signal.get("signal", "N/A") if signal else "N/A",
+            "category": signal.get("category", "Unknown") if signal else "Unknown",
+            "confidence": signal.get("confidence", 0) if signal else None,
+            "upside": signal.get("upside_potential", 0) if signal else None,
+            "sector": signal.get("sector", "Unknown") if signal else (quote.get("sector") if quote else "Unknown")
+        }
+        enriched.append(enriched_item)
+    
+    return enriched
+
+@api_router.post("/watchlist")
+async def add_to_watchlist(item: WatchlistAddModel, auth: bool = Depends(verify_access)):
+    """Add a stock to watchlist"""
+    symbol = item.symbol.upper()
+    
+    # Check if already in watchlist
+    existing = await db.watchlist.find_one({"symbol": symbol})
+    if existing:
+        return {"success": False, "message": f"{symbol} is already in your watchlist"}
+    
+    # Get basic info
+    quote = await api_client.fmp_quote(symbol)
+    if not quote:
+        return {"success": False, "message": f"Could not find stock: {symbol}"}
+    
+    watchlist_item = {
+        "id": str(uuid.uuid4()),
+        "symbol": symbol,
+        "name": quote.get("name", symbol),
+        "source": item.source,
+        "note": item.note,
+        "added_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.watchlist.insert_one(watchlist_item)
+    watchlist_item.pop("_id", None)
+    
+    return {"success": True, "item": watchlist_item, "message": f"{symbol} added to watchlist"}
+
+@api_router.delete("/watchlist/all")
+async def clear_watchlist(auth: bool = Depends(verify_access)):
+    """Remove all stocks from watchlist"""
+    result = await db.watchlist.delete_many({})
+    return {"success": True, "removed": result.deleted_count}
+
+@api_router.delete("/watchlist/{symbol}")
+async def remove_from_watchlist(symbol: str, auth: bool = Depends(verify_access)):
+    """Remove a stock from watchlist"""
+    symbol = symbol.upper()
+    result = await db.watchlist.delete_one({"symbol": symbol})
+    return {"success": result.deleted_count > 0, "message": f"{symbol} removed from watchlist" if result.deleted_count > 0 else f"{symbol} not found in watchlist"}
+
+@api_router.get("/watchlist/check/{symbol}")
+async def check_watchlist(symbol: str, auth: bool = Depends(verify_access)):
+    """Check if a symbol is in watchlist"""
+    symbol = symbol.upper()
+    exists = await db.watchlist.find_one({"symbol": symbol})
+    return {"in_watchlist": exists is not None}
+
+@api_router.post("/watchlist/refresh")
+async def refresh_watchlist(auth: bool = Depends(verify_access)):
+    """Refresh all watchlist items with latest data"""
+    cursor = db.watchlist.find({}, {"_id": 0})
+    items = await cursor.to_list(length=100)
+    
+    refreshed = []
+    for item in items:
+        symbol = item["symbol"]
+        
+        # Get fresh quote
+        quote = await api_client.fmp_quote(symbol)
+        
+        # Get cached signal
+        signal = await db.investment_signals.find_one({"symbol": symbol}, {"_id": 0})
+        
+        refreshed.append({
+            "symbol": symbol,
+            "name": quote.get("name", symbol) if quote else symbol,
+            "price": quote.get("price", 0) if quote else 0,
+            "change": quote.get("change", 0) if quote else 0,
+            "change_pct": quote.get("changesPercentage", 0) if quote else 0,
+            "score": signal.get("total_score") if signal else None,
+            "signal": signal.get("signal", "N/A") if signal else "N/A",
+            "category": signal.get("category", "Unknown") if signal else "Unknown"
+        })
+    
+    return {"items": refreshed, "count": len(refreshed)}
+
+@api_router.put("/watchlist/{symbol}/note")
+async def update_watchlist_note(symbol: str, note: str = "", auth: bool = Depends(verify_access)):
+    """Update note for a watchlist item"""
+    symbol = symbol.upper()
+    result = await db.watchlist.update_one(
+        {"symbol": symbol},
+        {"$set": {"note": note}}
+    )
+    return {"success": result.modified_count > 0}
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "2.1.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "2.2.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)

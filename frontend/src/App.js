@@ -14,6 +14,7 @@ import Portfolio from "./pages/Portfolio";
 import Alerts from "./pages/Alerts";
 import AutoTrade from "./pages/AutoTrade";
 import Settings from "./pages/Settings";
+import Watchlist from "./pages/Watchlist";
 import { 
   LayoutDashboard, 
   TrendingUp, 
@@ -25,7 +26,8 @@ import {
   Wallet,
   Bell,
   Bot,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Star
 } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -92,6 +94,7 @@ const Sidebar = () => {
     { path: "/", icon: LayoutDashboard, label: "Dashboard" },
     { path: "/trading", icon: TrendingUp, label: "Trading" },
     { path: "/investments", icon: PiggyBank, label: "Investments" },
+    { path: "/watchlist", icon: Star, label: "Watchlist" },
     { path: "/chatbot", icon: MessageSquare, label: "Chatbot" },
     { path: "/screener", icon: Search, label: "Screener" },
     { path: "/news", icon: Newspaper, label: "News" },
@@ -226,6 +229,7 @@ function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/trading" element={<Trading />} />
                   <Route path="/investments" element={<Investments />} />
+                  <Route path="/watchlist" element={<Watchlist />} />
                   <Route path="/chatbot" element={<Chatbot />} />
                   <Route path="/screener" element={<Screener />} />
                   <Route path="/news" element={<News />} />
