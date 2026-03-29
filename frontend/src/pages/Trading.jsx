@@ -439,6 +439,7 @@ const Trading = () => {
   const [searchResult, setSearchResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [expandedCard, setExpandedCard] = useState(null);
   const [activeTab, setActiveTab] = useState("hot");
   const [watchlistSymbols, setWatchlistSymbols] = useState(new Set());
@@ -500,6 +501,26 @@ const Trading = () => {
     }
   };
 
+  const refreshUniverse = async () => {
+    setRefreshing(true);
+    try {
+      await fetch(`${API}/trading/refresh?limit=1000`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success("Scanning 1,000+ stocks for trading signals...", { description: "This runs in the background. Refresh in a few minutes to see results." });
+      // Poll for results after a delay
+      setTimeout(async () => {
+        await fetchSignals();
+        setRefreshing(false);
+      }, 5000);
+    } catch (error) {
+      console.error("Refresh error:", error);
+      toast.error("Failed to start refresh");
+      setRefreshing(false);
+    }
+  };
+
   const searchStock = async (symbol) => {
     if (!symbol.trim()) return;
     setSearching(true);
@@ -551,11 +572,16 @@ const Trading = () => {
           <div className="flex items-center gap-2 mb-1">
             <Zap className="w-6 h-6 text-amber-400" />
             <h1 className="font-display text-2xl font-bold text-white">Trading Signals</h1>
+            {signals?.diagnostics?.signals_generated > 0 && (
+              <Badge variant="outline" className="text-xs border-amber-500/30 text-amber-400">
+                {signals.diagnostics.signals_generated} signals from {signals.diagnostics.stocks_scanned} stocks
+              </Badge>
+            )}
           </div>
           <p className="text-sm text-slate-500">Short-term momentum and technical setups</p>
         </div>
         
-        {/* Search */}
+        {/* Search + Refresh */}
         <div className="flex gap-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -575,6 +601,16 @@ const Trading = () => {
             data-testid="trading-search-btn"
           >
             {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : "Analyze"}
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={refreshUniverse}
+            disabled={refreshing}
+            className="border-slate-700"
+            data-testid="refresh-trading-btn"
+          >
+            <RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? "Scanning..." : "Refresh"}
           </Button>
         </div>
       </div>

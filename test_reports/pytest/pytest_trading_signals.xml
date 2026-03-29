@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="6" failures="0" skipped="0" tests="9" time="418.842" timestamp="2026-03-29T10:18:54.770171+00:00" hostname="agent-env-369fb371-dfec-4e5a-81d1-42a79df402c3"><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_scan_returns_signals" time="60.167"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">backend/tests/test_trading_signals.py:18: in setup
+    assert response.status_code == 200, f"Auth failed: {response.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_scan_has_cached_signals" time="60.132"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">backend/tests/test_trading_signals.py:18: in setup
+    assert response.status_code == 200, f"Auth failed: {response.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_scan_signal_structure" time="60.165"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">backend/tests/test_trading_signals.py:18: in setup
+    assert response.status_code == 200, f"Auth failed: {response.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_refresh_triggers_background_task" time="60.133"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">backend/tests/test_trading_signals.py:18: in setup
+    assert response.status_code == 200, f"Auth failed: {response.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_analyze_symbol" time="60.165"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">backend/tests/test_trading_signals.py:18: in setup
+    assert response.status_code == 200, f"Auth failed: {response.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_analyze_invalid_symbol" time="60.201"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">backend/tests/test_trading_signals.py:18: in setup
+    assert response.status_code == 200, f"Auth failed: {response.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_scan_categories_match_all" time="57.208" /><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_scan_unauthorized" time="0.202" /><testcase classname="backend.tests.test_trading_signals.TestTradingSignals" name="test_trading_refresh_unauthorized" time="0.305" /></testsuite></testsuites>

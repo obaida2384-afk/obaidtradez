@@ -1153,64 +1153,137 @@ class TradingEngine:
             analysis["exclusion_reason"] = f"Analysis error: {str(e)}"
             return analysis
     
-    async def scan_trading_opportunities(self) -> Dict:
-        """
-        Scan market for HIGH-QUALITY trading opportunities.
-        Returns only top 5-15 signals with full diagnostics.
-        """
-        # Expanded universe for better selection
-        universe = [
-            # Mega caps
-            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
-            # High-beta tech
-            "AMD", "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "SNOW",
-            # Volatile movers
-            "ROKU", "SNAP", "UBER", "ABNB", "RIVN", "LCID", "NIO",
-            # Momentum names
-            "MARA", "RIOT", "HOOD", "SOFI", "AFRM", "UPST",
-            # Sector leaders
-            "XOM", "CVX", "JPM", "GS", "BA", "CAT", "DE"
-        ]
-        
-        # Analyze all stocks
-        analyses = await asyncio.gather(*[self.analyze_for_trading(s) for s in universe])
-        
-        # Separate included vs excluded
+    def _quality_score(self, s):
+        """Compute quality score for ranking signals"""
+        if isinstance(s, dict):
+            base = s.get("confidence", 0)
+            indicators = s.get("indicators", {})
+        else:
+            base = s.confidence
+            indicators = s.indicators if hasattr(s, 'indicators') else {}
+        if indicators.get("structure_type"):
+            base += 0.1
+        if indicators.get("volume_ratio", 0) >= 1.5:
+            base += 0.05
+        return base
+
+    async def batch_analyze_trading(self, symbols: List[str], batch_size: int = 5) -> tuple:
+        """Analyze multiple symbols for trading in batches to avoid rate limits"""
         included = []
         excluded = []
         
-        for analysis in analyses:
-            if analysis and analysis.get("included") and analysis.get("signal"):
-                included.append(analysis["signal"])
-            elif analysis:
-                excluded.append({
-                    "symbol": analysis.get("symbol"),
-                    "reason": analysis.get("exclusion_reason", "Unknown")
-                })
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            try:
+                analyses = await asyncio.gather(
+                    *[self.analyze_for_trading(s) for s in batch],
+                    return_exceptions=True
+                )
+                for analysis in analyses:
+                    if isinstance(analysis, Exception):
+                        continue
+                    if analysis and analysis.get("included") and analysis.get("signal"):
+                        included.append(analysis["signal"])
+                    elif analysis:
+                        excluded.append({
+                            "symbol": analysis.get("symbol"),
+                            "reason": analysis.get("exclusion_reason", "Unknown")
+                        })
+            except Exception as e:
+                logger.error(f"Trading batch {i//batch_size + 1} error: {e}")
+            
+            if i + batch_size < len(symbols):
+                await asyncio.sleep(1.2)
         
-        # Sort by quality (confidence * has structure bonus)
-        def quality_score(s):
-            base = s.confidence
-            if s.indicators.get("structure_type"):
-                base += 0.1
-            if s.indicators.get("volume_ratio", 0) >= 1.5:
-                base += 0.05
-            return base
+        return included, excluded
+
+    async def refresh_trading_signals(self, limit: int = 1000) -> int:
+        """Background task: scan full universe and cache trading signals in MongoDB"""
+        try:
+            symbols = list(dict.fromkeys(universe_manager.CORE_UNIVERSE[:limit]))
+            logger.info(f"Trading refresh: scanning {len(symbols)} stocks in batches...")
+            
+            all_included = []
+            batch_size = 5
+            delay = 1.5
+            
+            for i in range(0, len(symbols), batch_size):
+                batch = symbols[i:i + batch_size]
+                try:
+                    analyses = await asyncio.gather(
+                        *[self.analyze_for_trading(s) for s in batch],
+                        return_exceptions=True
+                    )
+                    for analysis in analyses:
+                        if isinstance(analysis, Exception):
+                            continue
+                        if analysis and analysis.get("included") and analysis.get("signal"):
+                            sig = analysis["signal"]
+                            sig_dict = sig.dict() if hasattr(sig, 'dict') else sig
+                            sig_dict["last_updated"] = datetime.now(timezone.utc).isoformat()
+                            await db.trading_signals.update_one(
+                                {"symbol": sig_dict["symbol"]},
+                                {"$set": sig_dict},
+                                upsert=True
+                            )
+                            all_included.append(sig_dict)
+                    
+                    if (i // batch_size) % 20 == 0:
+                        logger.info(f"Trading refresh batch {i//batch_size + 1}/{(len(symbols) + batch_size - 1)//batch_size}, signals so far: {len(all_included)}")
+                except Exception as e:
+                    logger.error(f"Trading refresh batch {i//batch_size + 1} failed: {e}")
+                
+                if i + batch_size < len(symbols):
+                    await asyncio.sleep(delay)
+            
+            logger.info(f"Trading refresh complete: {len(all_included)} signals stored from {len(symbols)} stocks")
+            return len(all_included)
+        except Exception as e:
+            logger.error(f"Trading refresh error: {e}")
+            return 0
+
+    async def scan_trading_opportunities(self) -> Dict:
+        """
+        Scan market for HIGH-QUALITY trading opportunities.
+        Uses cached signals from full universe if available, otherwise quick scan.
+        """
+        # Check for cached trading signals from full universe scan
+        cached_count = await db.trading_signals.count_documents({})
         
-        included.sort(key=quality_score, reverse=True)
-        
-        # Limit to top 15 signals max
-        all_signals = included[:15]
+        if cached_count >= 10:
+            # Use cached data from background scan
+            cursor = db.trading_signals.find({}, {"_id": 0}).sort("confidence", -1)
+            all_cached = await cursor.to_list(length=2000)
+            
+            all_cached.sort(key=self._quality_score, reverse=True)
+            all_signals = all_cached
+            # Show the full universe size that was scanned, not just signals found
+            stocks_scanned = len(universe_manager.CORE_UNIVERSE)
+            source = "cached"
+        else:
+            # Fallback: quick scan of core stocks
+            quick_universe = [
+                "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+                "AMD", "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "SNOW",
+                "ROKU", "SNAP", "UBER", "ABNB", "RIVN", "LCID", "NIO",
+                "MARA", "RIOT", "HOOD", "SOFI", "AFRM", "UPST",
+                "XOM", "CVX", "JPM", "GS", "BA", "CAT", "DE"
+            ]
+            included, excluded = await self.batch_analyze_trading(quick_universe, batch_size=10)
+            included.sort(key=self._quality_score, reverse=True)
+            all_signals = [s.dict() if hasattr(s, 'dict') else s for s in included]
+            stocks_scanned = len(quick_universe)
+            source = "live"
         
         # Categorize
-        hot = [s for s in all_signals if s.category == "Hot"][:5]
-        breakout = [s for s in all_signals if s.category == "Breakout"][:5]
-        momentum = [s for s in all_signals if s.category == "Momentum"][:5]
-        high_volume = [s for s in all_signals if s.category == "High Volume"][:5]
-        watch = [s for s in all_signals if s.category == "Watch"][:5]
+        hot = [s for s in all_signals if s.get("category") == "Hot"]
+        breakout = [s for s in all_signals if s.get("category") == "Breakout"]
+        momentum = [s for s in all_signals if s.get("category") == "Momentum"]
+        high_volume = [s for s in all_signals if s.get("category") == "High Volume"]
+        watch = [s for s in all_signals if s.get("category") == "Watch"]
         
-        # Top Trades Today: Best 3-5 regardless of category
-        top_trades = sorted(all_signals, key=quality_score, reverse=True)[:5]
+        # Top Trades Today: Best 5 regardless of category
+        top_trades = sorted(all_signals, key=self._quality_score, reverse=True)[:5]
         
         return {
             "top_trades": top_trades,
@@ -1221,10 +1294,11 @@ class TradingEngine:
             "watch": watch,
             "all": all_signals,
             "diagnostics": {
-                "stocks_scanned": len(universe),
+                "stocks_scanned": stocks_scanned,
                 "signals_generated": len(all_signals),
-                "excluded_count": len(excluded),
-                "excluded_reasons": excluded[:10],  # Show first 10 exclusions
+                "source": source,
+                "excluded_count": stocks_scanned - len(all_signals),
+                "excluded_reasons": [],
                 "filters_applied": [
                     f"Min Volume: {self.MIN_VOLUME:,}",
                     f"Min Price: ${self.MIN_PRICE}",
@@ -1986,6 +2060,16 @@ async def refresh_investment_signals(
 async def scan_trading(auth: bool = Depends(verify_access)):
     """Scan market for trading opportunities"""
     return await trading_engine.scan_trading_opportunities()
+
+@api_router.post("/trading/refresh")
+async def refresh_trading_signals(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(default=1000, ge=50, le=1500),
+    auth: bool = Depends(verify_access)
+):
+    """Trigger trading signals refresh for full universe using background batching"""
+    background_tasks.add_task(trading_engine.refresh_trading_signals, limit)
+    return {"message": f"Scanning {limit} stocks for trading signals (background task)", "status": "processing"}
 
 @api_router.get("/trading/analyze/{symbol}")
 async def analyze_trading(symbol: str, auth: bool = Depends(verify_access)):
