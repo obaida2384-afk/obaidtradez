@@ -83,6 +83,26 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Alert History log
   - Reset functionality for triggered alerts
 
+### Phase 4 - Watchlist (Dec 2025)
+- [x] **Watchlist Page**:
+  - New sidebar tab with Star icon
+  - Stats cards: Total Stocks, Bullish, Bearish, Avg Score
+  - Quick add symbol input
+  - Filter/search watchlist
+  - Refresh All and Clear All bulk actions
+- [x] **Watchlist Cards**:
+  - Symbol, Name, Price, Change %, Signal, Category, Score
+  - Upside, Confidence, Sector
+  - Added date and source badge (manual/trading/investments)
+  - Inline note editing
+  - Individual remove button
+- [x] **Star Icon Integration**:
+  - Star button on Investment cards
+  - Star button on Trading cards
+  - Click to add/remove from watchlist
+  - Toast notifications
+  - MongoDB persistence across sessions
+
 ## API Endpoints
 
 ### Authentication
@@ -141,6 +161,17 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 | `/api/alerts/{id}/reset` | POST | Reset a triggered alert |
 | `/api/alerts/types` | GET | List available alert types |
 
+### Watchlist
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/watchlist` | GET | List all watchlist items with enriched data |
+| `/api/watchlist` | POST | Add stock to watchlist |
+| `/api/watchlist/{symbol}` | DELETE | Remove stock from watchlist |
+| `/api/watchlist/check/{symbol}` | GET | Check if symbol is in watchlist |
+| `/api/watchlist/refresh` | POST | Refresh all watchlist prices |
+| `/api/watchlist/all` | DELETE | Clear entire watchlist |
+| `/api/watchlist/{symbol}/note` | PUT | Update note for a stock |
+
 ## Prioritized Backlog
 
 ### P0 (Critical) - COMPLETE ✓
@@ -154,12 +185,12 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [x] Real backtesting with historical data ✓
 - [x] Persistent alerts with MongoDB storage ✓
 - [x] Risk Management engine ✓
-- [ ] Live Alpaca order execution (currently paper trading setup only)
+- [x] Watchlist with saved stocks ✓
 - [ ] Portfolio performance charts
+- [ ] Live Alpaca paper execution
 
 ### P2 (Medium Priority)
 - [ ] Real-time price streaming for Investment cards
-- [ ] Watchlist with saved stocks
 - [ ] Custom screener presets
 - [ ] Email notifications
 - [ ] Compare stocks side-by-side
@@ -171,12 +202,13 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_5)
+- Backend: 100% (All endpoints working - iteration_6)
 - Frontend: 100% (All features working, tested Dec 2025)
 - Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
 - Risk Management: 100% (Position Size, Risk/Reward calculators working)
 - Backtesting: 100% (Real FMP historical data, 5 strategies)
 - Alerts: 100% (CRUD, Check Now, History, Reset - MongoDB persistence)
+- Watchlist: 100% (18/18 tests passed - iteration_6)
 - Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
