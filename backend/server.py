@@ -1,9 +1,9 @@
 """
 ObaidTradez - AI Trading & Investing Platform
-Backend Server with Multi-API Integration
+Backend Server with Multi-API Integration and Broad Universe Coverage
 """
 
-from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Header, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -60,11 +60,13 @@ logger = logging.getLogger(__name__)
 # ===================== CACHE =====================
 _cache: Dict[str, tuple] = {}
 CACHE_TTL = 120  # 2 minutes
+UNIVERSE_CACHE_TTL = 3600  # 1 hour for universe
+SIGNAL_CACHE_TTL = 900  # 15 minutes for signals
 
-def get_cached(key: str) -> Optional[Any]:
+def get_cached(key: str, ttl: int = CACHE_TTL) -> Optional[Any]:
     if key in _cache:
         data, ts = _cache[key]
-        if datetime.now().timestamp() - ts < CACHE_TTL:
+        if datetime.now().timestamp() - ts < ttl:
             return data
     return None
 
@@ -85,7 +87,7 @@ class TradingSignal(BaseModel):
     symbol: str
     name: str
     price: Optional[float] = None
-    signal: str  # Buy, Watch, Avoid
+    signal: str
     confidence: float
     entry_zone: Optional[str] = None
     stop_loss: Optional[float] = None
@@ -94,13 +96,13 @@ class TradingSignal(BaseModel):
     risk_reward: Optional[str] = None
     reasoning: str
     indicators: Dict[str, Any] = {}
-    category: str  # Hot, Medium, Avoid, Breakout, Momentum, HighVolatility
+    category: str
 
 class InvestmentSignal(BaseModel):
     symbol: str
     name: str
     price: Optional[float] = None
-    signal: str  # Buy, Hold, Sell, Watchlist
+    signal: str
     confidence: float
     overall_score: float
     valuation_score: float
@@ -114,35 +116,65 @@ class InvestmentSignal(BaseModel):
     bear_case: List[str] = []
     risks: List[str] = []
     reasoning: str
-    category: str  # Hot, Bullish, Bearish, Undervalued, Overpriced, Watch
+    category: str
+    # Extended fields for universe
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    country: Optional[str] = None
+    market_cap: Optional[float] = None
+    market_cap_label: Optional[str] = None
+    data_completeness: float = 100.0
+    last_updated: Optional[str] = None
+
+class UniverseStock(BaseModel):
+    symbol: str
+    name: str
+    exchange: str
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    country: Optional[str] = None
+    market_cap: Optional[float] = None
+    is_etf: bool = False
+    is_actively_trading: bool = True
+
+class InvestmentFilters(BaseModel):
+    min_market_cap: Optional[float] = None
+    max_market_cap: Optional[float] = None
+    sectors: Optional[List[str]] = None
+    countries: Optional[List[str]] = None
+    min_valuation_score: Optional[float] = None
+    min_quality_score: Optional[float] = None
+    min_growth_score: Optional[float] = None
+    min_overall_score: Optional[float] = None
+    signals: Optional[List[str]] = None
+    categories: Optional[List[str]] = None
 
 class NewsItem(BaseModel):
     title: str
     source: str
     url: str
     published: str
-    sentiment: str  # Positive, Neutral, Negative
+    sentiment: str
     sentiment_score: float
     summary: Optional[str] = None
     symbols: List[str] = []
 
 class RiskSettings(BaseModel):
-    max_position_size: float = 0.05  # 5% of portfolio
-    max_daily_loss: float = 0.02  # 2%
-    max_weekly_loss: float = 0.05  # 5%
-    max_drawdown: float = 0.10  # 10%
+    max_position_size: float = 0.05
+    max_daily_loss: float = 0.02
+    max_weekly_loss: float = 0.05
+    max_drawdown: float = 0.10
     min_confidence: float = 0.6
-    cash_buffer: float = 0.10  # Keep 10% cash
-    sector_limit: float = 0.25  # Max 25% in one sector
+    cash_buffer: float = 0.10
+    sector_limit: float = 0.25
 
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    mode: str = "general"  # trading, investing, general
+    mode: str = "general"
 
 # ===================== ACCESS CONTROL =====================
 
-# Store valid session tokens
 _valid_tokens: Dict[str, datetime] = {}
 
 def generate_token() -> str:
@@ -162,7 +194,6 @@ def validate_token(token: str) -> bool:
 async def verify_access(authorization: str = Header(None)) -> bool:
     if not authorization:
         raise HTTPException(status_code=401, detail="Access token required")
-    
     token = authorization.replace("Bearer ", "")
     if not validate_token(token):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -181,9 +212,9 @@ class MultiAPIClient:
         self.alpaca_url = config.ALPACA_BASE_URL
         self.alpaca_data_url = "https://data.alpaca.markets"
     
-    async def _request(self, url: str, headers: Dict = None, params: Dict = None) -> Optional[Any]:
+    async def _request(self, url: str, headers: Dict = None, params: Dict = None, timeout: float = 15.0) -> Optional[Any]:
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.get(url, headers=headers, params=params)
                 if resp.status_code == 200:
                     return resp.json()
@@ -192,7 +223,78 @@ class MultiAPIClient:
             logger.error(f"Request error: {e}")
         return None
     
-    # FMP Methods
+    # ============ UNIVERSE LOADING METHODS ============
+    
+    async def fmp_stock_list(self) -> Optional[List[Dict]]:
+        """Get all tradable stocks from FMP"""
+        cache_key = "fmp_stock_list"
+        cached = get_cached(cache_key, UNIVERSE_CACHE_TTL)
+        if cached:
+            return cached
+        
+        data = await self._request(
+            f"{self.fmp_url}/stock-list",
+            headers={"apikey": config.FMP_API_KEY},
+            timeout=30.0
+        )
+        if data:
+            set_cached(cache_key, data)
+        return data
+    
+    async def fmp_tradable_list(self) -> Optional[List[Dict]]:
+        """Get actively tradable stocks"""
+        cache_key = "fmp_tradable_list"
+        cached = get_cached(cache_key, UNIVERSE_CACHE_TTL)
+        if cached:
+            return cached
+        
+        data = await self._request(
+            f"{self.fmp_url}/available-traded/list",
+            headers={"apikey": config.FMP_API_KEY},
+            timeout=30.0
+        )
+        if data:
+            set_cached(cache_key, data)
+        return data
+    
+    async def fmp_etf_list(self) -> Optional[List[Dict]]:
+        """Get ETF list"""
+        cache_key = "fmp_etf_list"
+        cached = get_cached(cache_key, UNIVERSE_CACHE_TTL)
+        if cached:
+            return cached
+        
+        data = await self._request(
+            f"{self.fmp_url}/etf-list",
+            headers={"apikey": config.FMP_API_KEY},
+            timeout=30.0
+        )
+        if data:
+            set_cached(cache_key, data)
+        return data
+    
+    async def fmp_screener(self, params: Dict) -> Optional[List[Dict]]:
+        """Use FMP stock screener for targeted filtering"""
+        return await self._request(
+            f"{self.fmp_url}/stock-screener",
+            headers={"apikey": config.FMP_API_KEY},
+            params=params,
+            timeout=30.0
+        )
+    
+    async def fmp_batch_quote(self, symbols: List[str]) -> Optional[List[Dict]]:
+        """Get batch quotes for multiple symbols"""
+        if not symbols:
+            return []
+        symbols_str = ",".join(symbols[:50])  # FMP limit
+        return await self._request(
+            f"{self.fmp_url}/quote",
+            headers={"apikey": config.FMP_API_KEY},
+            params={"symbol": symbols_str}
+        )
+    
+    # ============ EXISTING METHODS ============
+    
     async def fmp_quote(self, symbol: str) -> Optional[Dict]:
         cache_key = f"fmp_quote_{symbol}"
         cached = get_cached(cache_key)
@@ -256,13 +358,6 @@ class MultiAPIClient:
             params={"symbol": symbol}
         )
         return data if isinstance(data, list) else None
-    
-    async def fmp_screener(self, params: Dict) -> Optional[List]:
-        return await self._request(
-            f"{self.fmp_url}/company-screener",
-            headers={"apikey": config.FMP_API_KEY},
-            params=params
-        )
     
     # Polygon Methods
     async def polygon_quote(self, symbol: str) -> Optional[Dict]:
@@ -347,6 +442,221 @@ class MultiAPIClient:
 
 api_client = MultiAPIClient()
 
+# ===================== UNIVERSE MANAGER =====================
+
+class UniverseManager:
+    """Manages the investment universe - fetching, storing, and updating stock lists"""
+    
+    # Comprehensive stock universe - covering major sectors and market caps
+    CORE_UNIVERSE = [
+        # Mega Cap Tech
+        "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "NVDA", "TSLA", "AVGO", "ORCL",
+        # Large Cap Tech
+        "CRM", "ADBE", "AMD", "INTC", "CSCO", "TXN", "QCOM", "IBM", "NOW", "INTU",
+        "AMAT", "ADI", "LRCX", "MU", "SNPS", "CDNS", "KLAC", "MRVL", "FTNT", "PANW",
+        # Software & Cloud
+        "SNOW", "DDOG", "ZS", "CRWD", "NET", "MDB", "OKTA", "PLTR", "PATH", "SHOP",
+        "WDAY", "TTD", "HUBS", "VEEV", "ZM", "DOCU", "TEAM", "SPLK", "TWLO", "U",
+        # Semiconductors
+        "ASML", "TSM", "ARM", "ON", "MCHP", "SWKS", "NXPI", "GFS", "WOLF",
+        # Financial Services
+        "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "BLK", "SCHW", "C",
+        "AXP", "USB", "PNC", "TFC", "COF", "BK", "AIG", "PRU", "MET", "AFL",
+        "CME", "ICE", "SPGI", "MCO", "MSCI", "FIS", "PYPL", "SQ", "FI", "COIN",
+        # Healthcare
+        "UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY",
+        "AMGN", "GILD", "VRTX", "REGN", "MRNA", "BIIB", "ILMN", "ISRG", "SYK", "BSX",
+        "MDT", "ZBH", "EW", "BDX", "DXCM", "ALGN", "IDXX", "IQV", "A", "MTD",
+        # Consumer Discretionary
+        "HD", "NKE", "MCD", "SBUX", "LOW", "TJX", "TGT", "ROST", "CMG", "DHI",
+        "LEN", "GM", "F", "ABNB", "BKNG", "MAR", "HLT", "ORLY", "AZO", "BBY",
+        "DPZ", "YUM", "LULU", "RCL", "CCL", "WYNN", "LVS", "MGM", "DRI", "EBAY",
+        # Consumer Staples
+        "PG", "KO", "PEP", "WMT", "COST", "PM", "MO", "CL", "MDLZ", "KMB",
+        "GIS", "K", "HSY", "SJM", "CAG", "KHC", "STZ", "BF.B", "TAP", "EL",
+        # Industrials
+        "UNP", "HON", "UPS", "BA", "CAT", "GE", "RTX", "DE", "LMT", "NOC",
+        "MMM", "ITW", "EMR", "ROK", "ETN", "PH", "GD", "WM", "RSG", "CTAS",
+        "FDX", "CSX", "NSC", "PCAR", "CMI", "TT", "IR", "FAST", "ODFL", "J",
+        # Energy
+        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "PXD",
+        "HES", "DVN", "FANG", "HAL", "BKR", "KMI", "WMB", "OKE", "LNG", "TRGP",
+        # Materials
+        "LIN", "APD", "ECL", "SHW", "DD", "NEM", "FCX", "NUE", "VMC", "MLM",
+        "DOW", "PPG", "ALB", "CTVA", "CF", "MOS", "IFF", "FMC", "CE", "EMN",
+        # Utilities
+        "NEE", "DUK", "SO", "D", "AEP", "EXC", "SRE", "XEL", "PEG", "ED",
+        "WEC", "ES", "AWK", "DTE", "ETR", "FE", "AEE", "CMS", "EVRG", "AES",
+        # Real Estate
+        "PLD", "AMT", "EQIX", "CCI", "PSA", "SPG", "O", "VICI", "WELL", "DLR",
+        "AVB", "EQR", "ARE", "MAA", "ESS", "UDR", "VTR", "PEAK", "SUI", "HST",
+        # Communication Services
+        "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS", "CHTR", "WBD", "PARA", "FOX",
+        "OMC", "IPG", "EA", "TTWO", "RBLX", "MTCH", "LYV", "SPOT", "PINS", "SNAP",
+        # High Growth / Momentum
+        "SMCI", "MSTR", "APP", "CELH", "DUOL", "DKNG", "DASH", "RKLB", "IONQ", "SOUN",
+        "AI", "UPST", "SOFI", "HOOD", "AFRM", "RIVN", "LCID", "NIO", "XPEV", "LI",
+        # Small/Mid Cap Value
+        "SNA", "LKQ", "JBL", "TOL", "STLD", "CLF", "X", "AA", "RHI", "JBHT",
+        "CHRW", "XPO", "SAIA", "LSTR", "WERN", "KNX", "ARCB", "HUBG", "HTLD", "MATX",
+        # Financials - Regional Banks & Insurance
+        "HBAN", "KEY", "CFG", "MTB", "RF", "FITB", "ZION", "CMA", "FCNCA", "SIVB",
+        "CINF", "CB", "TRV", "ALL", "PGR", "HIG", "L", "WRB", "RE", "RNR",
+        # Biotech
+        "ALNY", "SGEN", "BMRN", "SRPT", "EXEL", "INCY", "HALO", "PCVX", "BNTX", "NVAX",
+        "CRSP", "BEAM", "EDIT", "NTLA", "VERV", "FATE", "RCKT", "BLUE", "SGMO", "RARE",
+        # Clean Energy & EV
+        "ENPH", "SEDG", "FSLR", "RUN", "NOVA", "PLUG", "BE", "CHPT", "BLNK", "EVGO",
+        "QS", "SLDP", "MVST", "MP", "LAC", "ALB", "LTHM", "SQM", "PLL", "LIVENT",
+        # Cybersecurity
+        "S", "CYBR", "TENB", "QLYS", "RPD", "VRNS", "SAIL", "SWI", "SCWX", "NTCT"
+    ]
+    
+    # ETFs for sector exposure
+    CORE_ETFS = [
+        "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "VEA", "VWO", "EFA", "EEM",
+        "XLF", "XLK", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE",
+        "GLD", "SLV", "TLT", "HYG", "LQD", "VNQ", "ARKK", "ARKG", "ARKF", "ARKW",
+        "SMH", "SOXX", "IBB", "XBI", "ICLN", "TAN", "LIT", "HACK", "SKYY", "CLOU"
+    ]
+    
+    # Market cap tiers
+    MARKET_CAP_TIERS = {
+        "mega": 200e9,
+        "large": 10e9,
+        "mid": 2e9,
+        "small": 300e6,
+        "micro": 50e6,
+        "nano": 0
+    }
+    
+    def get_market_cap_label(self, market_cap: float) -> str:
+        if not market_cap:
+            return "unknown"
+        if market_cap >= self.MARKET_CAP_TIERS["mega"]:
+            return "Mega Cap"
+        elif market_cap >= self.MARKET_CAP_TIERS["large"]:
+            return "Large Cap"
+        elif market_cap >= self.MARKET_CAP_TIERS["mid"]:
+            return "Mid Cap"
+        elif market_cap >= self.MARKET_CAP_TIERS["small"]:
+            return "Small Cap"
+        elif market_cap >= self.MARKET_CAP_TIERS["micro"]:
+            return "Micro Cap"
+        return "Nano Cap"
+    
+    async def load_universe(self, force_refresh: bool = False) -> List[UniverseStock]:
+        """Load the full investment universe"""
+        
+        # Check MongoDB cache first
+        if not force_refresh:
+            cached = await db.universe.find_one({"_id": "stock_universe"})
+            if cached and cached.get("updated_at"):
+                age = datetime.now(timezone.utc) - cached["updated_at"].replace(tzinfo=timezone.utc)
+                if age < timedelta(hours=6):
+                    return [UniverseStock(**s) for s in cached.get("stocks", [])]
+        
+        logger.info("Loading comprehensive stock universe...")
+        universe = {}
+        
+        # Load core universe stocks
+        all_symbols = list(set(self.CORE_UNIVERSE + self.CORE_ETFS))
+        logger.info(f"Processing {len(all_symbols)} symbols...")
+        
+        # Fetch profiles in batches to get sector/industry info
+        for i in range(0, len(all_symbols), 20):
+            batch = all_symbols[i:i+20]
+            
+            profiles = await asyncio.gather(
+                *[api_client.fmp_profile(symbol) for symbol in batch],
+                return_exceptions=True
+            )
+            
+            for symbol, profile in zip(batch, profiles):
+                if isinstance(profile, Exception) or not profile:
+                    # Still add the stock with minimal info
+                    is_etf = symbol in self.CORE_ETFS
+                    universe[symbol] = UniverseStock(
+                        symbol=symbol,
+                        name=symbol,
+                        exchange="UNKNOWN",
+                        sector="ETF" if is_etf else None,
+                        industry="Exchange Traded Fund" if is_etf else None,
+                        country="US",
+                        market_cap=None,
+                        is_etf=is_etf,
+                        is_actively_trading=True
+                    )
+                else:
+                    is_etf = symbol in self.CORE_ETFS or profile.get('isEtf', False)
+                    universe[symbol] = UniverseStock(
+                        symbol=symbol,
+                        name=profile.get('companyName', symbol),
+                        exchange=profile.get('exchangeShortName', 'UNKNOWN'),
+                        sector=profile.get('sector') or ("ETF" if is_etf else None),
+                        industry=profile.get('industry') or ("Exchange Traded Fund" if is_etf else None),
+                        country=profile.get('country', 'US'),
+                        market_cap=profile.get('mktCap'),
+                        is_etf=is_etf,
+                        is_actively_trading=not profile.get('isDelisted', False)
+                    )
+            
+            # Small delay between batches
+            if i + 20 < len(all_symbols):
+                await asyncio.sleep(0.3)
+        
+        # Store in MongoDB
+        stocks_list = [s.dict() for s in universe.values()]
+        await db.universe.update_one(
+            {"_id": "stock_universe"},
+            {
+                "$set": {
+                    "stocks": stocks_list,
+                    "count": len(stocks_list),
+                    "updated_at": datetime.now(timezone.utc)
+                }
+            },
+            upsert=True
+        )
+        
+        logger.info(f"Loaded {len(universe)} stocks into universe")
+        return list(universe.values())
+    
+    async def get_universe_stats(self) -> Dict:
+        """Get statistics about the current universe"""
+        cached = await db.universe.find_one({"_id": "stock_universe"})
+        if not cached:
+            return {"count": 0, "updated_at": None}
+        
+        stocks = cached.get("stocks", [])
+        sectors = {}
+        countries = {}
+        market_caps = {"mega": 0, "large": 0, "mid": 0, "small": 0, "micro": 0, "unknown": 0}
+        
+        for s in stocks:
+            sector = s.get("sector") or "Unknown"
+            sectors[sector] = sectors.get(sector, 0) + 1
+            
+            country = s.get("country") or "Unknown"
+            countries[country] = countries.get(country, 0) + 1
+            
+            mc = s.get("market_cap")
+            if mc:
+                label = self.get_market_cap_label(mc).lower().replace(" ", "_").replace("_cap", "")
+                market_caps[label] = market_caps.get(label, 0) + 1
+            else:
+                market_caps["unknown"] += 1
+        
+        return {
+            "count": len(stocks),
+            "updated_at": cached.get("updated_at"),
+            "sectors": sectors,
+            "countries": countries,
+            "market_caps": market_caps
+        }
+
+universe_manager = UniverseManager()
+
 # ===================== TRADING SIGNAL ENGINE =====================
 
 class TradingEngine:
@@ -375,16 +685,13 @@ class TradingEngine:
             high_52 = quote.get('yearHigh', 0)
             low_52 = quote.get('yearLow', 0)
             
-            # Calculate indicators
             vol_ratio = volume / avg_volume if avg_volume > 0 else 1
             price_vs_50 = ((price / sma50) - 1) * 100 if sma50 > 0 else 0
             price_vs_200 = ((price / sma200) - 1) * 100 if sma200 > 0 else 0
             
-            # Position in 52-week range
             range_52 = high_52 - low_52 if high_52 > low_52 else 1
             position_52 = ((price - low_52) / range_52) * 100 if range_52 > 0 else 50
             
-            # Score components
             momentum_score = 50
             volume_score = 50
             technical_score = 50
@@ -392,7 +699,6 @@ class TradingEngine:
             
             reasons = []
             
-            # Momentum analysis
             if change_pct > 3:
                 momentum_score += 25
                 reasons.append(f"Strong momentum (+{change_pct:.1f}% today)")
@@ -402,7 +708,6 @@ class TradingEngine:
                 momentum_score -= 20
                 reasons.append(f"Weak price action ({change_pct:.1f}%)")
             
-            # Volume analysis
             if vol_ratio > 2:
                 volume_score += 30
                 reasons.append(f"High volume ({vol_ratio:.1f}x average)")
@@ -411,7 +716,6 @@ class TradingEngine:
             elif vol_ratio < 0.5:
                 volume_score -= 15
             
-            # Technical setup
             if price > sma50 > sma200:
                 technical_score += 25
                 trend_score += 20
@@ -422,18 +726,15 @@ class TradingEngine:
                 technical_score -= 20
                 reasons.append("Bearish trend")
             
-            # Breakout detection
             if position_52 > 90 and vol_ratio > 1.5:
                 technical_score += 20
                 reasons.append("Near 52-week high with volume (breakout)")
             elif position_52 < 20:
                 technical_score -= 10
             
-            # Calculate overall
             overall = (momentum_score * 0.30 + volume_score * 0.25 + 
                       technical_score * 0.25 + trend_score * 0.20)
             
-            # Determine signal
             if overall >= 70 and len(reasons) >= 2:
                 signal = "Buy"
                 category = "Hot" if overall >= 80 else "Breakout"
@@ -444,10 +745,9 @@ class TradingEngine:
                 signal = "Avoid"
                 category = "Avoid"
             
-            # Entry/Exit calculation
             entry_zone = f"${price * 0.98:.2f} - ${price:.2f}"
-            stop_loss = round(price * 0.95, 2)  # 5% stop
-            take_profit = round(price * 1.10, 2)  # 10% target
+            stop_loss = round(price * 0.95, 2)
+            take_profit = round(price * 1.10, 2)
             risk = price - stop_loss
             reward = take_profit - price
             rr_ratio = f"1:{reward/risk:.1f}" if risk > 0 else "N/A"
@@ -479,7 +779,6 @@ class TradingEngine:
     
     async def scan_trading_opportunities(self) -> Dict[str, List[TradingSignal]]:
         """Scan market for trading opportunities"""
-        # Trading-focused universe
         universe = [
             "NVDA", "AMD", "TSLA", "META", "AAPL", "MSFT", "GOOGL", "AMZN",
             "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "ROKU", "SNAP",
@@ -506,10 +805,10 @@ class TradingEngine:
 
 trading_engine = TradingEngine()
 
-# ===================== INVESTMENT SIGNAL ENGINE =====================
+# ===================== INVESTMENT SIGNAL ENGINE (ENHANCED) =====================
 
 class InvestmentEngine:
-    """Long-term investment analysis"""
+    """Long-term investment analysis with broad universe support"""
     
     SECTOR_BENCHMARKS = {
         "Technology": {"pe": 28, "roe": 20, "growth": 15, "margin": 22},
@@ -519,11 +818,15 @@ class InvestmentEngine:
         "Consumer Defensive": {"pe": 24, "roe": 18, "growth": 5, "margin": 14},
         "Industrials": {"pe": 20, "roe": 15, "growth": 7, "margin": 12},
         "Energy": {"pe": 12, "roe": 12, "growth": 5, "margin": 15},
+        "Basic Materials": {"pe": 15, "roe": 12, "growth": 5, "margin": 12},
+        "Real Estate": {"pe": 35, "roe": 8, "growth": 5, "margin": 30},
+        "Utilities": {"pe": 18, "roe": 10, "growth": 3, "margin": 15},
+        "Communication Services": {"pe": 20, "roe": 15, "growth": 8, "margin": 20},
         "default": {"pe": 20, "roe": 15, "growth": 8, "margin": 15}
     }
     
-    async def analyze_for_investment(self, symbol: str) -> Optional[InvestmentSignal]:
-        """Analyze stock for long-term investment"""
+    async def analyze_for_investment(self, symbol: str, include_incomplete: bool = True) -> Optional[InvestmentSignal]:
+        """Analyze stock for long-term investment with graceful fallback handling"""
         try:
             quote, profile, ratios, metrics, growth = await asyncio.gather(
                 api_client.fmp_quote(symbol),
@@ -541,7 +844,17 @@ class InvestmentEngine:
             metrics = None if isinstance(metrics, Exception) else metrics
             growth = None if isinstance(growth, Exception) else growth
             
+            # Calculate data completeness
+            data_sources = [quote, profile, ratios, metrics, growth]
+            available_sources = sum(1 for d in data_sources if d)
+            data_completeness = (available_sources / len(data_sources)) * 100
+            
+            # Require at least quote or profile
             if not quote and not profile:
+                return None
+            
+            # Don't include if less than 40% data and not forcing incomplete
+            if data_completeness < 40 and not include_incomplete:
                 return None
             
             # Combine data
@@ -553,14 +866,15 @@ class InvestmentEngine:
             sector = data.get('sector', 'default')
             benchmark = self.SECTOR_BENCHMARKS.get(sector, self.SECTOR_BENCHMARKS['default'])
             price = data.get('price', 0)
+            market_cap = data.get('marketCap', 0)
             
             bull_case = []
             bear_case = []
             risks = []
             
-            # Valuation Score
+            # Valuation Score (with fallback)
             valuation_score = 50
-            pe = data.get('peRatioTTM')
+            pe = data.get('peRatioTTM') or data.get('pe')
             if pe and pe > 0:
                 if pe < benchmark['pe'] * 0.7:
                     valuation_score += 25
@@ -570,6 +884,8 @@ class InvestmentEngine:
                 elif pe > benchmark['pe'] * 1.5:
                     valuation_score -= 20
                     bear_case.append(f"Premium valuation (P/E: {pe:.1f})")
+            else:
+                valuation_score = 45  # Neutral if missing
             
             ev_ebitda = data.get('enterpriseValueOverEBITDATTM')
             if ev_ebitda and 0 < ev_ebitda < 50:
@@ -581,7 +897,7 @@ class InvestmentEngine:
             
             # Quality Score
             quality_score = 50
-            roe = data.get('returnOnEquityTTM')
+            roe = data.get('returnOnEquityTTM') or data.get('roe')
             if roe:
                 roe_pct = roe * 100 if abs(roe) < 1 else roe
                 if roe_pct > benchmark['roe'] * 1.5:
@@ -593,7 +909,7 @@ class InvestmentEngine:
                     quality_score -= 15
                     bear_case.append(f"Low ROE ({roe_pct:.1f}%)")
             
-            net_margin = data.get('netProfitMarginTTM')
+            net_margin = data.get('netProfitMarginTTM') or data.get('netProfitMargin')
             if net_margin:
                 margin_pct = net_margin * 100 if abs(net_margin) < 1 else net_margin
                 if margin_pct > benchmark['margin']:
@@ -618,7 +934,7 @@ class InvestmentEngine:
             
             # Financial Strength Score
             strength_score = 50
-            de = data.get('debtEquityRatioTTM')
+            de = data.get('debtEquityRatioTTM') or data.get('debtToEquity')
             if de is not None:
                 if de < 0.3:
                     strength_score += 20
@@ -627,7 +943,7 @@ class InvestmentEngine:
                     strength_score -= 20
                     risks.append(f"High debt (D/E: {de:.2f})")
             
-            current = data.get('currentRatioTTM')
+            current = data.get('currentRatioTTM') or data.get('currentRatio')
             if current:
                 if current > 2:
                     strength_score += 10
@@ -635,7 +951,7 @@ class InvestmentEngine:
                     strength_score -= 15
                     risks.append("Liquidity concerns")
             
-            # Risk Score (higher = safer)
+            # Risk Score
             risk_score = 70
             beta = data.get('beta', 1)
             if beta and beta > 1.5:
@@ -644,12 +960,19 @@ class InvestmentEngine:
             elif beta and beta < 0.8:
                 risk_score += 10
             
-            market_cap = data.get('marketCap', 0)
             if market_cap < 2e9:
                 risk_score -= 15
                 risks.append("Small cap risk")
             elif market_cap > 100e9:
                 risk_score += 10
+            
+            # Adjust scores for incomplete data
+            if data_completeness < 60:
+                # Reduce confidence for incomplete data
+                valuation_score = valuation_score * 0.9
+                quality_score = quality_score * 0.9
+                growth_score = growth_score * 0.9
+                strength_score = strength_score * 0.9
             
             # Overall Score
             overall = (
@@ -674,12 +997,12 @@ class InvestmentEngine:
                 signal = "Sell" if len(bear_case) >= 2 else "Watchlist"
                 category = "Bearish" if overall < 40 else "Watch"
             
-            # Intrinsic value estimate (simplified DCF proxy)
+            # Intrinsic value estimate
             fcf = data.get('freeCashFlowPerShareTTM', 0)
             intrinsic = None
             upside = None
             if fcf and fcf > 0:
-                growth_rate = (rev_growth or 0.05)
+                growth_rate = min((rev_growth or 0.05), 0.25)  # Cap growth rate
                 discount_rate = 0.10
                 terminal_multiple = 15
                 intrinsic = fcf * terminal_multiple * (1 + growth_rate)
@@ -688,7 +1011,8 @@ class InvestmentEngine:
                     upside = f"{upside_pct:+.1f}%"
                     if upside_pct > 30:
                         bull_case.append(f"Potential upside of {upside_pct:.0f}%")
-                        category = "Undervalued"
+                        if category not in ["Hot", "Bullish"]:
+                            category = "Undervalued"
                     elif upside_pct < -20:
                         bear_case.append(f"Appears overvalued by {abs(upside_pct):.0f}%")
                         category = "Overpriced"
@@ -698,6 +1022,9 @@ class InvestmentEngine:
                 reasoning += f"Strengths: {'; '.join(bull_case[:2])}. "
             if bear_case:
                 reasoning += f"Concerns: {'; '.join(bear_case[:2])}."
+            
+            # Market cap label
+            market_cap_label = universe_manager.get_market_cap_label(market_cap)
             
             return InvestmentSignal(
                 symbol=symbol,
@@ -717,23 +1044,154 @@ class InvestmentEngine:
                 bear_case=bear_case[:5],
                 risks=risks[:5],
                 reasoning=reasoning,
-                category=category
+                category=category,
+                sector=sector,
+                industry=data.get('industry'),
+                country=data.get('country', 'US'),
+                market_cap=market_cap,
+                market_cap_label=market_cap_label,
+                data_completeness=round(data_completeness, 1),
+                last_updated=datetime.now(timezone.utc).isoformat()
             )
         except Exception as e:
             logger.error(f"Investment analysis error for {symbol}: {e}")
             return None
     
-    async def scan_investment_opportunities(self) -> Dict[str, List[InvestmentSignal]]:
-        """Scan for long-term investment opportunities"""
-        # Investment-focused universe (quality companies)
-        universe = [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "V", "MA", "JPM",
-            "JNJ", "UNH", "PG", "HD", "KO", "PEP", "WMT", "COST", "MCD", "DIS",
-            "ADBE", "CRM", "NFLX", "INTC", "AMD", "QCOM", "TXN", "AVGO", "CSCO"
-        ]
+    async def batch_analyze(self, symbols: List[str], batch_size: int = 10) -> List[InvestmentSignal]:
+        """Analyze multiple symbols in batches to avoid rate limits"""
+        all_signals = []
         
-        signals = await asyncio.gather(*[self.analyze_for_investment(s) for s in universe])
-        signals = [s for s in signals if s]
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            signals = await asyncio.gather(*[self.analyze_for_investment(s) for s in batch])
+            valid_signals = [s for s in signals if s]
+            all_signals.extend(valid_signals)
+            
+            # Small delay between batches to avoid rate limits
+            if i + batch_size < len(symbols):
+                await asyncio.sleep(0.5)
+        
+        return all_signals
+    
+    async def refresh_universe_signals(self, limit: int = 500) -> int:
+        """Background task to refresh investment signals for the universe"""
+        try:
+            # Get symbols directly from the hardcoded universe (more reliable)
+            symbols = universe_manager.CORE_UNIVERSE[:limit]
+            logger.info(f"Refreshing signals for {len(symbols)} stocks from core universe...")
+            
+            signals = await self.batch_analyze(symbols, batch_size=10)
+            
+            # Store in MongoDB
+            for signal in signals:
+                await db.investment_signals.update_one(
+                    {"symbol": signal.symbol},
+                    {"$set": signal.dict()},
+                    upsert=True
+                )
+            
+            logger.info(f"Stored {len(signals)} investment signals")
+            return len(signals)
+        except Exception as e:
+            logger.error(f"Refresh universe signals error: {e}")
+            return 0
+    
+    async def get_cached_signals(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        filters: Optional[InvestmentFilters] = None,
+        sort_by: str = "overall_score",
+        sort_dir: str = "desc"
+    ) -> Dict:
+        """Get cached signals with filtering and pagination"""
+        
+        query = {}
+        
+        if filters:
+            if filters.min_market_cap:
+                query["market_cap"] = {"$gte": filters.min_market_cap}
+            if filters.max_market_cap:
+                if "market_cap" in query:
+                    query["market_cap"]["$lte"] = filters.max_market_cap
+                else:
+                    query["market_cap"] = {"$lte": filters.max_market_cap}
+            if filters.sectors:
+                query["sector"] = {"$in": filters.sectors}
+            if filters.countries:
+                query["country"] = {"$in": filters.countries}
+            if filters.min_valuation_score:
+                query["valuation_score"] = {"$gte": filters.min_valuation_score}
+            if filters.min_quality_score:
+                query["quality_score"] = {"$gte": filters.min_quality_score}
+            if filters.min_growth_score:
+                query["growth_score"] = {"$gte": filters.min_growth_score}
+            if filters.min_overall_score:
+                query["overall_score"] = {"$gte": filters.min_overall_score}
+            if filters.signals:
+                query["signal"] = {"$in": filters.signals}
+            if filters.categories:
+                query["category"] = {"$in": filters.categories}
+        
+        # Get total count
+        total = await db.investment_signals.count_documents(query)
+        
+        # Get paginated results
+        sort_direction = -1 if sort_dir == "desc" else 1
+        cursor = db.investment_signals.find(query, {"_id": 0})
+        cursor = cursor.sort(sort_by, sort_direction)
+        cursor = cursor.skip((page - 1) * page_size).limit(page_size)
+        
+        results = await cursor.to_list(length=page_size)
+        
+        # Get category counts for current filter
+        pipeline = [
+            {"$match": query},
+            {"$group": {"_id": "$category", "count": {"$sum": 1}}}
+        ]
+        category_counts = {}
+        async for doc in db.investment_signals.aggregate(pipeline):
+            category_counts[doc["_id"]] = doc["count"]
+        
+        return {
+            "signals": results,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+            "categories": category_counts
+        }
+    
+    async def scan_investment_opportunities(self) -> Dict[str, List[InvestmentSignal]]:
+        """Original scan method for backward compatibility - now uses cached data or analyzes on demand"""
+        
+        # Check if we have cached signals
+        total = await db.investment_signals.count_documents({})
+        
+        if total > 50:
+            # Use cached data
+            all_signals = []
+            cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1).limit(300)
+            async for doc in cursor:
+                all_signals.append(InvestmentSignal(**doc))
+            
+            signals = all_signals
+        else:
+            # Analyze a broader set of stocks on demand
+            universe = universe_manager.CORE_UNIVERSE[:100]  # Use first 100 from core universe
+            
+            logger.info(f"No cache, analyzing {len(universe)} stocks on demand...")
+            signals = await self.batch_analyze(universe, batch_size=10)
+            signals = [s for s in signals if s]
+            
+            # Store these in cache for next time
+            for signal in signals:
+                await db.investment_signals.update_one(
+                    {"symbol": signal.symbol},
+                    {"$set": signal.dict()},
+                    upsert=True
+                )
+            logger.info(f"Cached {len(signals)} signals")
         
         hot = [s for s in signals if s.category == "Hot"]
         bullish = [s for s in signals if s.category == "Bullish"]
@@ -743,14 +1201,15 @@ class InvestmentEngine:
         watch = [s for s in signals if s.category == "Watch"]
         
         return {
-            "hot": sorted(hot, key=lambda x: x.overall_score, reverse=True)[:5],
-            "bullish": sorted(bullish, key=lambda x: x.overall_score, reverse=True)[:5],
-            "undervalued": sorted(undervalued, key=lambda x: x.overall_score, reverse=True)[:5],
-            "watch": sorted(watch, key=lambda x: x.overall_score, reverse=True)[:5],
-            "bearish": bearish[:5],
-            "overpriced": overpriced[:5],
-            "avoid": [s for s in signals if s.signal == "Sell"][:5],
-            "all": sorted(signals, key=lambda x: x.overall_score, reverse=True)
+            "hot": sorted(hot, key=lambda x: x.overall_score, reverse=True)[:15],
+            "bullish": sorted(bullish, key=lambda x: x.overall_score, reverse=True)[:15],
+            "undervalued": sorted(undervalued, key=lambda x: x.overall_score, reverse=True)[:15],
+            "watch": sorted(watch, key=lambda x: x.overall_score, reverse=True)[:15],
+            "bearish": bearish[:15],
+            "overpriced": overpriced[:15],
+            "avoid": [s for s in signals if s.signal == "Sell"][:15],
+            "all": sorted(signals, key=lambda x: x.overall_score, reverse=True),
+            "total_analyzed": len(signals)
         }
 
 investment_engine = InvestmentEngine()
@@ -784,7 +1243,6 @@ class NewsSentimentEngine:
         """Get news for a specific symbol"""
         news_items = []
         
-        # Try Finnhub first
         finnhub_news = await api_client.finnhub_news(symbol)
         if finnhub_news:
             for item in finnhub_news[:5]:
@@ -800,7 +1258,6 @@ class NewsSentimentEngine:
                     symbols=[symbol]
                 ))
         
-        # Try Polygon as backup
         if len(news_items) < 5:
             polygon_news = await api_client.polygon_news(symbol, limit=5)
             if polygon_news:
@@ -823,7 +1280,6 @@ class NewsSentimentEngine:
         """Get general market news"""
         news_items = []
         
-        # Search for market news via NewsAPI
         newsapi_results = await api_client.newsapi_search("stock market finance trading", limit=10)
         if newsapi_results:
             for item in newsapi_results:
@@ -901,7 +1357,6 @@ async def verify_access_code(request: AccessRequest):
         token = generate_token()
         _valid_tokens[token] = datetime.now() + timedelta(hours=24)
         
-        # Log successful access
         await db.access_logs.insert_one({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "success": True
@@ -909,7 +1364,6 @@ async def verify_access_code(request: AccessRequest):
         
         return AccessResponse(success=True, token=token, message="Access granted")
     
-    # Log failed attempt
     await db.access_logs.insert_one({
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "success": False
@@ -925,6 +1379,28 @@ async def verify_token(authorization: str = Header(None)):
     token = authorization.replace("Bearer ", "")
     return {"valid": validate_token(token)}
 
+# Universe Management
+@api_router.get("/universe/stats")
+async def get_universe_stats(auth: bool = Depends(verify_access)):
+    """Get universe statistics"""
+    return await universe_manager.get_universe_stats()
+
+@api_router.post("/universe/refresh")
+async def refresh_universe(background_tasks: BackgroundTasks, auth: bool = Depends(verify_access)):
+    """Trigger universe refresh in background"""
+    background_tasks.add_task(universe_manager.load_universe, True)
+    return {"message": "Universe refresh started", "status": "processing"}
+
+@api_router.post("/investments/refresh")
+async def refresh_investment_signals(
+    background_tasks: BackgroundTasks,
+    limit: int = Query(default=300, ge=50, le=1000),
+    auth: bool = Depends(verify_access)
+):
+    """Trigger investment signals refresh in background"""
+    background_tasks.add_task(investment_engine.refresh_universe_signals, limit)
+    return {"message": f"Refreshing signals for up to {limit} stocks", "status": "processing"}
+
 # Trading
 @api_router.get("/trading/scan")
 async def scan_trading(auth: bool = Depends(verify_access)):
@@ -939,11 +1415,101 @@ async def analyze_trading(symbol: str, auth: bool = Depends(verify_access)):
         raise HTTPException(status_code=404, detail=f"Unable to analyze {symbol}")
     return signal
 
-# Investments
+# Investments (Enhanced)
 @api_router.get("/investments/scan")
 async def scan_investments(auth: bool = Depends(verify_access)):
     """Scan market for investment opportunities"""
     return await investment_engine.scan_investment_opportunities()
+
+@api_router.get("/investments/browse")
+async def browse_investments(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=10, le=100),
+    sort_by: str = Query(default="overall_score"),
+    sort_dir: str = Query(default="desc"),
+    min_market_cap: Optional[float] = None,
+    max_market_cap: Optional[float] = None,
+    sectors: Optional[str] = None,  # Comma-separated
+    countries: Optional[str] = None,  # Comma-separated
+    min_valuation: Optional[float] = None,
+    min_quality: Optional[float] = None,
+    min_growth: Optional[float] = None,
+    min_score: Optional[float] = None,
+    signals: Optional[str] = None,  # Comma-separated
+    categories: Optional[str] = None,  # Comma-separated
+    auth: bool = Depends(verify_access)
+):
+    """Browse investment signals with filtering and pagination"""
+    
+    filters = InvestmentFilters(
+        min_market_cap=min_market_cap,
+        max_market_cap=max_market_cap,
+        sectors=sectors.split(",") if sectors else None,
+        countries=countries.split(",") if countries else None,
+        min_valuation_score=min_valuation,
+        min_quality_score=min_quality,
+        min_growth_score=min_growth,
+        min_overall_score=min_score,
+        signals=signals.split(",") if signals else None,
+        categories=categories.split(",") if categories else None
+    )
+    
+    return await investment_engine.get_cached_signals(
+        page=page,
+        page_size=page_size,
+        filters=filters,
+        sort_by=sort_by,
+        sort_dir=sort_dir
+    )
+
+@api_router.get("/investments/filters")
+async def get_investment_filters(auth: bool = Depends(verify_access)):
+    """Get available filter options"""
+    
+    # Get unique sectors
+    sectors = await db.investment_signals.distinct("sector")
+    sectors = [s for s in sectors if s]
+    
+    # Get unique countries
+    countries = await db.investment_signals.distinct("country")
+    countries = [c for c in countries if c]
+    
+    # Get signal and category counts
+    pipeline = [
+        {"$group": {"_id": "$signal", "count": {"$sum": 1}}}
+    ]
+    signal_counts = {}
+    async for doc in db.investment_signals.aggregate(pipeline):
+        if doc["_id"]:
+            signal_counts[doc["_id"]] = doc["count"]
+    
+    pipeline = [
+        {"$group": {"_id": "$category", "count": {"$sum": 1}}}
+    ]
+    category_counts = {}
+    async for doc in db.investment_signals.aggregate(pipeline):
+        if doc["_id"]:
+            category_counts[doc["_id"]] = doc["count"]
+    
+    # Market cap ranges
+    market_cap_ranges = [
+        {"label": "Mega Cap (>$200B)", "min": 200e9, "max": None},
+        {"label": "Large Cap ($10B-$200B)", "min": 10e9, "max": 200e9},
+        {"label": "Mid Cap ($2B-$10B)", "min": 2e9, "max": 10e9},
+        {"label": "Small Cap ($300M-$2B)", "min": 300e6, "max": 2e9},
+        {"label": "Micro Cap (<$300M)", "min": 0, "max": 300e6},
+    ]
+    
+    total = await db.investment_signals.count_documents({})
+    
+    return {
+        "total_signals": total,
+        "sectors": sorted(sectors),
+        "countries": sorted(countries),
+        "signals": signal_counts,
+        "categories": category_counts,
+        "market_cap_ranges": market_cap_ranges
+    }
 
 @api_router.get("/investments/analyze/{symbol}")
 async def analyze_investment(symbol: str, auth: bool = Depends(verify_access)):
@@ -1030,7 +1596,7 @@ async def search_symbols(q: str = Query(..., min_length=1), auth: bool = Depends
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "1.0.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "2.0.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)
@@ -1042,6 +1608,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Startup event to initialize universe
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the investment universe on startup"""
+    try:
+        # Check if we have any cached signals
+        count = await db.investment_signals.count_documents({})
+        if count == 0:
+            logger.info("No cached signals found, starting initial load...")
+            # Start with a quick initial load of top stocks
+            asyncio.create_task(investment_engine.refresh_universe_signals(200))
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
