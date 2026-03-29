@@ -163,7 +163,43 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Tabs: Queue, Executed, Positions, Audit Log
   - Trade cards with action buttons
 
+### Phase 7 - Real-time Price Streaming (Dec 2025)
+- [x] **Backend Price Service**:
+  - LivePriceService class with 5s cache TTL
+  - Batch quote fetching via FMP stable API
+  - Parallel requests for multiple symbols (10 at a time)
+  - Rate limiting (0.1s delay between batches)
+- [x] **Price Endpoints**:
+  - POST /api/prices/batch - Get prices for up to 100 symbols
+  - GET /api/prices/{symbol} - Get single symbol price
+  - GET /api/prices/watchlist - Get prices for watchlist symbols
+  - GET /api/prices/positions - Get prices for position symbols
+- [x] **Frontend Hooks**:
+  - useLivePrices(symbols, interval, enabled) - Custom hook for any symbol list
+  - useWatchlistPrices(interval, enabled) - Hook for watchlist prices
+  - usePositionsPrices(interval, enabled) - Hook for position prices
+  - LiveIndicator component (green animated dot)
+- [x] **Page Integrations**:
+  - Trading: 12s updates, memoized TradingCard
+  - Investments: 20s updates, 30 symbols max, memoized InvestmentCard
+  - Watchlist: 15s updates
+  - Portfolio: 15s updates for positions
+  - AutoTrade: 12s for queue, 15s for positions
+- [x] **Performance Optimizations**:
+  - React.memo on all card components
+  - useMemo for visible symbols calculation
+  - Flash effects on price changes (green/red highlight)
+  - Throttled updates prevent API overload
+
 ## API Endpoints
+
+### Live Prices (NEW)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/prices/batch` | POST | Get live prices for multiple symbols (max 100) |
+| `/api/prices/{symbol}` | GET | Get live price for single symbol |
+| `/api/prices/watchlist` | GET | Get live prices for watchlist symbols |
+| `/api/prices/positions` | GET | Get live prices for position symbols |
 
 ### Authentication
 | Endpoint | Method | Description |
@@ -274,9 +310,9 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [x] Watchlist with saved stocks ✓
 - [x] Portfolio performance charts ✓
 - [x] Alpaca paper execution (with manual approval, kill switch) ✓
+- [x] Real-time price streaming for all views ✓
 
 ### P2 (Medium Priority)
-- [ ] Real-time price streaming for Investment cards
 - [ ] Custom screener presets
 - [ ] Email notifications
 - [ ] Compare stocks side-by-side
@@ -288,7 +324,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_8)
+- Backend: 100% (All endpoints working - iteration_9)
 - Frontend: 100% (All features working, tested Dec 2025)
 - Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
 - Risk Management: 100% (Position Size, Risk/Reward calculators working)
@@ -297,6 +333,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - Watchlist: 100% (18/18 tests passed - iteration_6)
 - Portfolio Analytics: 100% (17/17 backend, 24/24 frontend - iteration_7)
 - Paper Execution: 100% (25/25 backend, all UI verified - iteration_8)
+- Real-time Price Streaming: 100% (14/14 backend, all UI verified - iteration_9)
 - Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
