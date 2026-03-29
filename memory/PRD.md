@@ -103,6 +103,27 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Toast notifications
   - MongoDB persistence across sessions
 
+### Phase 5 - Portfolio Performance Charts (Dec 2025)
+- [x] **Portfolio Analytics Page**:
+  - Header with period selector (1D, 1W, 1M, 3M, 1Y, ALL)
+  - Account Summary cards (Equity, Day P&L, Cash, Buying Power)
+  - Win Rate summary row
+- [x] **Charts**:
+  - Equity Chart (AreaChart with gradient)
+  - Drawdown Chart (AreaChart, red theme)
+  - Win Rate Trend (LineChart with 50% baseline)
+  - Strategy Performance (BarChart from backtests)
+  - Sector Allocation (PieChart with legend)
+- [x] **P&L Breakdown**:
+  - Realized vs Unrealized P&L
+  - Total P&L
+  - Avg Trade Return
+  - Best/Worst Trade display
+- [x] **Data Sources**:
+  - Alpaca positions and trade history
+  - MongoDB backtest history
+  - Graceful handling of Alpaca 401
+
 ## API Endpoints
 
 ### Authentication
@@ -172,6 +193,17 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 | `/api/watchlist/all` | DELETE | Clear entire watchlist |
 | `/api/watchlist/{symbol}/note` | PUT | Update note for a stock |
 
+### Portfolio Analytics
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/portfolio/analytics` | GET | Comprehensive analytics (all data) |
+| `/api/portfolio/history` | GET | Portfolio equity history |
+| `/api/portfolio/drawdown` | GET | Drawdown analysis |
+| `/api/portfolio/win-rate` | GET | Win rate trends |
+| `/api/portfolio/sector-allocation` | GET | Sector allocation |
+| `/api/portfolio/pnl-breakdown` | GET | P&L breakdown |
+| `/api/portfolio/strategy-performance` | GET | Strategy performance from backtests |
+
 ## Prioritized Backlog
 
 ### P0 (Critical) - COMPLETE ✓
@@ -186,8 +218,8 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [x] Persistent alerts with MongoDB storage ✓
 - [x] Risk Management engine ✓
 - [x] Watchlist with saved stocks ✓
-- [ ] Portfolio performance charts
-- [ ] Live Alpaca paper execution
+- [x] Portfolio performance charts ✓
+- [ ] Live Alpaca paper execution (with manual approval, kill switch)
 
 ### P2 (Medium Priority)
 - [ ] Real-time price streaming for Investment cards
@@ -202,13 +234,14 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_6)
+- Backend: 100% (All endpoints working - iteration_7)
 - Frontend: 100% (All features working, tested Dec 2025)
 - Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
 - Risk Management: 100% (Position Size, Risk/Reward calculators working)
 - Backtesting: 100% (Real FMP historical data, 5 strategies)
 - Alerts: 100% (CRUD, Check Now, History, Reset - MongoDB persistence)
 - Watchlist: 100% (18/18 tests passed - iteration_6)
+- Portfolio Analytics: 100% (17/17 backend, 24/24 frontend - iteration_7)
 - Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
