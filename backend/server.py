@@ -24,6 +24,9 @@ import secrets
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# Import enhanced investment engine
+from enhanced_investment_engine import EnhancedInvestmentEngine, convert_to_legacy_format
+
 # ===================== CONFIGURATION =====================
 class Config:
     MONGO_URL = os.environ['MONGO_URL']
@@ -1214,6 +1217,9 @@ class InvestmentEngine:
 
 investment_engine = InvestmentEngine()
 
+# Initialize enhanced investment engine
+enhanced_investment_engine = EnhancedInvestmentEngine(api_client, db)
+
 # ===================== NEWS & SENTIMENT =====================
 
 class NewsSentimentEngine:
@@ -1397,9 +1403,28 @@ async def refresh_investment_signals(
     limit: int = Query(default=300, ge=50, le=1000),
     auth: bool = Depends(verify_access)
 ):
-    """Trigger investment signals refresh in background"""
-    background_tasks.add_task(investment_engine.refresh_universe_signals, limit)
-    return {"message": f"Refreshing signals for up to {limit} stocks", "status": "processing"}
+    """Trigger investment signals refresh using enhanced engine"""
+    
+    async def refresh_with_enhanced_engine(limit: int):
+        """Background task to refresh signals using enhanced engine"""
+        symbols = universe_manager.CORE_UNIVERSE[:limit]
+        logger.info(f"Enhanced refresh: analyzing {len(symbols)} stocks...")
+        
+        signals = await enhanced_investment_engine.batch_analyze(symbols, batch_size=10)
+        
+        # Store in MongoDB
+        for signal in signals:
+            await db.investment_signals.update_one(
+                {"symbol": signal.symbol},
+                {"$set": convert_to_legacy_format(signal)},
+                upsert=True
+            )
+        
+        logger.info(f"Stored {len(signals)} enhanced investment signals")
+        return len(signals)
+    
+    background_tasks.add_task(refresh_with_enhanced_engine, limit)
+    return {"message": f"Refreshing signals for up to {limit} stocks with enhanced engine", "status": "processing"}
 
 # Trading
 @api_router.get("/trading/scan")
@@ -1418,8 +1443,65 @@ async def analyze_trading(symbol: str, auth: bool = Depends(verify_access)):
 # Investments (Enhanced)
 @api_router.get("/investments/scan")
 async def scan_investments(auth: bool = Depends(verify_access)):
-    """Scan market for investment opportunities"""
-    return await investment_engine.scan_investment_opportunities()
+    """Scan market for investment opportunities with dynamic thresholds"""
+    # Check if we have cached signals
+    total = await db.investment_signals.count_documents({})
+    
+    if total > 50:
+        # Use cached data
+        cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1).limit(300)
+        all_signals = await cursor.to_list(length=300)
+        
+        # Apply dynamic percentile-based categorization
+        for i, s in enumerate(all_signals):
+            percentile = ((len(all_signals) - i) / len(all_signals)) * 100
+            score = s.get("overall_score", 0)
+            
+            # Dynamic categorization
+            if percentile >= 90 and score >= 60:
+                s["category"] = "Hot"
+                s["signal"] = "Buy"
+            elif percentile >= 75 and score >= 55:
+                s["category"] = "Bullish"
+                s["signal"] = "Buy"
+            # Keep existing category for others
+        
+        signals = all_signals
+    else:
+        # Analyze on demand
+        universe = universe_manager.CORE_UNIVERSE[:100]
+        logger.info(f"No cache, analyzing {len(universe)} stocks on demand...")
+        
+        analyzed = await enhanced_investment_engine.batch_analyze(universe, batch_size=10)
+        signals = [convert_to_legacy_format(s) for s in analyzed]
+        
+        # Store in cache
+        for signal in signals:
+            await db.investment_signals.update_one(
+                {"symbol": signal["symbol"]},
+                {"$set": signal},
+                upsert=True
+            )
+    
+    # Categorize results
+    hot = [s for s in signals if s.get("category") == "Hot"]
+    bullish = [s for s in signals if s.get("category") == "Bullish"]
+    undervalued = [s for s in signals if s.get("category") == "Undervalued"]
+    bearish = [s for s in signals if s.get("category") == "Bearish"]
+    overpriced = [s for s in signals if s.get("category") == "Overpriced"]
+    watch = [s for s in signals if s.get("category") == "Watch"]
+    
+    return {
+        "hot": sorted(hot, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
+        "bullish": sorted(bullish, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
+        "undervalued": sorted(undervalued, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
+        "watch": sorted(watch, key=lambda x: x.get("overall_score", 0), reverse=True)[:15],
+        "bearish": bearish[:15],
+        "overpriced": overpriced[:15],
+        "avoid": [s for s in signals if s.get("signal") == "Sell"][:15],
+        "all": sorted(signals, key=lambda x: x.get("overall_score", 0), reverse=True),
+        "total_analyzed": len(signals)
+    }
 
 @api_router.get("/investments/browse")
 async def browse_investments(
@@ -1513,11 +1595,124 @@ async def get_investment_filters(auth: bool = Depends(verify_access)):
 
 @api_router.get("/investments/analyze/{symbol}")
 async def analyze_investment(symbol: str, auth: bool = Depends(verify_access)):
-    """Analyze specific symbol for investment"""
-    signal = await investment_engine.analyze_for_investment(symbol.upper())
+    """Analyze specific symbol for investment with full explanations"""
+    signal = await enhanced_investment_engine.analyze_stock(symbol.upper())
     if not signal:
         raise HTTPException(status_code=404, detail=f"Unable to analyze {symbol}")
-    return signal
+    return convert_to_legacy_format(signal)
+
+@api_router.get("/investments/detailed/{symbol}")
+async def detailed_investment_analysis(symbol: str, auth: bool = Depends(verify_access)):
+    """Get comprehensive investment analysis with all explanations"""
+    signal = await enhanced_investment_engine.analyze_stock(symbol.upper())
+    if not signal:
+        raise HTTPException(status_code=404, detail=f"Unable to analyze {symbol}")
+    return signal.dict()
+
+@api_router.get("/investments/audit")
+async def audit_investment_scores(auth: bool = Depends(verify_access)):
+    """Audit score distribution across all cached signals"""
+    import statistics
+    
+    cursor = db.investment_signals.find({}, {"_id": 0, "symbol": 1, "overall_score": 1, "valuation_score": 1, 
+                                             "quality_score": 1, "growth_score": 1, "financial_strength": 1,
+                                             "risk_score": 1, "category": 1, "signal": 1})
+    signals = await cursor.to_list(length=500)
+    
+    if not signals:
+        return {"error": "No signals found"}
+    
+    scores = [s.get("overall_score", 0) for s in signals]
+    
+    # Score bands
+    bands = {
+        "80+": len([s for s in scores if s >= 80]),
+        "70-79": len([s for s in scores if 70 <= s < 80]),
+        "60-69": len([s for s in scores if 60 <= s < 70]),
+        "50-59": len([s for s in scores if 50 <= s < 60]),
+        "40-49": len([s for s in scores if 40 <= s < 50]),
+        "0-39": len([s for s in scores if s < 40]),
+    }
+    
+    # Categories
+    categories = {}
+    for s in signals:
+        cat = s.get("category", "Unknown")
+        categories[cat] = categories.get(cat, 0) + 1
+    
+    # Signals
+    signal_types = {}
+    for s in signals:
+        sig = s.get("signal", "Unknown")
+        signal_types[sig] = signal_types.get(sig, 0) + 1
+    
+    # Top/bottom
+    sorted_signals = sorted(signals, key=lambda x: x.get("overall_score", 0), reverse=True)
+    
+    return {
+        "total_stocks": len(signals),
+        "statistics": {
+            "average_score": round(statistics.mean(scores), 1),
+            "median_score": round(statistics.median(scores), 1),
+            "min_score": round(min(scores), 1),
+            "max_score": round(max(scores), 1),
+            "std_dev": round(statistics.stdev(scores), 1) if len(scores) > 1 else 0
+        },
+        "score_bands": bands,
+        "categories": categories,
+        "signals": signal_types,
+        "top_10": [{"symbol": s["symbol"], "score": s.get("overall_score")} for s in sorted_signals[:10]],
+        "bottom_10": [{"symbol": s["symbol"], "score": s.get("overall_score")} for s in sorted_signals[-10:]]
+    }
+
+@api_router.get("/investments/sanity-check")
+async def sanity_check_stocks(auth: bool = Depends(verify_access)):
+    """Run sanity check on specific benchmark stocks"""
+    test_stocks = ["GOOGL", "MSFT", "JPM", "V", "COST", "JNJ", "XOM", "AAPL"]
+    
+    results = []
+    for symbol in test_stocks:
+        signal = await enhanced_investment_engine.analyze_stock(symbol)
+        if signal:
+            results.append({
+                "symbol": symbol,
+                "overall_score": signal.overall_score,
+                "category": signal.category,
+                "signal": signal.signal,
+                "percentile_rank": signal.percentile_rank,
+                "scores": {
+                    "valuation": signal.valuation_score,
+                    "quality": signal.quality_score,
+                    "growth": signal.growth_score,
+                    "financial_strength": signal.financial_strength,
+                    "risk": signal.risk_score
+                },
+                "valuation_summary": signal.valuation_summary.dict(),
+                "business_quality": signal.business_quality.dict(),
+                "score_drivers": signal.score_drivers.dict(),
+                "bull_case": signal.bull_case,
+                "bear_case": signal.bear_case,
+                "explanation": signal.reasoning
+            })
+        await asyncio.sleep(0.3)  # Rate limiting
+    
+    # Apply dynamic thresholds to the batch
+    if results:
+        # Sort and rank
+        results = sorted(results, key=lambda x: x["overall_score"], reverse=True)
+        for i, r in enumerate(results):
+            r["rank"] = i + 1
+            r["percentile"] = ((len(results) - i) / len(results)) * 100
+    
+    return {
+        "test_stocks": results,
+        "summary": {
+            "average_score": sum(r["overall_score"] for r in results) / len(results) if results else 0,
+            "recommended_buys": [r["symbol"] for r in results if r["overall_score"] >= 60],
+            "watch_list": [r["symbol"] for r in results if 50 <= r["overall_score"] < 60],
+            "avoid": [r["symbol"] for r in results if r["overall_score"] < 50]
+        }
+    }
 
 # News & Sentiment
 @api_router.get("/news/market")

@@ -201,6 +201,160 @@ const InvestmentCard = ({ signal, expanded, onToggle }) => {
             </div>
           </div>
           
+          {/* Valuation Summary */}
+          {signal.valuation_summary && (
+            <div className="p-3 rounded bg-slate-900/50 border border-slate-800">
+              <p className="text-xs text-blue-400 mb-2 flex items-center gap-1">
+                <DollarSign className="w-3 h-3" /> Valuation Summary
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                {signal.valuation_summary.pe_ratio && (
+                  <div>
+                    <p className="text-slate-500">P/E Ratio</p>
+                    <p className="font-mono text-white">{signal.valuation_summary.pe_ratio?.toFixed(1)}x</p>
+                    <p className={`text-[10px] ${signal.valuation_summary.pe_vs_sector === 'Discount' ? 'text-emerald-400' : signal.valuation_summary.pe_vs_sector === 'Expensive' ? 'text-red-400' : 'text-slate-500'}`}>
+                      {signal.valuation_summary.pe_vs_sector}
+                    </p>
+                  </div>
+                )}
+                {signal.valuation_summary.ev_ebitda && (
+                  <div>
+                    <p className="text-slate-500">EV/EBITDA</p>
+                    <p className="font-mono text-white">{signal.valuation_summary.ev_ebitda?.toFixed(1)}x</p>
+                    <p className="text-[10px] text-slate-500">{signal.valuation_summary.ev_ebitda_vs_sector}</p>
+                  </div>
+                )}
+                {signal.valuation_summary.intrinsic_value && (
+                  <div>
+                    <p className="text-slate-500">Fair Value</p>
+                    <p className="font-mono text-emerald-400">${signal.valuation_summary.intrinsic_value?.toFixed(2)}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-slate-500">Classification</p>
+                  <p className={`font-medium ${signal.valuation_summary.classification?.includes('Under') ? 'text-emerald-400' : signal.valuation_summary.classification?.includes('Over') ? 'text-red-400' : 'text-slate-300'}`}>
+                    {signal.valuation_summary.classification || 'N/A'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Business Quality */}
+          {signal.business_quality && (
+            <div className="p-3 rounded bg-slate-900/50 border border-slate-800">
+              <p className="text-xs text-purple-400 mb-2 flex items-center gap-1">
+                <BarChart3 className="w-3 h-3" /> Business Quality
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                {signal.business_quality.roe !== null && signal.business_quality.roe !== undefined && (
+                  <div>
+                    <p className="text-slate-500">ROE</p>
+                    <p className={`font-mono ${signal.business_quality.roe > 20 ? 'text-emerald-400' : signal.business_quality.roe > 12 ? 'text-white' : 'text-amber-400'}`}>
+                      {signal.business_quality.roe?.toFixed(1)}%
+                    </p>
+                  </div>
+                )}
+                {signal.business_quality.net_margin !== null && signal.business_quality.net_margin !== undefined && (
+                  <div>
+                    <p className="text-slate-500">Net Margin</p>
+                    <p className={`font-mono ${signal.business_quality.net_margin > 20 ? 'text-emerald-400' : signal.business_quality.net_margin > 10 ? 'text-white' : 'text-amber-400'}`}>
+                      {signal.business_quality.net_margin?.toFixed(1)}%
+                    </p>
+                  </div>
+                )}
+                {signal.business_quality.gross_margin !== null && signal.business_quality.gross_margin !== undefined && (
+                  <div>
+                    <p className="text-slate-500">Gross Margin</p>
+                    <p className="font-mono text-white">{signal.business_quality.gross_margin?.toFixed(1)}%</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-slate-500">Quality Rating</p>
+                  <p className={`font-medium ${signal.business_quality.quality_rating === 'Excellent' ? 'text-emerald-400' : signal.business_quality.quality_rating === 'Good' ? 'text-blue-400' : 'text-slate-300'}`}>
+                    {signal.business_quality.quality_rating}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Growth Profile */}
+          {signal.growth_profile && (
+            <div className="p-3 rounded bg-slate-900/50 border border-slate-800">
+              <p className="text-xs text-cyan-400 mb-2 flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" /> Growth Profile
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                {signal.growth_profile.revenue_growth !== null && signal.growth_profile.revenue_growth !== undefined && (
+                  <div>
+                    <p className="text-slate-500">Revenue Growth</p>
+                    <p className={`font-mono ${signal.growth_profile.revenue_growth > 15 ? 'text-emerald-400' : signal.growth_profile.revenue_growth > 5 ? 'text-white' : signal.growth_profile.revenue_growth < 0 ? 'text-red-400' : 'text-amber-400'}`}>
+                      {signal.growth_profile.revenue_growth > 0 ? '+' : ''}{signal.growth_profile.revenue_growth?.toFixed(1)}%
+                    </p>
+                  </div>
+                )}
+                {signal.growth_profile.earnings_growth !== null && signal.growth_profile.earnings_growth !== undefined && (
+                  <div>
+                    <p className="text-slate-500">EPS Growth</p>
+                    <p className={`font-mono ${signal.growth_profile.earnings_growth > 15 ? 'text-emerald-400' : signal.growth_profile.earnings_growth > 5 ? 'text-white' : signal.growth_profile.earnings_growth < 0 ? 'text-red-400' : 'text-amber-400'}`}>
+                      {signal.growth_profile.earnings_growth > 0 ? '+' : ''}{signal.growth_profile.earnings_growth?.toFixed(1)}%
+                    </p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-slate-500">Trend</p>
+                  <p className={`font-medium ${signal.growth_profile.growth_trend === 'Accelerating' ? 'text-emerald-400' : signal.growth_profile.growth_trend === 'Declining' ? 'text-red-400' : 'text-slate-300'}`}>
+                    {signal.growth_profile.growth_trend}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Rating</p>
+                  <p className="text-slate-300">{signal.growth_profile.growth_rating}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Score Drivers */}
+          {signal.score_drivers && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {signal.score_drivers.boosters?.length > 0 && (
+                <div className="p-3 rounded bg-emerald-500/5 border border-emerald-500/20">
+                  <p className="text-xs text-emerald-400 mb-2">Score Boosters</p>
+                  <ul className="space-y-1">
+                    {signal.score_drivers.boosters.slice(0, 4).map((item, i) => (
+                      <li key={i} className="text-xs text-slate-300 flex items-start gap-1">
+                        <span className="text-emerald-400">+</span> {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {signal.score_drivers.detractors?.length > 0 && (
+                <div className="p-3 rounded bg-red-500/5 border border-red-500/20">
+                  <p className="text-xs text-red-400 mb-2">Score Detractors</p>
+                  <ul className="space-y-1">
+                    {signal.score_drivers.detractors.slice(0, 4).map((item, i) => (
+                      <li key={i} className="text-xs text-slate-300 flex items-start gap-1">
+                        <span className="text-red-400">-</span> {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Biggest Weakness */}
+          {signal.score_drivers?.biggest_weakness && (
+            <div className="flex items-center gap-2 text-xs">
+              <AlertTriangle className="w-3 h-3 text-amber-400" />
+              <span className="text-slate-500">Biggest weakness:</span>
+              <span className="text-amber-400">{signal.score_drivers.biggest_weakness}</span>
+            </div>
+          )}
+          
           {/* Bull Case */}
           {signal.bull_case?.length > 0 && (
             <div>
@@ -256,6 +410,16 @@ const InvestmentCard = ({ signal, expanded, onToggle }) => {
             </p>
             <p className="text-sm text-slate-300">{signal.reasoning}</p>
           </div>
+          
+          {/* Percentile Rank */}
+          {signal.percentile_rank && (
+            <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
+              <span className="text-slate-500">Percentile Rank</span>
+              <span className={`font-mono ${signal.percentile_rank >= 75 ? 'text-emerald-400' : signal.percentile_rank >= 50 ? 'text-blue-400' : 'text-slate-400'}`}>
+                Top {(100 - signal.percentile_rank).toFixed(0)}%
+              </span>
+            </div>
+          )}
         </div>
       )}
     </Card>
