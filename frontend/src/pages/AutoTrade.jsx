@@ -29,9 +29,58 @@ import {
   FileText,
   Zap,
   Ban,
-  ChevronRight
+  ChevronRight,
+  Sun,
+  Moon,
+  Sunrise,
+  Sunset
 } from "lucide-react";
 import { toast } from "sonner";
+
+// Market Status Badge Component
+const MarketStatusBadge = ({ status, extended }) => {
+  const configs = {
+    open: { 
+      color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", 
+      icon: Sun,
+      pulse: true 
+    },
+    pre_market: { 
+      color: "bg-amber-500/20 text-amber-400 border-amber-500/30", 
+      icon: Sunrise,
+      pulse: false 
+    },
+    after_hours: { 
+      color: "bg-orange-500/20 text-orange-400 border-orange-500/30", 
+      icon: Sunset,
+      pulse: false 
+    },
+    closed: { 
+      color: "bg-slate-500/20 text-slate-400 border-slate-500/30", 
+      icon: Moon,
+      pulse: false 
+    }
+  };
+  
+  const config = configs[status] || configs.closed;
+  const Icon = config.icon;
+  
+  return (
+    <Badge 
+      variant="outline" 
+      className={`${config.color} border font-mono text-xs`}
+      data-testid="market-status-badge"
+    >
+      <Icon className={`w-3 h-3 mr-1 ${config.pulse ? 'animate-pulse' : ''}`} />
+      {status === 'open' ? 'Market Open' : 
+       status === 'pre_market' ? 'Pre-Market' :
+       status === 'after_hours' ? 'After-Hours' : 'Closed'}
+      {extended && status !== 'open' && (
+        <span className="ml-1 text-[10px] opacity-70">(Extended ON)</span>
+      )}
+    </Badge>
+  );
+};
 
 // Status badge component
 const StatusBadge = ({ status }) => {
@@ -340,6 +389,7 @@ const AutoTrade = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("queue");
   const [statusFilter, setStatusFilter] = useState("");
+  const [marketStatus, setMarketStatus] = useState(null);
 
   // Get symbols from queue for live prices
   const queueSymbols = trades.map(t => t.symbol).filter(Boolean);
@@ -353,13 +403,14 @@ const AutoTrade = () => {
     try {
       const headers = { Authorization: `Bearer ${token}` };
       
-      const [settingsRes, tradesRes, statsRes, auditRes, accountRes, positionsRes] = await Promise.all([
+      const [settingsRes, tradesRes, statsRes, auditRes, accountRes, positionsRes, marketRes] = await Promise.all([
         fetch(`${API}/paper/settings`, { headers }),
         fetch(`${API}/paper/queue${statusFilter ? `?status=${statusFilter}` : ''}`, { headers }),
         fetch(`${API}/paper/stats`, { headers }),
         fetch(`${API}/paper/audit?limit=30`, { headers }),
         fetch(`${API}/account`, { headers }),
-        fetch(`${API}/positions`, { headers })
+        fetch(`${API}/positions`, { headers }),
+        fetch(`${API}/paper/market-status`, { headers })
       ]);
       
       if (settingsRes.ok) setSettings(await settingsRes.json());
@@ -368,6 +419,7 @@ const AutoTrade = () => {
       if (auditRes.ok) setAuditLog(await auditRes.json());
       if (accountRes.ok) setAccount(await accountRes.json());
       if (positionsRes.ok) setPositions(await positionsRes.json());
+      if (marketRes.ok) setMarketStatus(await marketRes.json());
     } catch (error) {
       console.error("Fetch error:", error);
     } finally {
@@ -512,12 +564,32 @@ const AutoTrade = () => {
       const result = await response.json();
       
       if (result.success) {
-        toast.success("Trade executed successfully");
+        toast.success("Trade executed successfully", {
+          description: `Order ${result.alpaca_order?.id?.slice(0, 8)}... submitted to Alpaca`
+        });
         fetchData();
       } else {
-        toast.error(result.error || "Execution failed");
+        // Check if it's a market hours violation
+        const isMarketHoursBlock = result.violations?.some(v => 
+          v.includes("Extended hours") || v.includes("Market is currently")
+        );
+        
+        if (isMarketHoursBlock) {
+          toast.error("Trade blocked by market hours", {
+            description: "Enable 'Allow Extended Hours Trading' in settings or wait for regular market hours (9:30 AM - 4:00 PM ET).",
+            duration: 6000
+          });
+        } else {
+          toast.error(result.error || "Execution failed");
+        }
+        
+        // Show all violations
         if (result.violations) {
-          result.violations.forEach(v => toast.error(v));
+          result.violations.forEach(v => {
+            if (!isMarketHoursBlock || !v.includes("Extended hours")) {
+              toast.warning(v, { duration: 5000 });
+            }
+          });
         }
         fetchData();
       }
@@ -551,14 +623,43 @@ const AutoTrade = () => {
             <Badge variant="outline" className="border-amber-500/30 text-amber-400">
               Paper Trading Only
             </Badge>
+            {marketStatus && (
+              <MarketStatusBadge 
+                status={marketStatus.status} 
+                extended={marketStatus.extended_hours_enabled}
+              />
+            )}
           </div>
-          <p className="text-sm text-slate-500">Queue and execute trades on Alpaca Paper account</p>
+          <p className="text-sm text-slate-500">
+            Queue and execute trades on Alpaca Paper account
+            {marketStatus?.message && (
+              <span className="ml-2 text-slate-600">• {marketStatus.message}</span>
+            )}
+          </p>
         </div>
         
         <Button variant="outline" onClick={fetchData} className="border-slate-700">
           <RefreshCw className="w-4 h-4 mr-2" /> Refresh
         </Button>
       </div>
+
+      {/* Market Hours Warning */}
+      {marketStatus && !marketStatus.can_trade_now && (
+        <Card className="p-4 border-amber-500/50 bg-amber-500/10">
+          <div className="flex items-center gap-3">
+            <Clock className="w-6 h-6 text-amber-400" />
+            <div>
+              <p className="text-amber-400 font-medium">Trading Outside Regular Hours</p>
+              <p className="text-xs text-amber-300">
+                {marketStatus.label}. Trades cannot be executed until {marketStatus.next_open || 'market opens'}.
+                {!marketStatus.extended_hours_enabled && (
+                  <span> Enable "Allow Extended Hours" in settings to trade during pre-market and after-hours sessions.</span>
+                )}
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Kill Switch Alert */}
       {settings?.kill_switch && (
@@ -652,14 +753,23 @@ const AutoTrade = () => {
               />
             </div>
             
-            <div className="flex items-center justify-between p-3 rounded bg-slate-900 border border-slate-800">
+            <div className="flex items-center justify-between p-3 rounded bg-slate-900 border border-amber-500/30">
               <div>
-                <p className="text-sm text-white">Block Extended Hours</p>
-                <p className="text-xs text-slate-500">Only allow trading during market hours</p>
+                <p className="text-sm text-white flex items-center gap-2">
+                  Allow Extended Hours Trading
+                  {marketStatus && marketStatus.status !== 'open' && !settings?.block_extended_hours && (
+                    <Badge variant="outline" className="border-amber-500/30 text-amber-400 text-[10px]">
+                      Active
+                    </Badge>
+                  )}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Trade during pre-market (4AM-9:30AM ET) and after-hours (4PM-8PM ET)
+                </p>
               </div>
               <Switch
-                checked={settings?.block_extended_hours !== false}
-                onCheckedChange={(v) => updateSettings({...settings, block_extended_hours: v})}
+                checked={settings?.block_extended_hours === false}
+                onCheckedChange={(v) => updateSettings({...settings, block_extended_hours: !v})}
               />
             </div>
           </div>

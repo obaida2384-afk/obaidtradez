@@ -133,11 +133,17 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Kill Switch: OFF
   - Manual Approval Required: ON
   - Auto Execution: OFF
-  - Block Extended Hours: ON
+  - Block Extended Hours: ON (regular market hours only by default)
   - Max Position Size: 5%
   - Cash Buffer: 10%
   - Min Confidence: 60%
   - Max Daily Loss: 2%
+- [x] **Market Hours Controls**:
+  - Real-time market status display (Open, Pre-Market, After-Hours, Closed)
+  - Clear warning banner when outside regular hours
+  - "Allow Extended Hours Trading" toggle for pre-market (4AM-9:30AM ET) and after-hours (4PM-8PM ET)
+  - Descriptive error messages when trades blocked by market hours
+  - Regular market hours (9:30 AM - 4:00 PM ET) enforced by default
 - [x] **Order Workflow**:
   - Queue trades for review
   - Approve / Reject / Cancel actions
@@ -284,6 +290,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 |----------|--------|-------------|
 | `/api/paper/settings` | GET/POST | Get/update execution settings |
 | `/api/paper/kill-switch` | GET/POST | Get/toggle kill switch |
+| `/api/paper/market-status` | GET | Get current market status and trading availability |
 | `/api/paper/queue` | GET/POST | Get trade queue / queue new trade |
 | `/api/paper/trade/{id}` | GET | Get specific trade |
 | `/api/paper/trade/{id}/approve` | POST | Approve pending trade |

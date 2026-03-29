@@ -3003,7 +3003,7 @@ class PaperExecutionEngine:
                 "max_position_pct": 0.05,
                 "cash_buffer": 0.10,
                 "max_daily_loss_pct": 0.02,
-                "block_extended_hours": False,  # Allow extended hours for paper trading
+                "block_extended_hours": True,  # Only allow regular market hours by default
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.paper_execution_settings.insert_one({"_id": "default", **settings})
@@ -3102,16 +3102,87 @@ class PaperExecutionEngine:
         
         # 7. Extended hours check
         if settings.get("block_extended_hours", True):
-            now = datetime.now(timezone.utc)
-            # Market hours: 9:30 AM - 4:00 PM ET (simplified check)
-            hour = now.hour - 5  # Rough ET conversion
-            if hour < 9 or hour >= 16:
-                violations.append("Extended hours trading is blocked")
+            market_status = self.get_market_status()
+            if market_status["status"] != "open":
+                status_name = market_status["status"].replace("_", " ").title()
+                violations.append(f"Market is currently {status_name}. Extended hours trading is disabled. Enable 'Allow Extended Hours' in settings to trade outside regular hours (9:30 AM - 4:00 PM ET).")
         
         return {
             "passed": len(violations) == 0,
             "violations": violations
         }
+    
+    def get_market_status(self) -> Dict:
+        """Get current market status based on US Eastern Time"""
+        from zoneinfo import ZoneInfo
+        
+        # Get current time in ET
+        et_tz = ZoneInfo("America/New_York")
+        now_et = datetime.now(et_tz)
+        
+        hour = now_et.hour
+        minute = now_et.minute
+        weekday = now_et.weekday()  # Monday = 0, Sunday = 6
+        
+        # Weekend check
+        if weekday >= 5:  # Saturday or Sunday
+            return {
+                "status": "closed",
+                "label": "Market Closed",
+                "message": "Markets are closed on weekends",
+                "next_open": "Monday 9:30 AM ET",
+                "is_trading_allowed": False
+            }
+        
+        # Convert to minutes since midnight for easier comparison
+        current_minutes = hour * 60 + minute
+        
+        # Market times in minutes
+        premarket_start = 4 * 60  # 4:00 AM ET
+        market_open = 9 * 60 + 30  # 9:30 AM ET
+        market_close = 16 * 60  # 4:00 PM ET
+        afterhours_end = 20 * 60  # 8:00 PM ET
+        
+        if current_minutes < premarket_start:
+            return {
+                "status": "closed",
+                "label": "Market Closed",
+                "message": "Markets open at 9:30 AM ET",
+                "next_open": "9:30 AM ET today",
+                "is_trading_allowed": False
+            }
+        elif current_minutes < market_open:
+            return {
+                "status": "pre_market",
+                "label": "Pre-Market",
+                "message": f"Pre-market trading (4:00 AM - 9:30 AM ET). Regular session opens in {(market_open - current_minutes) // 60}h {(market_open - current_minutes) % 60}m",
+                "next_open": "9:30 AM ET today",
+                "is_trading_allowed": False  # Extended hours only
+            }
+        elif current_minutes < market_close:
+            return {
+                "status": "open",
+                "label": "Market Open",
+                "message": f"Regular trading hours (9:30 AM - 4:00 PM ET). Closes in {(market_close - current_minutes) // 60}h {(market_close - current_minutes) % 60}m",
+                "next_open": None,
+                "is_trading_allowed": True
+            }
+        elif current_minutes < afterhours_end:
+            return {
+                "status": "after_hours",
+                "label": "After-Hours",
+                "message": "After-hours trading (4:00 PM - 8:00 PM ET). Regular session opens tomorrow at 9:30 AM ET",
+                "next_open": "9:30 AM ET tomorrow",
+                "is_trading_allowed": False  # Extended hours only
+            }
+        else:
+            return {
+                "status": "closed",
+                "label": "Market Closed",
+                "message": "Markets open tomorrow at 9:30 AM ET",
+                "next_open": "9:30 AM ET tomorrow",
+                "is_trading_allowed": False
+            }
     
     async def queue_trade(self, trade_data: Dict) -> Dict:
         """Add a trade to the queue for review"""
@@ -3467,6 +3538,21 @@ async def get_paper_stats(auth: bool = Depends(verify_access)):
         "failed": stats.get(OrderStatus.FAILED, 0),
         "total": sum(stats.values())
     }
+
+@api_router.get("/paper/market-status")
+async def get_market_status(auth: bool = Depends(verify_access)):
+    """Get current market status and trading availability"""
+    market_status = paper_execution.get_market_status()
+    settings = await paper_execution.get_system_settings()
+    
+    # Add extended hours setting to response
+    market_status["extended_hours_enabled"] = not settings.get("block_extended_hours", True)
+    market_status["can_trade_now"] = (
+        market_status["is_trading_allowed"] or 
+        market_status["extended_hours_enabled"]
+    )
+    
+    return market_status
 
 # ===================== LIVE PRICES =====================
 
