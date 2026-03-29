@@ -44,7 +44,9 @@ class Config:
     # Alpaca
     ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
     ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY')
-    ALPACA_BASE_URL = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+    # Store base URL without /v2, add it in API calls
+    _raw_base_url = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets/v2')
+    ALPACA_BASE_URL = _raw_base_url.rstrip('/').replace('/v2', '')
 
 config = Config()
 
@@ -2976,9 +2978,12 @@ class PaperExecutionEngine:
     """Paper trading execution engine with safety controls"""
     
     def __init__(self):
-        self.alpaca_url = os.environ.get("ALPACA_API_URL", "https://paper-api.alpaca.markets")
+        # Use consistent env var names - ALPACA_BASE_URL and ALPACA_SECRET_KEY
+        self.alpaca_url = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2")
+        # Strip /v2 if present (we add it in API calls)
+        self.alpaca_url = self.alpaca_url.rstrip("/").replace("/v2", "")
         self.alpaca_key = os.environ.get("ALPACA_API_KEY", "")
-        self.alpaca_secret = os.environ.get("ALPACA_API_SECRET", "")
+        self.alpaca_secret = os.environ.get("ALPACA_SECRET_KEY", "")
         self.headers = {
             "APCA-API-KEY-ID": self.alpaca_key,
             "APCA-API-SECRET-KEY": self.alpaca_secret,
