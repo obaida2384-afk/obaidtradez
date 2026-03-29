@@ -61,6 +61,28 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [x] **Percentile Rank**: Top X% ranking indicator
 - [x] **Dynamic thresholding**: Percentile-based category assignment
 
+### Phase 3 - Risk Management, Backtesting & Alerts (Dec 2025)
+- [x] **Risk Management Engine**:
+  - Position Size Calculator (shares, position value, risk amount based on stop-loss)
+  - Risk/Reward Calculator (ratio display, quality rating: Excellent/Good/Fair/Poor)
+  - Risk Settings (max position, max daily/weekly loss, max drawdown, stop-loss/take-profit defaults)
+  - Daily Risk Status (account value, daily P&L, can_trade flag - gracefully handles Alpaca 401)
+- [x] **Backtesting Tab**:
+  - 5 strategies: Momentum, Mean Reversion, Breakout, MA Crossover, Value
+  - Time periods: 3m, 6m, 1y, 2y, 5y
+  - Real historical data from FMP API
+  - Results: Total Return, Final Value, Max Drawdown, Sharpe Ratio, Win Rate
+  - Equity Curve visualization
+  - Trade Log (last 10 trades with entry/exit and P&L)
+  - Backtest History persistence
+- [x] **Alerts Tab**:
+  - 4 alert types: Price Above, Price Below, % Change, Volume Spike
+  - MongoDB persistence
+  - Real-time price checking via FMP API
+  - Trigger detection with timestamp and message
+  - Alert History log
+  - Reset functionality for triggered alerts
+
 ## API Endpoints
 
 ### Authentication
@@ -94,6 +116,31 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 | `/api/positions` | GET | Current positions |
 | `/api/universe/stats` | GET | Universe statistics |
 
+### Risk Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/risk/position-size` | POST | Calculate optimal position size |
+| `/api/risk/risk-reward` | POST | Calculate risk/reward ratio |
+| `/api/risk/settings` | GET/POST | Get/save risk settings |
+| `/api/risk/daily-status` | GET | Daily risk status with P&L |
+
+### Backtesting
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/backtest/run` | POST | Run a backtest simulation |
+| `/api/backtest/history` | GET | Get backtest history |
+| `/api/backtest/strategies` | GET | List available strategies |
+
+### Alerts
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/alerts` | GET/POST | List/create alerts |
+| `/api/alerts/{id}` | PUT/DELETE | Update/delete alert |
+| `/api/alerts/check` | GET | Check all alerts vs real prices |
+| `/api/alerts/history` | GET | Get triggered alert history |
+| `/api/alerts/{id}/reset` | POST | Reset a triggered alert |
+| `/api/alerts/types` | GET | List available alert types |
+
 ## Prioritized Backlog
 
 ### P0 (Critical) - COMPLETE ✓
@@ -104,12 +151,14 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - Broad market coverage (271 stocks)
 
 ### P1 (High Priority)
+- [x] Real backtesting with historical data ✓
+- [x] Persistent alerts with MongoDB storage ✓
+- [x] Risk Management engine ✓
 - [ ] Live Alpaca order execution (currently paper trading setup only)
-- [ ] Persistent alerts with push notifications
-- [ ] Real backtesting with historical data
 - [ ] Portfolio performance charts
 
 ### P2 (Medium Priority)
+- [ ] Real-time price streaming for Investment cards
 - [ ] Watchlist with saved stocks
 - [ ] Custom screener presets
 - [ ] Email notifications
@@ -122,9 +171,12 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (22/22 tests passed)
+- Backend: 100% (All endpoints working - iteration_5)
 - Frontend: 100% (All features working, tested Dec 2025)
 - Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
+- Risk Management: 100% (Position Size, Risk/Reward calculators working)
+- Backtesting: 100% (Real FMP historical data, 5 strategies)
+- Alerts: 100% (CRUD, Check Now, History, Reset - MongoDB persistence)
 - Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
@@ -134,3 +186,5 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - Investment signals are cached in MongoDB and refreshed on demand
 - Background refresh processes stocks in batches of 10 with 0.5s delays
 - Conditional sections (Bear Case, Key Risks, Score Detractors) only appear when data is available
+- Alpaca API returns 401 (invalid keys) - gracefully handled with "Connect Alpaca" message
+- Risk settings, backtest history, and alerts persist to MongoDB
