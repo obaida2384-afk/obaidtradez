@@ -2994,7 +2994,7 @@ class PaperExecutionEngine:
         """Get paper execution system settings"""
         settings = await db.paper_execution_settings.find_one({"_id": "default"}, {"_id": 0})
         if not settings:
-            # Default settings: SAFE MODE
+            # Default settings: SAFE MODE (but allow extended hours for paper trading)
             settings = {
                 "kill_switch": False,
                 "auto_execution": False,  # OFF by default
@@ -3003,7 +3003,7 @@ class PaperExecutionEngine:
                 "max_position_pct": 0.05,
                 "cash_buffer": 0.10,
                 "max_daily_loss_pct": 0.02,
-                "block_extended_hours": True,
+                "block_extended_hours": False,  # Allow extended hours for paper trading
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.paper_execution_settings.insert_one({"_id": "default", **settings})
@@ -3066,7 +3066,9 @@ class PaperExecutionEngine:
         if account:
             equity = float(account.get("equity", 0))
             max_position_pct = settings.get("max_position_pct", 0.05)
-            notional = trade.get("notional") or (trade.get("qty", 0) * trade.get("entry_price", 0))
+            qty = float(trade.get("qty") or 0)
+            entry_price = float(trade.get("entry_price") or 0)
+            notional = trade.get("notional") or (qty * entry_price if entry_price > 0 else 0)
             
             if equity > 0 and notional > 0:
                 position_pct = notional / equity
@@ -3078,9 +3080,12 @@ class PaperExecutionEngine:
             cash = float(account.get("cash", 0))
             equity = float(account.get("equity", 0))
             cash_buffer = settings.get("cash_buffer", 0.10)
-            notional = trade.get("notional") or (trade.get("qty", 0) * trade.get("entry_price", 0))
+            qty = float(trade.get("qty") or 0)
+            entry_price = float(trade.get("entry_price") or 0)
+            notional = trade.get("notional") or (qty * entry_price if entry_price > 0 else 0)
             
-            if equity > 0:
+            # Skip cash buffer check if we can't calculate notional
+            if equity > 0 and notional > 0:
                 remaining_cash_pct = (cash - notional) / equity
                 if remaining_cash_pct < cash_buffer:
                     violations.append(f"Trade would reduce cash below buffer ({cash_buffer:.0%})")
