@@ -214,6 +214,10 @@ class MultiAPIClient:
         self.news_url = "https://newsapi.org/v2"
         self.alpaca_url = config.ALPACA_BASE_URL
         self.alpaca_data_url = "https://data.alpaca.markets"
+        self.alpaca_headers = {
+            "APCA-API-KEY-ID": config.ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY
+        }
     
     async def _request(self, url: str, headers: Dict = None, params: Dict = None, timeout: float = 15.0) -> Optional[Any]:
         try:
@@ -2586,10 +2590,364 @@ async def update_watchlist_note(symbol: str, note: str = "", auth: bool = Depend
     )
     return {"success": result.modified_count > 0}
 
+# ===================== PORTFOLIO ANALYTICS =====================
+
+class PortfolioAnalytics:
+    """Portfolio analytics and performance calculations"""
+    
+    async def get_portfolio_history(self, period: str = "1M") -> List[Dict]:
+        """Get portfolio history from Alpaca"""
+        period_map = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "1Y": "1A", "ALL": "all"}
+        alpaca_period = period_map.get(period, "1M")
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{api_client.alpaca_url}/v2/account/portfolio/history",
+                    headers=api_client.alpaca_headers,
+                    params={"period": alpaca_period, "timeframe": "1D"}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    timestamps = data.get("timestamp", [])
+                    equity = data.get("equity", [])
+                    profit_loss = data.get("profit_loss", [])
+                    profit_loss_pct = data.get("profit_loss_pct", [])
+                    
+                    history = []
+                    for i in range(len(timestamps)):
+                        if timestamps[i] and equity[i]:
+                            history.append({
+                                "date": datetime.fromtimestamp(timestamps[i]).strftime("%Y-%m-%d"),
+                                "equity": equity[i],
+                                "pnl": profit_loss[i] if i < len(profit_loss) else 0,
+                                "pnl_pct": profit_loss_pct[i] * 100 if i < len(profit_loss_pct) else 0
+                            })
+                    return history
+        except Exception as e:
+            logger.error(f"Portfolio history error: {e}")
+        
+        return []
+    
+    async def get_trade_history(self) -> List[Dict]:
+        """Get closed trades from Alpaca"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{api_client.alpaca_url}/v2/orders",
+                    headers=api_client.alpaca_headers,
+                    params={"status": "closed", "limit": 500}
+                )
+                if response.status_code == 200:
+                    orders = response.json()
+                    trades = []
+                    for order in orders:
+                        if order.get("filled_at"):
+                            trades.append({
+                                "id": order.get("id"),
+                                "symbol": order.get("symbol"),
+                                "side": order.get("side"),
+                                "qty": float(order.get("filled_qty", 0)),
+                                "avg_price": float(order.get("filled_avg_price", 0)),
+                                "filled_at": order.get("filled_at"),
+                                "order_type": order.get("type")
+                            })
+                    return trades
+        except Exception as e:
+            logger.error(f"Trade history error: {e}")
+        
+        return []
+    
+    def calculate_drawdown(self, equity_history: List[Dict]) -> List[Dict]:
+        """Calculate drawdown series"""
+        if not equity_history:
+            return []
+        
+        drawdowns = []
+        peak = equity_history[0]["equity"]
+        
+        for point in equity_history:
+            equity = point["equity"]
+            if equity > peak:
+                peak = equity
+            
+            drawdown = ((peak - equity) / peak) * 100 if peak > 0 else 0
+            drawdowns.append({
+                "date": point["date"],
+                "drawdown": round(drawdown, 2),
+                "equity": equity,
+                "peak": peak
+            })
+        
+        return drawdowns
+    
+    def calculate_win_rate_trend(self, trades: List[Dict]) -> Dict:
+        """Calculate win rate trends"""
+        if not trades:
+            return {"overall": 0, "trend": [], "by_strategy": {}}
+        
+        # Match buys and sells by symbol
+        positions = {}
+        completed_trades = []
+        
+        for trade in sorted(trades, key=lambda x: x.get("filled_at", "")):
+            symbol = trade["symbol"]
+            
+            if trade["side"] == "buy":
+                if symbol not in positions:
+                    positions[symbol] = []
+                positions[symbol].append(trade)
+            elif trade["side"] == "sell" and symbol in positions and positions[symbol]:
+                buy_trade = positions[symbol].pop(0)
+                buy_price = buy_trade["avg_price"]
+                sell_price = trade["avg_price"]
+                pnl = (sell_price - buy_price) * trade["qty"]
+                pnl_pct = ((sell_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0
+                
+                completed_trades.append({
+                    "symbol": symbol,
+                    "buy_price": buy_price,
+                    "sell_price": sell_price,
+                    "qty": trade["qty"],
+                    "pnl": pnl,
+                    "pnl_pct": pnl_pct,
+                    "date": trade.get("filled_at", "")[:10],
+                    "win": pnl > 0
+                })
+        
+        if not completed_trades:
+            return {"overall": 0, "trend": [], "by_strategy": {}, "total_trades": 0}
+        
+        # Overall win rate
+        wins = sum(1 for t in completed_trades if t["win"])
+        total = len(completed_trades)
+        overall_win_rate = (wins / total) * 100 if total > 0 else 0
+        
+        # Rolling win rate (last 20 trades)
+        rolling_window = 20
+        trend = []
+        for i in range(min(rolling_window, len(completed_trades)), len(completed_trades) + 1):
+            window = completed_trades[max(0, i - rolling_window):i]
+            window_wins = sum(1 for t in window if t["win"])
+            window_rate = (window_wins / len(window)) * 100 if window else 0
+            if i <= len(completed_trades) and i > 0:
+                trend.append({
+                    "trade_num": i,
+                    "win_rate": round(window_rate, 1),
+                    "date": completed_trades[i-1]["date"] if i > 0 else ""
+                })
+        
+        return {
+            "overall": round(overall_win_rate, 1),
+            "wins": wins,
+            "losses": total - wins,
+            "total_trades": total,
+            "trend": trend,
+            "completed_trades": completed_trades[-50:]  # Last 50 trades
+        }
+    
+    async def get_sector_allocation(self, positions: List[Dict]) -> List[Dict]:
+        """Calculate sector allocation from positions"""
+        if not positions:
+            return []
+        
+        sector_values = {}
+        total_value = 0
+        
+        for pos in positions:
+            symbol = pos.get("symbol", "")
+            market_value = float(pos.get("market_value", 0))
+            total_value += abs(market_value)
+            
+            # Get sector from cached investment signal
+            signal = await db.investment_signals.find_one({"symbol": symbol})
+            sector = signal.get("sector", "Unknown") if signal else "Unknown"
+            
+            if sector not in sector_values:
+                sector_values[sector] = 0
+            sector_values[sector] += abs(market_value)
+        
+        allocation = []
+        for sector, value in sorted(sector_values.items(), key=lambda x: -x[1]):
+            allocation.append({
+                "sector": sector,
+                "value": round(value, 2),
+                "percentage": round((value / total_value) * 100, 1) if total_value > 0 else 0
+            })
+        
+        return allocation
+    
+    def get_pnl_breakdown(self, positions: List[Dict], completed_trades: List[Dict]) -> Dict:
+        """Get P&L breakdown: realized vs unrealized"""
+        # Unrealized from current positions
+        unrealized_pnl = sum(float(p.get("unrealized_pl", 0)) for p in positions)
+        unrealized_pnl_pct = sum(float(p.get("unrealized_plpc", 0)) * 100 for p in positions) / len(positions) if positions else 0
+        
+        # Realized from completed trades
+        realized_pnl = sum(t.get("pnl", 0) for t in completed_trades)
+        total_invested = sum(t.get("buy_price", 0) * t.get("qty", 0) for t in completed_trades)
+        realized_pnl_pct = (realized_pnl / total_invested) * 100 if total_invested > 0 else 0
+        
+        # Calculate average trade return
+        avg_trade_return = sum(t.get("pnl_pct", 0) for t in completed_trades) / len(completed_trades) if completed_trades else 0
+        
+        # Best and worst trades
+        best_trade = max(completed_trades, key=lambda x: x.get("pnl_pct", 0)) if completed_trades else None
+        worst_trade = min(completed_trades, key=lambda x: x.get("pnl_pct", 0)) if completed_trades else None
+        
+        return {
+            "realized_pnl": round(realized_pnl, 2),
+            "realized_pnl_pct": round(realized_pnl_pct, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "unrealized_pnl_pct": round(unrealized_pnl_pct, 2),
+            "total_pnl": round(realized_pnl + unrealized_pnl, 2),
+            "avg_trade_return": round(avg_trade_return, 2),
+            "best_trade": {
+                "symbol": best_trade["symbol"],
+                "pnl_pct": round(best_trade["pnl_pct"], 2)
+            } if best_trade else None,
+            "worst_trade": {
+                "symbol": worst_trade["symbol"],
+                "pnl_pct": round(worst_trade["pnl_pct"], 2)
+            } if worst_trade else None
+        }
+    
+    def get_strategy_performance(self, backtests: List[Dict]) -> List[Dict]:
+        """Get performance by strategy from backtest history"""
+        strategy_stats = {}
+        
+        for bt in backtests:
+            strategy = bt.get("strategy", "unknown")
+            result = bt.get("result", {})
+            
+            if strategy not in strategy_stats:
+                strategy_stats[strategy] = {
+                    "runs": 0,
+                    "total_return": 0,
+                    "total_win_rate": 0,
+                    "avg_drawdown": 0
+                }
+            
+            stats = strategy_stats[strategy]
+            stats["runs"] += 1
+            stats["total_return"] += result.get("total_return", 0)
+            stats["total_win_rate"] += result.get("win_rate", 0)
+            stats["avg_drawdown"] += result.get("max_drawdown", 0)
+        
+        performance = []
+        for strategy, stats in strategy_stats.items():
+            runs = stats["runs"]
+            if runs > 0:
+                performance.append({
+                    "strategy": strategy,
+                    "avg_return": round(stats["total_return"] / runs, 2),
+                    "avg_win_rate": round(stats["total_win_rate"] / runs, 1),
+                    "avg_drawdown": round(stats["avg_drawdown"] / runs, 2),
+                    "runs": runs
+                })
+        
+        return sorted(performance, key=lambda x: -x["avg_return"])
+
+portfolio_analytics = PortfolioAnalytics()
+
+@api_router.get("/portfolio/history")
+async def get_portfolio_history(
+    period: str = Query(default="1M", regex="^(1D|1W|1M|3M|1Y|ALL)$"),
+    auth: bool = Depends(verify_access)
+):
+    """Get portfolio equity history"""
+    history = await portfolio_analytics.get_portfolio_history(period)
+    return {"history": history, "period": period}
+
+@api_router.get("/portfolio/drawdown")
+async def get_portfolio_drawdown(
+    period: str = Query(default="1M"),
+    auth: bool = Depends(verify_access)
+):
+    """Get portfolio drawdown history"""
+    history = await portfolio_analytics.get_portfolio_history(period)
+    drawdowns = portfolio_analytics.calculate_drawdown(history)
+    
+    max_drawdown = max((d["drawdown"] for d in drawdowns), default=0)
+    
+    return {
+        "drawdowns": drawdowns,
+        "max_drawdown": round(max_drawdown, 2),
+        "period": period
+    }
+
+@api_router.get("/portfolio/win-rate")
+async def get_portfolio_win_rate(auth: bool = Depends(verify_access)):
+    """Get win rate analysis"""
+    trades = await portfolio_analytics.get_trade_history()
+    analysis = portfolio_analytics.calculate_win_rate_trend(trades)
+    return analysis
+
+@api_router.get("/portfolio/sector-allocation")
+async def get_sector_allocation(auth: bool = Depends(verify_access)):
+    """Get portfolio sector allocation"""
+    positions = await api_client.alpaca_positions() or []
+    allocation = await portfolio_analytics.get_sector_allocation(positions)
+    return {"allocation": allocation, "position_count": len(positions)}
+
+@api_router.get("/portfolio/pnl-breakdown")
+async def get_pnl_breakdown(auth: bool = Depends(verify_access)):
+    """Get P&L breakdown: realized vs unrealized"""
+    positions = await api_client.alpaca_positions() or []
+    trades = await portfolio_analytics.get_trade_history()
+    win_analysis = portfolio_analytics.calculate_win_rate_trend(trades)
+    completed_trades = win_analysis.get("completed_trades", [])
+    
+    breakdown = portfolio_analytics.get_pnl_breakdown(positions, completed_trades)
+    return breakdown
+
+@api_router.get("/portfolio/strategy-performance")
+async def get_strategy_performance(auth: bool = Depends(verify_access)):
+    """Get performance by backtest strategy"""
+    cursor = db.backtests.find({}, {"_id": 0}).sort("created_at", -1).limit(100)
+    backtests = await cursor.to_list(length=100)
+    performance = portfolio_analytics.get_strategy_performance(backtests)
+    return {"performance": performance}
+
+@api_router.get("/portfolio/analytics")
+async def get_portfolio_analytics(
+    period: str = Query(default="1M"),
+    auth: bool = Depends(verify_access)
+):
+    """Get comprehensive portfolio analytics"""
+    # Fetch all data in parallel
+    history_task = portfolio_analytics.get_portfolio_history(period)
+    trades_task = portfolio_analytics.get_trade_history()
+    positions_task = api_client.alpaca_positions()
+    backtests_cursor = db.backtests.find({}, {"_id": 0}).sort("created_at", -1).limit(100)
+    
+    history = await history_task
+    trades = await trades_task
+    positions = await positions_task or []
+    backtests = await backtests_cursor.to_list(length=100)
+    
+    # Calculate all analytics
+    drawdowns = portfolio_analytics.calculate_drawdown(history)
+    win_analysis = portfolio_analytics.calculate_win_rate_trend(trades)
+    sector_allocation = await portfolio_analytics.get_sector_allocation(positions)
+    pnl_breakdown = portfolio_analytics.get_pnl_breakdown(positions, win_analysis.get("completed_trades", []))
+    strategy_performance = portfolio_analytics.get_strategy_performance(backtests)
+    
+    return {
+        "period": period,
+        "history": history,
+        "drawdowns": drawdowns,
+        "max_drawdown": max((d["drawdown"] for d in drawdowns), default=0),
+        "win_rate": win_analysis,
+        "sector_allocation": sector_allocation,
+        "pnl_breakdown": pnl_breakdown,
+        "strategy_performance": strategy_performance
+    }
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "2.2.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "2.3.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)
