@@ -124,6 +124,45 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - MongoDB backtest history
   - Graceful handling of Alpaca 401
 
+### Phase 6 - Paper Execution (Dec 2025)
+- [x] **Paper Trading Only**:
+  - Uses Alpaca Paper account only
+  - Live trading disabled
+  - "Paper Trading Only" badge in UI
+- [x] **Safety Controls (Defaults)**:
+  - Kill Switch: OFF
+  - Manual Approval Required: ON
+  - Auto Execution: OFF
+  - Block Extended Hours: ON
+  - Max Position Size: 5%
+  - Cash Buffer: 10%
+  - Min Confidence: 60%
+  - Max Daily Loss: 2%
+- [x] **Order Workflow**:
+  - Queue trades for review
+  - Approve / Reject / Cancel actions
+  - Status tracking: pending → approved → executed/rejected/failed
+  - Execute only approved trades
+- [x] **Trade Logs & Audit Trail**:
+  - Symbol, side, qty, reason, strategy, confidence
+  - Entry, stop-loss, take-profit prices
+  - Alpaca order ID when executed
+  - Status history with timestamps
+  - Full audit log of all actions
+- [x] **Risk Controls Before Execution**:
+  - Kill switch check
+  - Position size limit
+  - Cash buffer enforcement
+  - Confidence threshold check
+  - Extended hours block
+  - Daily loss limit check
+- [x] **UI**:
+  - Account stats (Buying Power, Cash, counts)
+  - Safety Controls section with toggles/sliders
+  - Queue New Trade form
+  - Tabs: Queue, Executed, Positions, Audit Log
+  - Trade cards with action buttons
+
 ## API Endpoints
 
 ### Authentication
@@ -204,6 +243,21 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 | `/api/portfolio/pnl-breakdown` | GET | P&L breakdown |
 | `/api/portfolio/strategy-performance` | GET | Strategy performance from backtests |
 
+### Paper Execution
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/paper/settings` | GET/POST | Get/update execution settings |
+| `/api/paper/kill-switch` | GET/POST | Get/toggle kill switch |
+| `/api/paper/queue` | GET/POST | Get trade queue / queue new trade |
+| `/api/paper/trade/{id}` | GET | Get specific trade |
+| `/api/paper/trade/{id}/approve` | POST | Approve pending trade |
+| `/api/paper/trade/{id}/reject` | POST | Reject pending trade |
+| `/api/paper/trade/{id}/cancel` | POST | Cancel trade |
+| `/api/paper/trade/{id}/execute` | POST | Execute approved trade |
+| `/api/paper/risk-check` | POST | Check risk controls for trade |
+| `/api/paper/audit` | GET | Get audit log |
+| `/api/paper/stats` | GET | Get execution statistics |
+
 ## Prioritized Backlog
 
 ### P0 (Critical) - COMPLETE ✓
@@ -219,7 +273,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [x] Risk Management engine ✓
 - [x] Watchlist with saved stocks ✓
 - [x] Portfolio performance charts ✓
-- [ ] Live Alpaca paper execution (with manual approval, kill switch)
+- [x] Alpaca paper execution (with manual approval, kill switch) ✓
 
 ### P2 (Medium Priority)
 - [ ] Real-time price streaming for Investment cards
@@ -234,7 +288,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_7)
+- Backend: 100% (All endpoints working - iteration_8)
 - Frontend: 100% (All features working, tested Dec 2025)
 - Investment Explainability UI: 100% (21/21 tests passed - iteration_4)
 - Risk Management: 100% (Position Size, Risk/Reward calculators working)
@@ -242,6 +296,7 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - Alerts: 100% (CRUD, Check Now, History, Reset - MongoDB persistence)
 - Watchlist: 100% (18/18 tests passed - iteration_6)
 - Portfolio Analytics: 100% (17/17 backend, 24/24 frontend - iteration_7)
+- Paper Execution: 100% (25/25 backend, all UI verified - iteration_8)
 - Investment Universe: 271 stocks cached from 350+ stock universe
 - Access Code: `Bullishalmarkhan7.7`
 
