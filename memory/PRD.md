@@ -365,6 +365,20 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - Win/loss years, best/worst year, vs ATH, 200-day SMA trend
   - Historical rating (Exceptional/Strong/Average/Weak/Poor) with score boost/penalty
   - Frontend: Full historical section in expanded investment cards with color-coded metrics
+- [x] **Mobile-Responsive Sidebar** for iPhone
+  - Hamburger menu (☰) on screens < 768px
+  - Full slide-out drawer with backdrop overlay
+  - Auto-closes on navigation
+  - All nav items accessible with labels
+- [x] **Backtesting Dashboard Upgrade** with 30yr data
+  - Period options: 3m, 6m, 1yr, 2yr, 5yr, 10yr, 20yr, 30yr
+  - S&P 500 (SPY) benchmark comparison with alpha calculation
+  - Annualized return, years tested, data points
+  - Last 20 trades (up from 10)
+- [x] **30yr Data for All Companies**
+  - 1,222 out of 1,250 stocks with historical performance data
+  - 562 stocks with 25-30 years of data
+  - Newer IPOs traced back as far as available
 
 ### P2 (Medium Priority)
 - [ ] Compare stocks side-by-side
@@ -377,9 +391,11 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_16)
-- Frontend: 100% (All features working - iteration_16)
-- Historical Performance: 100% (verified iteration_16)
+- Backend: 100% (All endpoints working - iteration_17)
+- Frontend: 100% (All features working - iteration_17)
+- Mobile Sidebar: 100% (verified iteration_17)
+- Backtesting 30yr: 100% (verified iteration_17)
+- Historical Performance: 100% (verified iteration_16 & 17)
 - Trading Signals Full Universe: 100% (verified iteration_15)
 - Decision Clarity UI: 100% (verified iteration_14)
 - Custom Screener Presets: 100% (verified iteration_14)
