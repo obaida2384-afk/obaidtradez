@@ -14,7 +14,8 @@ import {
   ArrowUpRight, ArrowDownRight, Loader2, Brain, Lock, Bell,
   CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert, Filter,
   Search, Layers, TriangleAlert, CheckCircle, Database,
-  ArrowUp, ArrowDown, Grid3x3, BookOpen
+  ArrowUp, ArrowDown, Grid3x3, BookOpen, PieChart, TrendingDown,
+  SkipForward, Ban
 } from "lucide-react";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
@@ -589,6 +590,7 @@ const AutoTrade = () => {
   const [history, setHistory] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [tradeLog, setTradeLog] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -646,6 +648,13 @@ const AutoTrade = () => {
     try {
       const resp = await fetch(`${API}/auto-trade/trade-log?limit=50`, { headers });
       if (resp.ok) setTradeLog(await resp.json());
+    } catch (e) { console.error(e); }
+  }, [token]);
+
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API}/auto-trade/analytics`, { headers });
+      if (resp.ok) setAnalytics(await resp.json());
     } catch (e) { console.error(e); }
   }, [token]);
 
@@ -863,6 +872,7 @@ const AutoTrade = () => {
         if (v === "notifications") fetchNotifications();
         if (v === "history") fetchHistory();
         if (v === "trade-log") fetchTradeLog();
+        if (v === "analytics") fetchAnalytics();
       }}>
         <TabsList className="w-full justify-start bg-slate-900 border border-slate-800 p-1 h-auto flex-wrap">
           <TabsTrigger value="scheduler" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400"><Timer className="w-4 h-4 mr-1" /> Scheduler</TabsTrigger>
@@ -872,6 +882,9 @@ const AutoTrade = () => {
           <TabsTrigger value="long-term" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><TrendingUp className="w-4 h-4 mr-1" /> Long ({opportunities?.long_term?.length || 0})</TabsTrigger>
           <TabsTrigger value="mtf-heatmap" className="data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400"><Grid3x3 className="w-4 h-4 mr-1" /> MTF Heatmap</TabsTrigger>
           <TabsTrigger value="trade-log" className="data-[state=active]:bg-teal-500/20 data-[state=active]:text-teal-400"><Database className="w-4 h-4 mr-1" /> Trade Log</TabsTrigger>
+          <TabsTrigger value="analytics" data-testid="analytics-tab" className="data-[state=active]:bg-rose-500/20 data-[state=active]:text-rose-400"><PieChart className="w-4 h-4 mr-1" /> Analytics</TabsTrigger>
+          <TabsTrigger value="lt-pipeline" data-testid="lt-pipeline-tab" className="data-[state=active]:bg-violet-500/20 data-[state=active]:text-violet-400"><Layers className="w-4 h-4 mr-1" /> LT Pipeline</TabsTrigger>
+          <TabsTrigger value="momentum-diag" data-testid="momentum-diag-tab" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400"><Gauge className="w-4 h-4 mr-1" /> Momentum</TabsTrigger>
           <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Bell className="w-4 h-4 mr-1" /> Alerts</TabsTrigger>
           <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Activity className="w-4 h-4 mr-1" /> History</TabsTrigger>
           <TabsTrigger value="settings" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-white"><Settings className="w-4 h-4 mr-1" /> Config</TabsTrigger>
@@ -1197,7 +1210,7 @@ const AutoTrade = () => {
             <Button variant="outline" size="sm" onClick={fetchTradeLog} className="border-slate-700"><RefreshCw className="w-3 h-3 mr-1" /> Refresh</Button>
           </div>
           {tradeLog.length > 0 ? tradeLog.map((t, i) => (
-            <Card key={i} className={`terminal-card p-4 border ${t.status === "OPEN" ? "border-emerald-500/20" : t.pnl_dollars >= 0 ? "border-blue-500/20" : "border-red-500/20"}`} data-testid={`trade-log-${i}`}>
+            <Card key={i} className={`terminal-card p-4 border ${t.status === "SKIPPED" ? "border-slate-700" : t.status === "OPEN" ? "border-emerald-500/20" : t.pnl_dollars >= 0 ? "border-blue-500/20" : "border-red-500/20"}`} data-testid={`trade-log-${i}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="text-white font-bold text-sm">{t.symbol}</span>
@@ -1207,21 +1220,23 @@ const AutoTrade = () => {
                   <Badge variant="outline" className={`text-[10px] ${t.action === "BUY" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
                     {t.action}
                   </Badge>
-                  <Badge variant="outline" className={`text-[10px] ${t.status === "OPEN" ? "border-amber-500/30 text-amber-400" : "border-slate-700 text-slate-400"}`}>
+                  <Badge variant="outline" className={`text-[10px] ${t.status === "OPEN" ? "border-amber-500/30 text-amber-400" : t.status === "SKIPPED" ? "border-slate-600 text-slate-400" : "border-slate-700 text-slate-400"}`}>
                     {t.status}
                   </Badge>
+                  {t.executed === false && <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400"><SkipForward className="w-3 h-3 mr-0.5" />SKIP</Badge>}
                   {t.momentum_mode && <Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">MOMENTUM</Badge>}
                   {t.mtf_aligned && <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">MTF OK</Badge>}
                 </div>
-                <span className="text-xs text-slate-500">{t.opened_at ? new Date(t.opened_at).toLocaleString() : ""}</span>
+                <span className="text-xs text-slate-500">{t.opened_at ? new Date(t.opened_at).toLocaleString() : t.date || ""}</span>
               </div>
-              <div className="grid grid-cols-3 md:grid-cols-7 gap-2 text-xs">
+              <div className="grid grid-cols-3 md:grid-cols-8 gap-2 text-xs">
                 <div><p className="text-slate-500">Entry</p><p className="text-white font-mono">${t.entry_price}</p></div>
                 <div><p className="text-slate-500">SL</p><p className="text-red-400 font-mono">${t.stop_loss}</p></div>
                 <div><p className="text-slate-500">TP</p><p className="text-emerald-400 font-mono">${t.take_profit}</p></div>
                 <div><p className="text-slate-500">Setup</p><p className="text-blue-400">{t.setup_type || "?"}</p></div>
                 <div><p className="text-slate-500">Conf</p><p className="text-amber-400 font-mono">{t.confidence_score}</p></div>
                 <div><p className="text-slate-500">R:R</p><p className="text-white font-mono">{t.rr_ratio}:1</p></div>
+                <div><p className="text-slate-500">Slippage</p><p className={`font-mono ${t.slippage_pct > 0.1 ? "text-red-400" : "text-slate-400"}`}>{t.slippage_pct != null ? `${t.slippage_pct}%` : "—"}</p></div>
                 <div>
                   <p className="text-slate-500">P&L</p>
                   <p className={`font-mono ${t.pnl_dollars == null ? "text-slate-500" : t.pnl_dollars >= 0 ? "text-emerald-400" : "text-red-400"}`}>
@@ -1229,13 +1244,26 @@ const AutoTrade = () => {
                   </p>
                 </div>
               </div>
+              {t.time_elapsed_ms != null && (
+                <div className="mt-1 text-[10px] text-slate-500">Signal-to-Exec: {t.time_elapsed_ms}ms</div>
+              )}
+              {t.skip_reason && (
+                <div className="mt-2 pt-2 border-t border-slate-800">
+                  <p className="text-[10px] text-red-400 flex items-center gap-1"><Ban className="w-3 h-3" /> Skip Reason: {t.skip_reason}</p>
+                </div>
+              )}
               {t.entry_reasons?.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-slate-800">
                   <p className="text-[10px] text-emerald-400 mb-1">Entry Reasons:</p>
                   <p className="text-[10px] text-slate-400">{t.entry_reasons.slice(0, 4).join(" | ")}</p>
                 </div>
               )}
-              {t.exit_reasons?.length > 0 && (
+              {t.actual_exit_reason && (
+                <div className="mt-1">
+                  <p className="text-[10px] text-amber-400">Exit: {t.actual_exit_reason}</p>
+                </div>
+              )}
+              {t.exit_reasons?.length > 0 && !t.actual_exit_reason && (
                 <div className="mt-1">
                   <p className="text-[10px] text-red-400">Exit: {t.exit_reasons.join(", ")}</p>
                 </div>
@@ -1243,7 +1271,394 @@ const AutoTrade = () => {
             </Card>
           )) : (
             <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
-              No trade logs yet. Trades will appear here once the system executes orders.
+              No trade logs yet. Trades will appear here once the system executes or skips signals.
+            </Card>
+          )}
+        </TabsContent>
+
+
+        {/* ANALYTICS DASHBOARD TAB */}
+        <TabsContent value="analytics" className="space-y-4" data-testid="analytics-dashboard">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm text-rose-400 flex items-center gap-1"><PieChart className="w-4 h-4" /> Trade Analytics Dashboard</h2>
+            <Button variant="outline" size="sm" onClick={fetchAnalytics} className="border-slate-700"><RefreshCw className="w-3 h-3 mr-1" /> Refresh</Button>
+          </div>
+
+          {analytics ? (
+            <>
+              {/* Summary Stats Row */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <Card className="terminal-card p-3 border border-slate-800" data-testid="stat-total-trades">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Total Trades</p>
+                  <p className="text-lg font-bold text-white font-mono">{analytics.total_trades}</p>
+                  <p className="text-[10px] text-slate-500">{analytics.total_executed} exec / {analytics.total_skipped} skip</p>
+                </Card>
+                <Card className="terminal-card p-3 border border-slate-800" data-testid="stat-win-rate">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Win Rate</p>
+                  <p className={`text-lg font-bold font-mono ${analytics.win_rate >= 50 ? "text-emerald-400" : "text-red-400"}`}>{analytics.win_rate}%</p>
+                  <p className="text-[10px] text-slate-500">{analytics.total_closed} closed</p>
+                </Card>
+                <Card className="terminal-card p-3 border border-slate-800" data-testid="stat-total-pnl">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Total P&L</p>
+                  <p className={`text-lg font-bold font-mono ${analytics.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    ${analytics.total_pnl}
+                  </p>
+                </Card>
+                <Card className="terminal-card p-3 border border-slate-800" data-testid="stat-avg-r">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Avg R Multiple</p>
+                  <p className={`text-lg font-bold font-mono ${analytics.avg_r_multiple >= 1 ? "text-emerald-400" : "text-amber-400"}`}>
+                    {analytics.avg_r_multiple}R
+                  </p>
+                </Card>
+                <Card className="terminal-card p-3 border border-slate-800" data-testid="stat-max-drawdown">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Max Drawdown</p>
+                  <p className="text-lg font-bold text-red-400 font-mono">${analytics.max_drawdown}</p>
+                </Card>
+              </div>
+
+              {/* Win/Loss + Long/Short */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><DollarSign className="w-3 h-3 text-emerald-400" /> Win / Loss</h3>
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-slate-500">Avg Win</p>
+                      <p className="text-emerald-400 font-mono text-sm font-bold">${analytics.avg_win}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">Avg Loss</p>
+                      <p className="text-red-400 font-mono text-sm font-bold">${analytics.avg_loss}</p>
+                    </div>
+                  </div>
+                </Card>
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><ArrowUp className="w-3 h-3 text-emerald-400" /> Long vs Short</h3>
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-emerald-400 font-medium">LONG</p>
+                      <p className="text-slate-400">{analytics.long_vs_short?.long?.count || 0} trades | {analytics.long_vs_short?.long?.win_rate || 0}% WR</p>
+                      <p className="font-mono text-white">${analytics.long_vs_short?.long?.pnl || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-red-400 font-medium">SHORT</p>
+                      <p className="text-slate-400">{analytics.long_vs_short?.short?.count || 0} trades | {analytics.long_vs_short?.short?.win_rate || 0}% WR</p>
+                      <p className="font-mono text-white">${analytics.long_vs_short?.short?.pnl || 0}</p>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              {/* Performance by Setup Type */}
+              {Object.keys(analytics.by_setup_type || {}).length > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Layers className="w-3 h-3 text-blue-400" /> Performance by Setup Type</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {Object.entries(analytics.by_setup_type).map(([setup, data]) => (
+                      <div key={setup} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                        <p className="text-xs text-blue-400 font-medium capitalize">{setup}</p>
+                        <p className="text-white font-mono text-sm">{data.count} trades</p>
+                        <p className="text-[10px] text-slate-400">WR: {data.win_rate}% | P&L: ${data.total_pnl}</p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* Performance by Confidence Band */}
+              {Object.keys(analytics.by_confidence_band || {}).length > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Target className="w-3 h-3 text-amber-400" /> Performance by Confidence Band</h3>
+                  <div className="space-y-2">
+                    {Object.entries(analytics.by_confidence_band).map(([band, data]) => (
+                      <div key={band} className="flex items-center justify-between bg-slate-900/50 rounded px-3 py-2 border border-slate-800">
+                        <span className="text-xs text-amber-400 font-mono w-20">{band}</span>
+                        <span className="text-xs text-slate-400">{data.count} trades</span>
+                        <span className={`text-xs font-mono ${data.win_rate >= 50 ? "text-emerald-400" : "text-red-400"}`}>{data.win_rate}% WR</span>
+                        <span className={`text-xs font-mono ${data.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>${data.total_pnl}</span>
+                        <span className="text-xs text-slate-500 font-mono">Avg: ${data.avg_pnl}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* Performance by Session (Date) */}
+              {Object.keys(analytics.by_session || {}).length > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Clock className="w-3 h-3 text-purple-400" /> Performance by Session</h3>
+                  <div className="space-y-1">
+                    {Object.entries(analytics.by_session).slice(0, 20).map(([date, data]) => (
+                      <div key={date} className="flex items-center justify-between bg-slate-900/50 rounded px-3 py-1.5 border border-slate-800">
+                        <span className="text-xs text-slate-300 font-mono">{date}</span>
+                        <span className="text-xs text-slate-400">{data.trades} trades</span>
+                        <span className={`text-xs font-mono ${data.win_rate >= 50 ? "text-emerald-400" : "text-red-400"}`}>{data.win_rate}% WR</span>
+                        <span className={`text-xs font-mono ${data.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>${data.pnl}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* P&L Curve */}
+              {analytics.pnl_curve?.length > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><TrendingUp className="w-3 h-3 text-emerald-400" /> P&L Curve</h3>
+                  <div className="h-32 flex items-end gap-px">
+                    {analytics.pnl_curve.map((p, i) => {
+                      const maxPnl = Math.max(...analytics.pnl_curve.map(x => Math.abs(x.pnl)), 1);
+                      const h = Math.abs(p.pnl) / maxPnl * 100;
+                      return (
+                        <div key={i} className="flex-1 flex flex-col justify-end items-center" title={`${p.symbol}: $${p.pnl}`}>
+                          <div className={`w-full rounded-t ${p.pnl >= 0 ? "bg-emerald-500/60" : "bg-red-500/60"}`} style={{ height: `${Math.max(h, 2)}%` }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between mt-1 text-[9px] text-slate-600">
+                    <span>Oldest</span>
+                    <span>Most Recent</span>
+                  </div>
+                </Card>
+              )}
+
+              {/* Skip & Rejection Reasons */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {Object.keys(analytics.skip_reasons || {}).length > 0 && (
+                  <Card className="terminal-card p-4 border border-slate-800" data-testid="skip-reasons">
+                    <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><SkipForward className="w-3 h-3 text-amber-400" /> Skip Reasons</h3>
+                    <div className="space-y-1">
+                      {Object.entries(analytics.skip_reasons).slice(0, 10).map(([reason, count]) => (
+                        <div key={reason} className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400 truncate max-w-[250px]">{reason}</span>
+                          <span className="text-amber-400 font-mono ml-2">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+                {Object.keys(analytics.rejection_reasons || {}).length > 0 && (
+                  <Card className="terminal-card p-4 border border-slate-800" data-testid="rejection-reasons">
+                    <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Ban className="w-3 h-3 text-red-400" /> Rejection Reasons</h3>
+                    <div className="space-y-1">
+                      {Object.entries(analytics.rejection_reasons).slice(0, 10).map(([reason, count]) => (
+                        <div key={reason} className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400 truncate max-w-[250px]">{reason}</span>
+                          <span className="text-red-400 font-mono ml-2">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </div>
+
+              {/* Slippage & Execution Timing */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="slippage-stats">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><TrendingDown className="w-3 h-3 text-orange-400" /> Slippage</h3>
+                  <div className="grid grid-cols-3 gap-4 text-xs">
+                    <div><p className="text-slate-500">Avg</p><p className="text-orange-400 font-mono">{analytics.slippage?.avg_pct || 0}%</p></div>
+                    <div><p className="text-slate-500">Max</p><p className="text-red-400 font-mono">{analytics.slippage?.max_pct || 0}%</p></div>
+                    <div><p className="text-slate-500">Data Points</p><p className="text-slate-300 font-mono">{analytics.slippage?.data_points || 0}</p></div>
+                  </div>
+                </Card>
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="exec-timing">
+                  <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Timer className="w-3 h-3 text-cyan-400" /> Execution Timing</h3>
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div><p className="text-slate-500">Avg Signal-to-Exec</p><p className="text-cyan-400 font-mono">{analytics.execution_timing?.avg_ms || 0}ms</p></div>
+                    <div><p className="text-slate-500">Data Points</p><p className="text-slate-300 font-mono">{analytics.execution_timing?.data_points || 0}</p></div>
+                  </div>
+                </Card>
+              </div>
+            </>
+          ) : (
+            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
+              <PieChart className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+              Click to load analytics. Data is derived from actual logged executions and skipped signals.
+            </Card>
+          )}
+        </TabsContent>
+
+
+        {/* LT PIPELINE TRANSPARENCY TAB */}
+        <TabsContent value="lt-pipeline" className="space-y-4" data-testid="lt-pipeline-content">
+          <h2 className="text-sm text-violet-400 flex items-center gap-1"><Layers className="w-4 h-4" /> Long-Term Pipeline Transparency</h2>
+          
+          {opportunities?.lt_pipeline ? (() => {
+            const lt = opportunities.lt_pipeline;
+            return (
+              <>
+                {/* Funnel Stages */}
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3">LT Evaluation Funnel</h3>
+                  <div className="space-y-2">
+                    {[
+                      { label: "Total Evaluated", value: lt.total_evaluated, color: "bg-slate-600" },
+                      { label: "Fundamentals Passed", value: lt.fundamental_passed, color: "bg-blue-500/70" },
+                      { label: "Valuation Passed", value: lt.valuation_passed, color: "bg-emerald-500/70" },
+                      { label: "Timing Passed", value: lt.timing_passed, color: "bg-amber-500/70" },
+                      { label: "Final LT Candidates", value: lt.final_candidates, color: "bg-emerald-400" },
+                    ].map((stage) => (
+                      <div key={stage.label} className="flex items-center gap-3">
+                        <span className="text-xs text-slate-400 w-44">{stage.label}</span>
+                        <div className="flex-1 bg-slate-900 rounded-full h-4 overflow-hidden">
+                          <div className={`h-full ${stage.color} rounded-full transition-all`} style={{ width: `${Math.max((stage.value / Math.max(lt.total_evaluated, 1)) * 100, 2)}%` }} />
+                        </div>
+                        <span className="text-xs text-white font-mono w-12 text-right">{stage.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+                
+                {/* Confidence Distribution */}
+                <Card className="terminal-card p-4 border border-slate-800">
+                  <h3 className="text-xs text-white font-medium mb-3">LT Confidence Distribution</h3>
+                  <div className="grid grid-cols-5 gap-2">
+                    {Object.entries(lt.confidence_distribution || {}).map(([band, count]) => (
+                      <div key={band} className="bg-slate-900/50 rounded p-3 text-center border border-slate-800">
+                        <p className="text-[10px] text-violet-400 font-mono">{band}</p>
+                        <p className="text-lg font-bold text-white font-mono">{count}</p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+                
+                {/* Rejection Reasons */}
+                {Object.keys(lt.rejection_reasons || {}).length > 0 && (
+                  <Card className="terminal-card p-4 border border-slate-800">
+                    <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Ban className="w-3 h-3 text-red-400" /> LT Rejection Reasons</h3>
+                    <div className="space-y-1">
+                      {Object.entries(lt.rejection_reasons).map(([reason, count]) => (
+                        <div key={reason} className="flex items-center justify-between bg-slate-900/50 rounded px-3 py-1.5 border border-slate-800">
+                          <span className="text-xs text-slate-400 truncate max-w-[500px]">{reason}</span>
+                          <span className="text-xs text-red-400 font-mono ml-2">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+                
+                {/* Top Missed Opportunities */}
+                {lt.top_missed?.length > 0 && (
+                  <Card className="terminal-card p-4 border border-slate-800">
+                    <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Target className="w-3 h-3 text-amber-400" /> Top 10 Missed LT Opportunities</h3>
+                    <div className="space-y-2">
+                      {lt.top_missed.map((m, i) => (
+                        <div key={m.symbol} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-white font-bold text-sm">{m.symbol}</span>
+                              <Badge variant="outline" className={`text-[10px] ${m.action === "WATCHLIST" ? "border-amber-500/30 text-amber-400" : "border-red-500/30 text-red-400"}`}>
+                                {m.action}
+                              </Badge>
+                              <span className="text-xs text-violet-400 font-mono">Conf: {m.confidence}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500">#{i+1}</span>
+                          </div>
+                          {m.entry_reasons?.length > 0 && (
+                            <p className="text-[10px] text-emerald-400">Strengths: {m.entry_reasons.join(" | ")}</p>
+                          )}
+                          {m.reject_reasons?.length > 0 && (
+                            <p className="text-[10px] text-red-400 mt-0.5">Blocked: {m.reject_reasons.join(" | ")}</p>
+                          )}
+                          {m.diagnostic_tags?.length > 0 && (
+                            <div className="flex gap-1 mt-1">
+                              {m.diagnostic_tags.map(t => (
+                                <Badge key={t} variant="outline" className="text-[9px] border-slate-700 text-slate-500">{t}</Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </>
+            );
+          })() : (
+            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
+              Run a scan to view LT pipeline data.
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* MOMENTUM MODE DIAGNOSTICS TAB */}
+        <TabsContent value="momentum-diag" className="space-y-4" data-testid="momentum-diag-content">
+          <h2 className="text-sm text-orange-400 flex items-center gap-1"><Gauge className="w-4 h-4" /> Momentum Mode Diagnostics</h2>
+          
+          {opportunities?.momentum_diagnostics ? (() => {
+            const md = opportunities.momentum_diagnostics;
+            return (
+              <>
+                {/* Summary Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Card className="terminal-card p-3 border border-slate-800">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">Momentum Candidates</p>
+                    <p className="text-lg font-bold text-orange-400 font-mono">{md.total_momentum_candidates}</p>
+                  </Card>
+                  <Card className="terminal-card p-3 border border-slate-800">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">Bypassed</p>
+                    <p className="text-lg font-bold text-amber-400 font-mono">{md.total_momentum_bypassed}</p>
+                  </Card>
+                  <Card className="terminal-card p-3 border border-slate-800">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">Near Misses</p>
+                    <p className="text-lg font-bold text-cyan-400 font-mono">{md.total_near_misses}</p>
+                  </Card>
+                  <Card className="terminal-card p-3 border border-slate-800">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide">Filter Status</p>
+                    <p className="text-sm font-bold text-emerald-400">STRICT (Unchanged)</p>
+                  </Card>
+                </div>
+                
+                {/* Near-Miss Momentum Candidates */}
+                {md.top_near_misses?.length > 0 ? (
+                  <Card className="terminal-card p-4 border border-slate-800">
+                    <h3 className="text-xs text-white font-medium mb-3 flex items-center gap-1"><Zap className="w-3 h-3 text-orange-400" /> Top 10 Near-Miss Momentum Candidates</h3>
+                    <p className="text-[10px] text-slate-500 mb-3">These stocks almost qualified for Momentum Mode. Filters are NOT loosened.</p>
+                    <div className="space-y-2">
+                      {md.top_near_misses.map((nm, i) => (
+                        <div key={nm.symbol} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-white font-bold text-sm">{nm.symbol}</span>
+                              <Badge variant="outline" className={`text-[10px] ${nm.conditions_met >= 3 ? "border-orange-500/30 text-orange-400" : "border-slate-700 text-slate-400"}`}>
+                                {nm.conditions_met}/3 conditions met
+                              </Badge>
+                            </div>
+                            <span className="text-[10px] text-slate-500">#{i+1}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 text-xs mb-2">
+                            <div>
+                              <p className="text-slate-500">RelVol</p>
+                              <p className={`font-mono ${nm.rel_vol >= 2.0 ? "text-emerald-400" : nm.rel_vol >= 1.5 ? "text-amber-400" : "text-red-400"}`}>{nm.rel_vol}x</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">Spread</p>
+                              <p className={`font-mono ${nm.spread_pct <= 0.3 ? "text-emerald-400" : "text-red-400"}`}>{nm.spread_pct}%</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500">VWAP</p>
+                              <p className={`font-mono ${nm.vwap_above ? "text-emerald-400" : "text-red-400"}`}>{nm.vwap_above ? "Above" : "Below"}</p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {nm.blocked_conditions.map((c, j) => (
+                              <Badge key={j} variant="outline" className="text-[9px] border-red-500/20 text-red-400">{c}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ) : (
+                  <Card className="terminal-card p-6 text-center text-slate-500 text-sm">
+                    No near-miss momentum candidates this scan. All stocks are either fully qualifying or far from momentum thresholds.
+                  </Card>
+                )}
+              </>
+            );
+          })() : (
+            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
+              Run a scan to view momentum diagnostics.
             </Card>
           )}
         </TabsContent>

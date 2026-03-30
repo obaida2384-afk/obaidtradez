@@ -1699,6 +1699,14 @@ class AutoTradeOrchestrator:
                 rejected.append(entry)
 
         # === PHASE 5: Process Long-Term candidates (unchanged logic) ===
+        lt_total_evaluated = 0
+        lt_fundamental_passed = 0
+        lt_valuation_passed = 0
+        lt_timing_passed = 0
+        lt_rejected_reasons = {}
+        lt_all_evaluated = []
+        lt_conf_dist = {"90-100": 0, "80-89": 0, "70-79": 0, "60-69": 0, "below_60": 0}
+        
         for symbol in all_symbols:
             i_sig = inv_lookup.get(symbol)
             if not i_sig or not settings.lt_enabled:
@@ -1711,9 +1719,58 @@ class AutoTradeOrchestrator:
             classification = cls_result["classification"]
 
             if classification in ("LONG_TERM", "WATCHLIST") and i_sig:
+                lt_total_evaluated += 1
                 confidence = ConfidenceScoringEngine.score_long_term(i_sig, market_regime)
                 explanation = LongTermEngine.evaluate_buy(i_sig, market_regime, settings)
                 explanation.confidence_score = confidence
+                
+                # Track LT funnel stages
+                ki = explanation.key_indicators
+                diag_tags = ki.get("diagnostic_tags", []) if isinstance(ki, dict) else []
+                reject_reasons_list = explanation.reject_reasons or []
+                
+                # Fundamentals: revenue/growth OK
+                has_fundamentals = not any(t in diag_tags for t in ["weak_revenue", "declining_growth", "poor_quality", "low_roe"])
+                if has_fundamentals:
+                    lt_fundamental_passed += 1
+                
+                # Valuation: not overvalued, not value trap
+                val_status = ki.get("valuation_status", "") if isinstance(ki, dict) else ""
+                is_value_ok = "Overvalued" not in val_status and "value_trap" not in diag_tags
+                if is_value_ok:
+                    lt_valuation_passed += 1
+                
+                # Timing: above 200 SMA, not cyclical in bearish
+                sma_ok = ki.get("sma_200") != "Below" if isinstance(ki, dict) else True
+                no_cyclical_issue = "negative_industry_outlook" not in diag_tags
+                if sma_ok and no_cyclical_issue:
+                    lt_timing_passed += 1
+                
+                # Confidence distribution
+                if confidence >= 90:
+                    lt_conf_dist["90-100"] += 1
+                elif confidence >= 80:
+                    lt_conf_dist["80-89"] += 1
+                elif confidence >= 70:
+                    lt_conf_dist["70-79"] += 1
+                elif confidence >= 60:
+                    lt_conf_dist["60-69"] += 1
+                else:
+                    lt_conf_dist["below_60"] += 1
+                
+                # Track rejection reasons
+                for r in reject_reasons_list:
+                    r_short = r[:60]
+                    lt_rejected_reasons[r_short] = lt_rejected_reasons.get(r_short, 0) + 1
+                
+                lt_all_evaluated.append({
+                    "symbol": symbol,
+                    "confidence": confidence,
+                    "action": explanation.action,
+                    "reject_reasons": reject_reasons_list,
+                    "entry_reasons": explanation.entry_reasons or [],
+                    "diagnostic_tags": diag_tags,
+                })
 
                 entry = {
                     "symbol": symbol,
@@ -1793,6 +1850,70 @@ class AutoTradeOrchestrator:
                 diagnostics.add_reason(
                     f"{filters_passed_count} stocks passed filters but confidence below threshold ({dt_threshold})")
 
+        # Build LT pipeline transparency data
+        lt_missed = sorted(
+            [e for e in lt_all_evaluated if e["action"] in ("REJECT", "WATCHLIST") and e["confidence"] >= (lt_threshold - 15)],
+            key=lambda x: x["confidence"], reverse=True
+        )[:10]
+        
+        lt_pipeline = {
+            "total_evaluated": lt_total_evaluated,
+            "fundamental_passed": lt_fundamental_passed,
+            "valuation_passed": lt_valuation_passed,
+            "timing_passed": lt_timing_passed,
+            "final_candidates": len(long_term_candidates),
+            "rejection_reasons": dict(sorted(lt_rejected_reasons.items(), key=lambda x: x[1], reverse=True)[:20]),
+            "top_missed": lt_missed,
+            "confidence_distribution": lt_conf_dist,
+        }
+
+        # Build Momentum Mode diagnostics (DO NOT loosen filters)
+        momentum_near_misses = []
+        for ta_sig in final_ta_results:
+            if ta_sig.get("momentum_mode"):
+                continue  # Already a momentum candidate
+            indicators = ta_sig.get("indicators", {})
+            rel_vol = indicators.get("rel_vol", 0)
+            spread_pct = indicators.get("spread_pct", 999)
+            vwap_above = indicators.get("price", 0) > indicators.get("vwap", 0)
+            
+            # Near-miss: close to qualifying (RelVol >= 2.0, spread < 0.3, above VWAP)
+            blocked_conditions = []
+            if rel_vol < 2.0:
+                blocked_conditions.append(f"RelVol {rel_vol:.1f} < 2.0")
+            if spread_pct > 0.3:
+                blocked_conditions.append(f"Spread {spread_pct:.2f}% > 0.3%")
+            if not vwap_above:
+                blocked_conditions.append("Below VWAP")
+            
+            # Count how many conditions are close to qualifying
+            conditions_close = 0
+            if rel_vol >= 1.5:
+                conditions_close += 1
+            if spread_pct <= 0.5:
+                conditions_close += 1
+            if vwap_above:
+                conditions_close += 1
+            
+            if conditions_close >= 2 and blocked_conditions:
+                momentum_near_misses.append({
+                    "symbol": ta_sig.get("symbol", ""),
+                    "rel_vol": round(rel_vol, 1),
+                    "spread_pct": round(spread_pct, 3),
+                    "vwap_above": vwap_above,
+                    "blocked_conditions": blocked_conditions,
+                    "conditions_met": conditions_close,
+                })
+        
+        momentum_near_misses.sort(key=lambda x: x["conditions_met"], reverse=True)
+        
+        momentum_diagnostics = {
+            "total_momentum_candidates": momentum_mode_count,
+            "total_momentum_bypassed": momentum_bypass_count,
+            "total_near_misses": len(momentum_near_misses),
+            "top_near_misses": momentum_near_misses[:10],
+        }
+
         no_trade_summary = diagnostics.build_no_trade_summary(
             len(day_trade_candidates), len(long_term_candidates), market_regime)
 
@@ -1871,6 +1992,8 @@ class AutoTradeOrchestrator:
             "no_trade_summary": no_trade_summary,
             "mtf_heatmap": heatmap_entries,
             "mtf_heatmap_distribution": heatmap_dist,
+            "lt_pipeline": lt_pipeline,
+            "momentum_diagnostics": momentum_diagnostics,
             "settings": settings.dict(),
         }
     
@@ -1909,6 +2032,7 @@ class AutoTradeOrchestrator:
         market_regime = await self.regime_detector.detect()
         
         opportunities = await self.scan_opportunities()
+        scan_timestamp = datetime.now(timezone.utc).isoformat()
         
         executed = []
         skipped = []
@@ -1943,14 +2067,30 @@ class AutoTradeOrchestrator:
                 
                 if size["shares"] > 0:
                     result = await self._place_order(symbol, size["shares"], order_side, "DAY_TRADE", candidate)
+                    exec_end = datetime.now(timezone.utc)
                     if result.get("success"):
                         executed.append(result)
-                        # Log comprehensive trade record
-                        await self._log_trade(symbol, direction, action, signal, candidate, result)
+                        await self._log_trade(symbol, direction, action, signal, candidate, result,
+                                              scan_timestamp=scan_timestamp, exec_timestamp=exec_end.isoformat(),
+                                              executed=True)
                     else:
-                        skipped.append({"symbol": symbol, "reason": result.get("error", "Order failed")})
+                        skip_reason = result.get("error", "Order failed")
+                        skipped.append({"symbol": symbol, "reason": skip_reason})
+                        await self._log_skip(symbol, direction, action, signal, candidate,
+                                             skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                             classification="DAY_TRADE")
+                else:
+                    skip_reason = "Position size calculated to 0 shares"
+                    skipped.append({"symbol": symbol, "reason": skip_reason})
+                    await self._log_skip(symbol, direction, action, signal, candidate,
+                                         skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                         classification="DAY_TRADE")
             else:
-                skipped.append({"symbol": symbol, "reason": "; ".join(c for c in checks if "VIOLATION" in c)})
+                skip_reason = "; ".join(c for c in checks if "VIOLATION" in c) or "Risk check failed"
+                skipped.append({"symbol": symbol, "reason": skip_reason})
+                await self._log_skip(symbol, direction, action, signal, candidate,
+                                     skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                     classification="DAY_TRADE")
         
         # Process long-term candidates (always BUY for long-term)
         for candidate in opportunities["long_term"][:3]:  # Top 3
@@ -1970,13 +2110,30 @@ class AutoTradeOrchestrator:
                 
                 if size["shares"] > 0:
                     result = await self._place_order(symbol, size["shares"], "buy", "LONG_TERM", candidate)
+                    exec_end = datetime.now(timezone.utc)
                     if result.get("success"):
                         executed.append(result)
-                        await self._log_trade(symbol, "LONG", "BUY", signal, candidate, result)
+                        await self._log_trade(symbol, "LONG", "BUY", signal, candidate, result,
+                                              scan_timestamp=scan_timestamp, exec_timestamp=exec_end.isoformat(),
+                                              executed=True)
                     else:
-                        skipped.append({"symbol": symbol, "reason": result.get("error", "Order failed")})
+                        skip_reason = result.get("error", "Order failed")
+                        skipped.append({"symbol": symbol, "reason": skip_reason})
+                        await self._log_skip(symbol, "LONG", "BUY", signal, candidate,
+                                             skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                             classification="LONG_TERM")
+                else:
+                    skip_reason = "Position size calculated to 0 shares"
+                    skipped.append({"symbol": symbol, "reason": skip_reason})
+                    await self._log_skip(symbol, "LONG", "BUY", signal, candidate,
+                                         skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                         classification="LONG_TERM")
             else:
-                skipped.append({"symbol": symbol, "reason": "; ".join(c for c in checks if "VIOLATION" in c)})
+                skip_reason = "; ".join(c for c in checks if "VIOLATION" in c) or "Risk check failed"
+                skipped.append({"symbol": symbol, "reason": skip_reason})
+                await self._log_skip(symbol, "LONG", "BUY", signal, candidate,
+                                     skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                     classification="LONG_TERM")
         
         # Monitor existing positions for sell signals
         sell_results = await self._monitor_positions(settings, market_regime)
@@ -2039,30 +2196,54 @@ class AutoTradeOrchestrator:
             return {"success": False, "error": str(e)}
 
     async def _log_trade(self, symbol: str, direction: str, action: str,
-                         signal: Dict, candidate: Dict, result: Dict):
+                         signal: Dict, candidate: Dict, result: Dict,
+                         scan_timestamp: str = "", exec_timestamp: str = "",
+                         executed: bool = True):
         """Comprehensive trade logging for every executed or simulated trade.
         Stores: ticker, direction, entry price, SL, TP, setup type, confidence,
-        entry reasons, reject reasons, momentum mode, MTF status."""
+        entry reasons, reject reasons, momentum mode, MTF status,
+        execution validation: signal timestamp, execution timestamp, slippage."""
         explanation = candidate.get("explanation", {})
         ki = explanation.get("key_indicators", {})
-        exit_plan = explanation.get("exit_plan", {})
+        
+        expected_price = round(signal.get("price", 0), 2)
+        # For market orders, actual fill price comes from the order response
+        actual_price = round(result.get("filled_avg_price", expected_price), 2)
+        slippage = round(actual_price - expected_price, 4) if expected_price > 0 else 0
+        slippage_pct = round((slippage / expected_price) * 100, 4) if expected_price > 0 else 0
+        
+        # Calculate time elapsed from scan to execution
+        time_elapsed_ms = 0
+        if scan_timestamp and exec_timestamp:
+            try:
+                scan_dt = datetime.fromisoformat(scan_timestamp.replace("Z", "+00:00"))
+                exec_dt = datetime.fromisoformat(exec_timestamp.replace("Z", "+00:00"))
+                time_elapsed_ms = int((exec_dt - scan_dt).total_seconds() * 1000)
+            except Exception:
+                pass
         
         trade_record = {
             "symbol": symbol,
             "direction": direction,
             "action": action,
-            "entry_price": round(signal.get("price", 0), 2),
+            "executed": executed,
+            "skip_reason": None,
+            "entry_price": expected_price,
+            "actual_entry_price": actual_price,
+            "slippage": slippage,
+            "slippage_pct": slippage_pct,
             "stop_loss": round(signal.get("stop_loss", 0), 2),
             "take_profit": round(signal.get("take_profit", 0), 2),
             "rr_ratio": signal.get("rr_ratio", 0),
-            "exit_price": None,  # Populated on close
-            "pnl_dollars": None,  # Populated on close
-            "pnl_percent": None,  # Populated on close
+            "exit_price": None,
+            "pnl_dollars": None,
+            "pnl_percent": None,
+            "actual_exit_reason": None,
             "setup_type": candidate.get("best_setup", "unknown"),
             "confidence_score": candidate.get("confidence", 0),
             "entry_reasons": explanation.get("entry_reasons", []),
             "reject_reasons": explanation.get("reject_reasons", []),
-            "exit_reasons": [],  # Populated on close
+            "exit_reasons": [],
             "momentum_mode": ki.get("momentum_mode", False),
             "momentum_bypass_active": ki.get("momentum_bypass_active", False),
             "mtf_aligned": ki.get("mtf_aligned", False),
@@ -2076,6 +2257,9 @@ class AutoTradeOrchestrator:
             "shares": result.get("shares", 0),
             "classification": candidate.get("classification", "DAY_TRADE"),
             "status": "OPEN",
+            "signal_timestamp": scan_timestamp,
+            "execution_timestamp": exec_timestamp,
+            "time_elapsed_ms": time_elapsed_ms,
             "opened_at": datetime.now(timezone.utc).isoformat(),
             "closed_at": None,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -2083,7 +2267,56 @@ class AutoTradeOrchestrator:
         await self.db.trade_log.insert_one(trade_record)
         logger.info(f"TRADE LOG: {action} {symbol} dir={direction} conf={trade_record['confidence_score']} "
                      f"setup={trade_record['setup_type']} mtf={trade_record['mtf_aligned']} "
-                     f"momentum={trade_record['momentum_mode']}")
+                     f"momentum={trade_record['momentum_mode']} slippage={slippage_pct}%")
+    
+    async def _log_skip(self, symbol: str, direction: str, action: str,
+                        signal: Dict, candidate: Dict, skip_reason: str,
+                        scan_timestamp: str = "", classification: str = "DAY_TRADE"):
+        """Log a skipped signal to the trade_log for diagnostics.
+        Every signal that was considered but not executed gets recorded with its skip reason."""
+        explanation = candidate.get("explanation", {})
+        ki = explanation.get("key_indicators", {})
+        
+        skip_record = {
+            "symbol": symbol,
+            "direction": direction,
+            "action": action,
+            "executed": False,
+            "skip_reason": skip_reason,
+            "entry_price": round(signal.get("price", 0), 2),
+            "actual_entry_price": None,
+            "slippage": None,
+            "slippage_pct": None,
+            "stop_loss": round(signal.get("stop_loss", 0), 2),
+            "take_profit": round(signal.get("take_profit", 0), 2),
+            "rr_ratio": signal.get("rr_ratio", 0),
+            "exit_price": None,
+            "pnl_dollars": None,
+            "pnl_percent": None,
+            "actual_exit_reason": None,
+            "setup_type": candidate.get("best_setup", "unknown"),
+            "confidence_score": candidate.get("confidence", 0),
+            "entry_reasons": explanation.get("entry_reasons", []),
+            "reject_reasons": explanation.get("reject_reasons", []),
+            "exit_reasons": [],
+            "momentum_mode": ki.get("momentum_mode", False) if isinstance(ki, dict) else False,
+            "mtf_aligned": ki.get("mtf_aligned", False) if isinstance(ki, dict) else False,
+            "rel_vol": ki.get("rel_vol", 0) if isinstance(ki, dict) else 0,
+            "spread_pct": ki.get("spread_pct", 0) if isinstance(ki, dict) else 0,
+            "order_id": None,
+            "shares": 0,
+            "classification": classification,
+            "status": "SKIPPED",
+            "signal_timestamp": scan_timestamp,
+            "execution_timestamp": None,
+            "time_elapsed_ms": None,
+            "opened_at": None,
+            "closed_at": None,
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        }
+        await self.db.trade_log.insert_one(skip_record)
+        logger.info(f"SKIP LOG: {symbol} dir={direction} conf={candidate.get('confidence', 0)} "
+                     f"reason={skip_reason[:80]}")
     
     async def _monitor_positions(self, settings: AutoTradeSettings, market_regime: Dict) -> List[Dict]:
         """Check existing positions for sell signals"""
@@ -2136,6 +2369,8 @@ class AutoTradeOrchestrator:
                     if result.get("success"):
                         pnl_dollars = (current_price - entry_price) * qty
                         pnl_pct = ((current_price / entry_price) - 1) * 100 if entry_price > 0 else 0
+                        exit_reasons = explanation.exit_reasons if hasattr(explanation, 'exit_reasons') else []
+                        actual_exit_reason = exit_reasons[0] if exit_reasons else "Unknown"
                         # Update trade_log with close info
                         await self.db.trade_log.update_one(
                             {"symbol": symbol, "status": "OPEN"},
@@ -2144,7 +2379,8 @@ class AutoTradeOrchestrator:
                                 "exit_price": round(current_price, 2),
                                 "pnl_dollars": round(pnl_dollars, 2),
                                 "pnl_percent": round(pnl_pct, 2),
-                                "exit_reasons": explanation.exit_reasons if hasattr(explanation, 'exit_reasons') else [],
+                                "exit_reasons": exit_reasons,
+                                "actual_exit_reason": actual_exit_reason,
                                 "closed_at": datetime.now(timezone.utc).isoformat(),
                             }}
                         )
@@ -2160,8 +2396,6 @@ class AutoTradeOrchestrator:
                         })
         
         return sell_results
-        
-        return sell_results
     
     async def get_trade_history(self, limit: int = 50) -> List[Dict]:
         """Get auto-trade history with explanations"""
@@ -2171,10 +2405,10 @@ class AutoTradeOrchestrator:
         return await cursor.to_list(length=limit)
 
     async def get_trade_log(self, limit: int = 50) -> List[Dict]:
-        """Get comprehensive trade log with full details"""
+        """Get comprehensive trade log with full details (executed + skipped)"""
         cursor = self.db.trade_log.find(
             {}, {"_id": 0}
-        ).sort("opened_at", -1).limit(limit)
+        ).sort([("date", -1), ("signal_timestamp", -1)]).limit(limit)
         return await cursor.to_list(length=limit)
     
     async def get_status(self) -> Dict:
@@ -2214,4 +2448,163 @@ class AutoTradeOrchestrator:
                 "pnl": round(daily_pnl, 2)
             },
             "settings": settings.dict()
+        }
+
+    async def get_trade_analytics(self) -> Dict:
+        """Comprehensive trade log analytics dashboard.
+        All values derived from actual logged execution data — no inferred values."""
+        all_trades = await self.db.trade_log.find({}, {"_id": 0}).to_list(10000)
+        
+        executed_trades = [t for t in all_trades if t.get("executed", True) and t.get("status") != "SKIPPED"]
+        skipped_trades = [t for t in all_trades if t.get("status") == "SKIPPED" or t.get("executed") is False]
+        closed_trades = [t for t in executed_trades if t.get("status") == "CLOSED" and t.get("pnl_dollars") is not None]
+        open_trades = [t for t in executed_trades if t.get("status") == "OPEN"]
+        
+        # Win/Loss
+        wins = [t for t in closed_trades if t.get("pnl_dollars", 0) > 0]
+        losses = [t for t in closed_trades if t.get("pnl_dollars", 0) <= 0]
+        win_rate = round(len(wins) / max(1, len(closed_trades)) * 100, 1)
+        
+        avg_win = round(sum(t["pnl_dollars"] for t in wins) / max(1, len(wins)), 2) if wins else 0
+        avg_loss = round(sum(t["pnl_dollars"] for t in losses) / max(1, len(losses)), 2) if losses else 0
+        
+        # R Multiple (avg win / abs(avg loss))
+        avg_r_multiple = round(avg_win / abs(avg_loss), 2) if avg_loss != 0 else 0
+        
+        # Total P&L
+        total_pnl = round(sum(t.get("pnl_dollars", 0) for t in closed_trades), 2)
+        
+        # Max Drawdown (running P&L peak-to-trough)
+        sorted_closed = sorted(closed_trades, key=lambda t: t.get("closed_at", ""))
+        running_pnl = 0
+        peak_pnl = 0
+        max_drawdown = 0
+        pnl_curve = []
+        for t in sorted_closed:
+            running_pnl += t.get("pnl_dollars", 0)
+            peak_pnl = max(peak_pnl, running_pnl)
+            drawdown = peak_pnl - running_pnl
+            max_drawdown = max(max_drawdown, drawdown)
+            pnl_curve.append({
+                "date": t.get("closed_at", t.get("date", "")),
+                "symbol": t.get("symbol", ""),
+                "pnl": round(running_pnl, 2),
+                "drawdown": round(drawdown, 2),
+            })
+        
+        # Long vs Short breakdown
+        long_trades = [t for t in closed_trades if t.get("direction") == "LONG"]
+        short_trades = [t for t in closed_trades if t.get("direction") == "SHORT"]
+        long_wins = len([t for t in long_trades if t.get("pnl_dollars", 0) > 0])
+        short_wins = len([t for t in short_trades if t.get("pnl_dollars", 0) > 0])
+        
+        # Performance by setup type
+        setup_perf = {}
+        for t in closed_trades:
+            setup = t.get("setup_type", "unknown")
+            if setup not in setup_perf:
+                setup_perf[setup] = {"count": 0, "wins": 0, "total_pnl": 0}
+            setup_perf[setup]["count"] += 1
+            setup_perf[setup]["total_pnl"] = round(setup_perf[setup]["total_pnl"] + t.get("pnl_dollars", 0), 2)
+            if t.get("pnl_dollars", 0) > 0:
+                setup_perf[setup]["wins"] += 1
+        for s in setup_perf.values():
+            s["win_rate"] = round(s["wins"] / max(1, s["count"]) * 100, 1)
+        
+        # Performance by confidence band
+        conf_bands = {"90-100": [], "80-89": [], "70-79": [], "60-69": [], "below_60": []}
+        for t in closed_trades:
+            conf = t.get("confidence_score", 0)
+            if conf >= 90:
+                conf_bands["90-100"].append(t)
+            elif conf >= 80:
+                conf_bands["80-89"].append(t)
+            elif conf >= 70:
+                conf_bands["70-79"].append(t)
+            elif conf >= 60:
+                conf_bands["60-69"].append(t)
+            else:
+                conf_bands["below_60"].append(t)
+        
+        confidence_perf = {}
+        for band, trades in conf_bands.items():
+            if trades:
+                band_wins = len([t for t in trades if t.get("pnl_dollars", 0) > 0])
+                confidence_perf[band] = {
+                    "count": len(trades),
+                    "wins": band_wins,
+                    "win_rate": round(band_wins / len(trades) * 100, 1),
+                    "total_pnl": round(sum(t.get("pnl_dollars", 0) for t in trades), 2),
+                    "avg_pnl": round(sum(t.get("pnl_dollars", 0) for t in trades) / len(trades), 2),
+                }
+        
+        # Performance by session (date grouping)
+        session_perf = {}
+        for t in closed_trades:
+            date = t.get("date", "unknown")
+            if date not in session_perf:
+                session_perf[date] = {"trades": 0, "wins": 0, "pnl": 0}
+            session_perf[date]["trades"] += 1
+            session_perf[date]["pnl"] = round(session_perf[date]["pnl"] + t.get("pnl_dollars", 0), 2)
+            if t.get("pnl_dollars", 0) > 0:
+                session_perf[date]["wins"] += 1
+        for s in session_perf.values():
+            s["win_rate"] = round(s["wins"] / max(1, s["trades"]) * 100, 1)
+        
+        # Skip reason counts
+        skip_reasons = {}
+        for t in skipped_trades:
+            reason = t.get("skip_reason", "Unknown")
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+        
+        # Rejection reason counts (from closed/open executed trades)
+        rejection_reasons = {}
+        for t in executed_trades:
+            for reason in t.get("reject_reasons", []):
+                rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+        
+        # Slippage stats
+        slippage_data = [t.get("slippage_pct", 0) for t in executed_trades if t.get("slippage_pct") is not None]
+        avg_slippage = round(sum(slippage_data) / max(1, len(slippage_data)), 4) if slippage_data else 0
+        max_slippage = round(max(slippage_data, default=0), 4)
+        
+        # Execution timing stats
+        elapsed_data = [t.get("time_elapsed_ms", 0) for t in executed_trades if t.get("time_elapsed_ms")]
+        avg_exec_time_ms = round(sum(elapsed_data) / max(1, len(elapsed_data))) if elapsed_data else 0
+        
+        return {
+            "total_trades": len(all_trades),
+            "total_executed": len(executed_trades),
+            "total_skipped": len(skipped_trades),
+            "total_closed": len(closed_trades),
+            "total_open": len(open_trades),
+            "win_rate": win_rate,
+            "avg_win": avg_win,
+            "avg_loss": avg_loss,
+            "avg_r_multiple": avg_r_multiple,
+            "total_pnl": total_pnl,
+            "max_drawdown": round(max_drawdown, 2),
+            "long_vs_short": {
+                "long": {"count": len(long_trades), "wins": long_wins,
+                         "win_rate": round(long_wins / max(1, len(long_trades)) * 100, 1),
+                         "pnl": round(sum(t.get("pnl_dollars", 0) for t in long_trades), 2)},
+                "short": {"count": len(short_trades), "wins": short_wins,
+                          "win_rate": round(short_wins / max(1, len(short_trades)) * 100, 1),
+                          "pnl": round(sum(t.get("pnl_dollars", 0) for t in short_trades), 2)},
+            },
+            "by_setup_type": setup_perf,
+            "by_confidence_band": confidence_perf,
+            "by_session": dict(sorted(session_perf.items(), reverse=True)),
+            "pnl_curve": pnl_curve[-100:],  # Last 100 data points
+            "skip_reasons": dict(sorted(skip_reasons.items(), key=lambda x: x[1], reverse=True)),
+            "rejection_reasons": dict(sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True)),
+            "slippage": {
+                "avg_pct": avg_slippage,
+                "max_pct": max_slippage,
+                "data_points": len(slippage_data),
+            },
+            "execution_timing": {
+                "avg_ms": avg_exec_time_ms,
+                "data_points": len(elapsed_data),
+            },
         }

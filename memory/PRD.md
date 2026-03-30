@@ -1,58 +1,67 @@
-# ObaidTradez - Product Requirements Document
+# ObaidTradez - AI Trading & Investing Platform
 
 ## Original Problem Statement
-ObaidTradez is a secure, dark-themed AI trading and investing platform protected by access code (`Bullishalmarkhan7.7`). The platform features a technical-analysis-first, professional-grade day trading engine. Core requirements: high performance, quality-only setups, ~80+ liquid stock scanning, strict risk controls.
+Secure, dark-themed AI day trading and long-term investing platform protected by access code (`Bullishalmarkhan7.7`). Dual modes: Trading (short-term TA pipeline) and Investments (long-term fundamentals). Tiered Technical Analysis via Polygon OHLCV data with MTF confirmation, Momentum Mode bypass, and strict risk controls.
+
+## Current Phase: Validation & Diagnostics
+The platform is in a **validation phase** — no new trading strategies. Focus on trustworthy tests, execution data, and analytics.
 
 ## Architecture
-- **Frontend**: React + Tailwind CSS + Shadcn UI
-- **Backend**: FastAPI + MongoDB
-- **Data Source**: Polygon.io (OHLCV bars), FMP (fundamentals), Finnhub/Benzinga/Marketaux (news)
-- **Execution**: Alpaca Paper Trading API
-- **AI**: OpenAI GPT-5.2 via Emergent LLM Key
+```
+/app/
+├── backend/
+│   ├── ai_trading_system.py (Orchestrator, Risk Manager, Trade Logging, LT Engine, Momentum Diagnostics)
+│   ├── technical_analysis_engine.py (TA math, MTF, Confidence Scoring)
+│   ├── auto_trade_scheduler.py
+│   ├── tests/conftest.py (URL config for all tests)
+│   ├── tests/ (22 test files, 345 tests)
+│   └── server.py (FastAPI routes)
+├── frontend/
+│   ├── src/pages/AutoTrade.jsx (Scheduler, Diagnostics, Candidates, MTF Heatmap, Trade Log, Analytics, LT Pipeline, Momentum, Guide)
+```
 
-## Core Technical Design
-- **Tiered TA Pipeline**: Tier 1 (fast composite) → Tier 2 (deep multi-timeframe)
-- **Internal TA Math**: EMA, RSI, MACD, VWAP, Structure, FVG from Polygon OHLCV (no external APIs)
-- **MTF Classification Engine**: BULLISH_ALIGNED, BEARISH_ALIGNED, MOMENTUM_CANDIDATE, NEAR_MISS, MIXED, CONFLICT
-- **Aggressive Caching**: Bar-level + TA-level (prevents rate limits)
-- **Direction Consistency**: LONG→BUY, SHORT→SELL everywhere
-
-## Strict Trade Quality Filters (Current)
-1. **15m Trend**: ranging = heavy penalty, reject unless RelVol>2 + breakout
-2. **Strict MTF**: Aligned = 15m+5m BOTH directional (ranging doesn't count)
-3. **Volume**: <1.0 = hard reject, 1.0-1.3 = penalize, >=1.5 = preferred
-4. **Entry Timing**: Only execute when 1m=entry_ready. Early/weak = watchlist only
-5. **Spread**: >0.5% = reject, >0.3% = penalize
-6. **Pre-Market**: Hard disable execution before 9:30 AM ET
-7. **Momentum Mode**: RelVol>2.5, strong candle, clear structure, VWAP<2%, no bypass of MTF/risk
-
-## Completed Features
-- [x] Internal TA engine + Tiered Pipeline + Caching
-- [x] MTF Confirmation + MTF Classification + MTF Heatmap (frontend + backend decision engine)
-- [x] Direction bug fix (LONG→BUY, SHORT→SELL)
-- [x] Confidence normalization (base=35, wider distribution)
-- [x] Strict Momentum Mode (RelVol>2.5)
-- [x] Pre-market safety gate
-- [x] Trade logging system (MongoDB trade_log)
-- [x] Strict quality filters (15m trend, volume, timing, spread, alignment)
-- [x] Frontend: Heatmap grid, confidence distribution, pipeline funnel, trade log tab
-
-## Upcoming Tasks
-- [ ] P2: Compare stocks side-by-side
-- [ ] P3: Scheduler Performance Tracker (win rate, Sharpe ratio)
-- [ ] Refactor: server.py modularization (~4,800 lines)
-
-## Key Files
-- `/app/backend/technical_analysis_engine.py` - TA math, MTF Confirmer, MTFClassifier, confidence scoring
-- `/app/backend/ai_trading_system.py` - Trade evaluation, quality filters, heatmap builder, trade logging
-- `/app/backend/server.py` - FastAPI routes
-- `/app/frontend/src/pages/AutoTrade.jsx` - AutoTrade dashboard with all diagnostics
+## Key DB Collections
+- `trade_log`: Full lifecycle trade records (executed + skipped, slippage, timing, P&L)
+- `auto_trade_log`: Basic execution log
+- `auto_trade_settings`: Dynamic thresholds
+- `trading_signals`, `paper_trades`, `watchlist`, `investment_signals`
 
 ## Key API Endpoints
-- `GET /api/auto-trade/scan` - Full pipeline scan
-- `GET /api/auto-trade/mtf-heatmap` - Dedicated MTF heatmap
-- `GET /api/auto-trade/trade-log` - Trade lifecycle log
-- `POST /api/auth/access` - Verify access code
+- `/api/auto-trade/scan` — Tiered pipeline + lt_pipeline + momentum_diagnostics
+- `/api/auto-trade/analytics` — Win rate, P&L, drawdown, by setup/confidence/session, skip/rejection reasons, slippage, timing
+- `/api/auto-trade/trade-log` — Full lifecycle trade log (executed + skipped)
+- `/api/auto-trade/mtf-heatmap` — MTF distribution
+
+## Completed Features (Validation Phase - March 2026)
+- [x] Backend Test Gap: 345/345 tests passing (100%)
+- [x] Execution Validation Logging: signal/exec timestamps, slippage, skip reasons, actual exit reason
+- [x] Trade Log Analytics Dashboard: total trades, win rate, avg win/loss, R multiple, P&L, drawdown, long vs short, by setup type, by confidence band, by session, P&L curve, skip/rejection reasons, slippage stats, execution timing
+- [x] LT Pipeline Transparency: funnel visualization, confidence distribution, rejection reasons, top 10 missed opportunities
+- [x] Momentum Mode Diagnostics: near-miss candidates, blocked conditions (RelVol, spread, VWAP), filter status (STRICT unchanged)
+
+## Previously Completed Features
+- [x] Tiered TA Pipeline (Tier 1 fast scan → Tier 2 deep analysis)
+- [x] Multi-Timeframe Confirmation (15m trend, 5m structure, 1m timing)
+- [x] Momentum Mode Bypass for explosive stocks
+- [x] Pre-Market Safety gate (no execution before 9:30 AM ET)
+- [x] MTF Heatmap UI
+- [x] Algorithm Explanation User Guide tab
+- [x] Strict trade quality filters (volume, timing, trend, spread)
+- [x] MongoDB trade logging system
+- [x] 1,097+ company universe with background batch processing
+- [x] Risky stocks blocklist (83+ meme/crypto/leveraged)
+
+## Upcoming / Backlog
+- [ ] Daily Summary Generator (P2)
+- [ ] Scheduler Performance Tracker (P3)
+- [ ] Compare stocks side-by-side (P3)
+- [ ] server.py modularization refactor (P3)
 
 ## Access
 - Access Code: `Bullishalmarkhan7.7`
+
+## 3rd Party Integrations
+- OpenAI GPT-5.2 (Emergent LLM Key)
+- Polygon.io (User API Key, Starter Plan)
+- Alpaca (User API Key, Paper Trading)
+- FMP / Finnhub (User API Keys)

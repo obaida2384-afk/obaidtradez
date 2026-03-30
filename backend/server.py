@@ -4331,6 +4331,15 @@ async def get_trade_log(limit: int = Query(default=50, ge=1, le=200), auth: bool
     return await auto_orchestrator.get_trade_log(limit)
 
 
+@api_router.get("/auto-trade/analytics")
+async def get_trade_analytics(auth: bool = Depends(verify_access)):
+    """Comprehensive trade log analytics dashboard.
+    Returns win rate, P&L, drawdown, performance by setup/confidence/session,
+    skip reasons, rejection reasons, slippage stats, and execution timing."""
+    return await auto_orchestrator.get_trade_analytics()
+
+
+
 @api_router.get("/auto-trade/mtf-heatmap")
 async def get_mtf_heatmap(auth: bool = Depends(verify_access)):
     """Get MTF heatmap data from the latest scan results.

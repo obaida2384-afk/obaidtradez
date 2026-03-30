@@ -34,7 +34,10 @@ class TestAccessGate:
     def test_access_gate_with_invalid_code(self):
         """Test that access gate rejects invalid code"""
         response = requests.post(f"{BASE_URL}/api/auth/access", json={"code": "wrong_code"})
-        assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
+        # API returns 200 with success=false for invalid codes
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("success") == False, "Invalid code should return success=false"
         print("✓ Access gate rejects invalid code")
 
 

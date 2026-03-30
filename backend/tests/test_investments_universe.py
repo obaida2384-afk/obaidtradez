@@ -239,7 +239,7 @@ class TestInvestmentUniverse:
         """Test that refresh endpoint triggers background scanning"""
         response = requests.post(
             f"{BASE_URL}/api/investments/refresh",
-            params={"limit": 50},  # Small limit for testing
+            params={"limit": 100},  # API requires limit >= 100
             headers=self.headers
         )
         assert response.status_code == 200, f"Refresh endpoint failed: {response.text}"

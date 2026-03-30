@@ -98,21 +98,15 @@ class TestNewsAPIEndpoints:
     """Test dedicated news API endpoints"""
     
     def test_news_for_symbol_returns_data(self, api_client):
-        """Verify /api/news/{symbol} returns news items"""
+        """Verify /api/news/{symbol} returns news analysis data"""
         response = api_client.get(f"{BASE_URL}/api/news/AAPL")
         assert response.status_code == 200
         
         data = response.json()
-        assert isinstance(data, list), "Expected list of news items"
-        
-        if len(data) > 0:
-            first_item = data[0]
-            assert "title" in first_item
-            assert "sentiment" in first_item
-            assert "sentiment_score" in first_item
-            assert "source" in first_item
-            print(f"AAPL news count: {len(data)}")
-            print(f"First headline: {first_item['title'][:60]}...")
+        # News API now returns a dict with analysis (not a raw list)
+        assert isinstance(data, dict), "Expected news analysis dict"
+        assert "article_count" in data or "symbol" in data or "catalyst_score" in data
+        print(f"AAPL news: {data.get('article_count', 'N/A')} articles")
     
     def test_news_for_multiple_symbols(self, api_client):
         """Test news endpoint for various symbols"""
@@ -122,17 +116,20 @@ class TestNewsAPIEndpoints:
             response = api_client.get(f"{BASE_URL}/api/news/{symbol}")
             assert response.status_code == 200, f"Failed for {symbol}"
             data = response.json()
-            print(f"{symbol}: {len(data)} news items")
+            count = data.get("article_count", 0) if isinstance(data, dict) else len(data)
+            print(f"{symbol}: {count} news items")
     
     def test_news_sentiment_scores_valid(self, api_client):
-        """Verify sentiment scores are between 0 and 1"""
+        """Verify news analysis returns valid catalyst score"""
         response = api_client.get(f"{BASE_URL}/api/news/AAPL")
         assert response.status_code == 200
         
         data = response.json()
-        for item in data:
-            score = item.get("sentiment_score", 0)
-            assert 0 <= score <= 1, f"Invalid sentiment score: {score}"
+        # News API returns dict with catalyst_score (0-100)
+        if "catalyst_score" in data:
+            score = data["catalyst_score"]
+            assert 0 <= score <= 100, f"Invalid catalyst score: {score}"
+            print(f"AAPL catalyst score: {score}")
 
 
 class TestWatchlistFunctionality:

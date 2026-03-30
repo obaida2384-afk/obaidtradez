@@ -140,8 +140,13 @@ class TestTradingSignals:
         
         assert data.get("symbol") == "AAPL"
         assert "signal" in data
-        assert "confidence" in data
-        print(f"✓ AAPL analysis: {data['signal']} with {data['confidence']*100:.0f}% confidence")
+        # Symbol may be excluded by strict filters
+        if data.get("included") is False:
+            assert "exclusion_reason" in data
+            print(f"✓ AAPL excluded: {data['exclusion_reason']}")
+        else:
+            assert "confidence" in data
+            print(f"✓ AAPL analysis: {data['signal']} with {data['confidence']*100:.0f}% confidence")
 
 
 class TestInvestmentIdeas:

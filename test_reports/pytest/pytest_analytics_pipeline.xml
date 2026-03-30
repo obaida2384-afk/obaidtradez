@@ -1,0 +1,652 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="35" failures="0" skipped="0" tests="35" time="362.602" timestamp="2026-03-30T12:27:04.498276+00:00" hostname="agent-env-369fb371-dfec-4e5a-81d1-42a79df402c3"><testcase classname="tests.test_analytics_pipeline.TestSetup" name="test_auth_works" time="60.182"><error message="failed on setup with &quot;AssertionError: Auth failed: The preview environment is not responding. It may be starting up.&#10;  &#10;assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code&quot;">tests/test_analytics_pipeline.py:19: in auth_token
+    assert resp.status_code == 200, f"Auth failed: {resp.text}"
+E   AssertionError: Auth failed: The preview environment is not responding. It may be starting up.
+E     
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</error></testcase><testcase classname="tests.test_analytics_pipeline.TestTradeLogEndpoint" name="test_trade_log_returns_200" time="60.210"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:36: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestTradeLogEndpoint" name="test_trade_log_returns_list" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:36: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestTradeLogEndpoint" name="test_trade_log_entry_has_new_fields" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:36: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_returns_200" time="60.202"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_summary_stats" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_r_multiple" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_total_pnl" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_max_drawdown" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_long_vs_short" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_by_setup_type" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_by_confidence_band" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_by_session" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_pnl_curve" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_skip_reasons" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_rejection_reasons" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_slippage" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsEndpoint" name="test_analytics_has_execution_timing" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:75: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_scan_has_lt_pipeline" time="60.210"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_total_evaluated" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_fundamental_passed" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_valuation_passed" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_timing_passed" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_final_candidates" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_rejection_reasons" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_top_missed" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanLTPipeline" name="test_lt_pipeline_has_confidence_distribution" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:195: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanMomentumDiagnostics" name="test_scan_has_momentum_diagnostics" time="60.231"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:255: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanMomentumDiagnostics" name="test_momentum_diagnostics_has_total_momentum_candidates" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:255: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanMomentumDiagnostics" name="test_momentum_diagnostics_has_total_momentum_bypassed" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:255: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanMomentumDiagnostics" name="test_momentum_diagnostics_has_total_near_misses" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:255: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanMomentumDiagnostics" name="test_momentum_diagnostics_has_top_near_misses" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:255: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestScanMomentumDiagnostics" name="test_near_miss_entry_structure" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:255: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsZeroedData" name="test_analytics_returns_valid_structure_even_with_no_data" time="60.176"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:307: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase><testcase classname="tests.test_analytics_pipeline.TestAnalyticsZeroedData" name="test_analytics_numeric_fields_are_numbers" time="0.000"><error message="failed on setup with &quot;requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)&quot;">/root/.venv/lib/python3.11/site-packages/requests/models.py:976: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests/test_analytics_pipeline.py:307: in auth_token
+    return resp.json().get("token")
+           ^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:980: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</error></testcase></testsuite></testsuites>

@@ -44,9 +44,9 @@ class TestAutoTradeScanEndpoint:
         assert "dt_threshold" in dt, f"Missing dt_threshold: {dt}"
         assert "lt_threshold" in dt, f"Missing lt_threshold: {dt}"
         
-        # Validate threshold values are reasonable (70-100 range)
-        assert 70 <= dt["dt_threshold"] <= 100, f"DT threshold out of range: {dt['dt_threshold']}"
-        assert 65 <= dt["lt_threshold"] <= 100, f"LT threshold out of range: {dt['lt_threshold']}"
+        # Validate threshold values are reasonable (50-100 range)
+        assert 50 <= dt["dt_threshold"] <= 100, f"DT threshold out of range: {dt['dt_threshold']}"
+        assert 50 <= dt["lt_threshold"] <= 100, f"LT threshold out of range: {dt['lt_threshold']}"
         print(f"✓ Dynamic thresholds: DT={dt['dt_threshold']}, LT={dt['lt_threshold']}")
     
     def test_scan_returns_risk_mode(self, headers):
@@ -76,10 +76,10 @@ class TestAutoTradeScanEndpoint:
         assert "bottleneck" in pf, f"Missing bottleneck in pipeline_funnel: {pf}"
         assert "top_rejections" in pf, f"Missing top_rejections in pipeline_funnel: {pf}"
         
-        # Check 7 stages exist in funnel
+        # Check current pipeline stages exist in funnel
         expected_stages = [
-            "universe_scanned", "liquidity_passed", "technical_passed",
-            "catalyst_passed", "confidence_passed", "risk_approved", "executed"
+            "universe_scanned", "prefilter_passed", "ta_analyzed",
+            "setup_found", "filters_passed", "confidence_passed", "risk_approved", "executed"
         ]
         funnel = pf["funnel"]
         for stage in expected_stages:

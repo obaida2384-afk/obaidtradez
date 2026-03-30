@@ -77,18 +77,23 @@ class TestMTFMomentumModeAPI:
                   f"mtf_aligned: {candidate['mtf_aligned']}, has_tf_conflict: {candidate['has_tf_conflict']}, "
                   f"momentum_mode: {candidate['momentum_mode']}")
         else:
-            # Check watchlist or rejected for MTF fields
+            # Check watchlist or rejected for MTF fields — only DAY_TRADE candidates have MTF
             watchlist = data.get("watchlist", [])
             rejected = data.get("rejected_details", [])
             all_candidates = watchlist + rejected
+            dt_candidates = [c for c in all_candidates if c.get("classification") == "DAY_TRADE"]
             
-            if len(all_candidates) > 0:
-                candidate = all_candidates[0]
-                assert "mtf_aligned" in candidate, "Missing mtf_aligned field in candidate"
-                assert "has_tf_conflict" in candidate, "Missing has_tf_conflict field in candidate"
-                print(f"SUCCESS: Candidate {candidate['symbol']} has MTF fields (from watchlist/rejected)")
+            if len(dt_candidates) > 0:
+                candidate = dt_candidates[0]
+                # MTF fields may be at top level or inside explanation.key_indicators
+                explanation = candidate.get("explanation", {})
+                ki = explanation.get("key_indicators", {})
+                has_mtf = ("mtf_aligned" in candidate or "mtf_aligned" in ki or 
+                          "mtf_score" in ki or "mtf_5m" in ki)
+                assert has_mtf, f"Missing MTF data in DT candidate: top-level keys={list(candidate.keys())}, ki keys={list(ki.keys())}"
+                print(f"SUCCESS: DT Candidate {candidate['symbol']} has MTF data")
             else:
-                print("WARNING: No candidates to verify MTF fields - market may be closed")
+                print("WARNING: No DAY_TRADE candidates to verify MTF fields — market may be closed or all filtered")
     
     def test_explanation_has_mtf_key_indicators(self):
         """Test explanation.key_indicators includes MTF fields"""
