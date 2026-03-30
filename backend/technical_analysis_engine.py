@@ -773,6 +773,15 @@ class MultiTimeframeConfirmer:
         # Hard timeframe conflict: 5m or 15m opposing the trade direction
         has_tf_conflict = struct_5_opposing or trend_15_opposing
 
+        # Explicit MTF logging for diagnostics
+        if has_tf_conflict:
+            for r in reject_reasons:
+                logger.info(f"MTF REJECT {direction}: {r} | 5m={struct_5m} 15m={struct_15m} 1m={timing_1m}")
+        elif mtf_aligned:
+            logger.info(f"MTF ALIGNED {direction}: 5m={struct_5m} 15m={struct_15m} 1m={timing_1m} score={score}/5")
+        else:
+            logger.info(f"MTF PARTIAL {direction}: 5m={struct_5m} 15m={struct_15m} 1m={timing_1m} score={score}/5")
+
         return {
             "aligned": mtf_aligned,
             "score": score,
@@ -849,58 +858,100 @@ class TechnicalSignalGenerator:
             mtf = MultiTimeframeConfirmer.confirm(bars_1m, bars_5m, bars_15m, direction)
 
             # 8. Compute base confidence with MTF integration
-            base_confidence = 45
+            # RECALIBRATED: base=35, stricter scoring for wider distribution
+            # Target bands: 85-95 elite, 75-85 strong, 65-75 acceptable, <65 reject
+            base_confidence = 35
+
+            # Setup quality (max +18)
             if best_setup:
-                base_confidence += best_setup["confidence_boost"]
+                setup_boost = min(best_setup["confidence_boost"], 18)
+                base_confidence += setup_boost
 
             # MTF scoring: aligned = 5m+15m supportive
             if mtf["aligned"]:
-                base_confidence += 12  # Full alignment: strong boost
+                base_confidence += 10  # Full alignment
                 if mtf.get("timing_1m_aligned"):
                     base_confidence += 3  # All 3 timeframes aligned
             elif mtf["score"] >= 2:
-                base_confidence += 5  # Partial alignment
+                base_confidence += 4  # Partial alignment
             # Hard penalty: timeframe conflict (5m or 15m opposing direction)
             if mtf.get("has_tf_conflict"):
-                base_confidence -= 15
+                base_confidence -= 18
             # Soft penalty: 1m conflicts with higher timeframes
             if mtf.get("has_1m_conflict"):
-                base_confidence -= 5
+                base_confidence -= 6
 
-            if indicators["rel_vol"] >= 2.0:
-                base_confidence += 8
-            elif indicators["rel_vol"] >= 1.3:
+            # Volume (max +6)
+            if indicators["rel_vol"] >= 2.5:
+                base_confidence += 6
+            elif indicators["rel_vol"] >= 2.0:
                 base_confidence += 4
+            elif indicators["rel_vol"] >= 1.3:
+                base_confidence += 2
+            elif indicators["rel_vol"] < 1.0:
+                base_confidence -= 3  # Penalty for borderline RelVol
+
+            # RSI context (max +3)
             rsi = indicators["rsi"]
-            if direction == "LONG" and 40 < rsi < 70:
+            if direction == "LONG" and 40 < rsi < 65:
                 base_confidence += 3
-            elif direction == "SHORT" and 30 < rsi < 60:
+            elif direction == "SHORT" and 35 < rsi < 60:
                 base_confidence += 3
+            elif direction == "LONG" and rsi >= 75:
+                base_confidence -= 4  # Overbought penalty
+            elif direction == "SHORT" and rsi <= 25:
+                base_confidence -= 4  # Oversold penalty
+
+            # MACD (max +4)
             macd_data = indicators["macd"]
             if direction == "LONG" and macd_data["crossover"] == "bullish":
-                base_confidence += 5
+                base_confidence += 4
             elif direction == "SHORT" and macd_data["crossover"] == "bearish":
-                base_confidence += 5
+                base_confidence += 4
+
+            # Structure alignment (max +5, penalty for weak)
             if structure["structure"] == "bullish" and direction == "LONG":
                 base_confidence += 5
             elif structure["structure"] == "bearish" and direction == "SHORT":
                 base_confidence += 5
+            elif structure["structure"] == "ranging":
+                base_confidence += 1  # Neutral
+            else:
+                # Structure opposes direction
+                base_confidence -= 5
+
+            # R:R ratio bonus (max +4)
+            rr_prelim = 0
+            if direction == "LONG" and structure["last_pivot_low"] > 0:
+                risk_est = price - structure["last_pivot_low"]
+                if risk_est > 0:
+                    rr_prelim = (risk_est * 2) / risk_est
+            elif direction == "SHORT" and structure["last_pivot_high"] > 0:
+                risk_est = structure["last_pivot_high"] - price
+                if risk_est > 0:
+                    rr_prelim = (risk_est * 2) / risk_est
+            if rr_prelim >= 2.5:
+                base_confidence += 4
+            elif rr_prelim >= 2.0:
+                base_confidence += 2
 
             # Penalties
             if fake:
-                base_confidence -= 20
+                base_confidence -= 22
             if overextended:
-                base_confidence -= 15
+                base_confidence -= 18
             if indicators["spread_pct"] > 0.5:
-                base_confidence -= 10
+                base_confidence -= 12
             elif indicators["spread_pct"] > 0.3:
                 base_confidence -= 5
+            elif indicators["spread_pct"] > 0.2:
+                base_confidence -= 2
 
             base_confidence = max(0, min(100, base_confidence))
 
-            # Momentum Mode: strict disciplined bypass for explosive movers
-            # Requirements: RelVol>2, strong breakout/breakdown, clear structure,
-            # VWAP aligned, acceptable spread, NOT overextended, NOT fake breakout
+            # Momentum Mode: STRICT disciplined bypass for explosive movers
+            # Requirements: RelVol>2.5, strong breakout/breakdown candle, clear structure,
+            # VWAP aligned, acceptable spread, NOT overextended (>2% from VWAP), NOT fake breakout
             is_breakout_setup = best_setup is not None and best_setup.get("type", "") in (
                 "breakout_long", "breakdown_short", "liquidity_sweep_long", "liquidity_sweep_short"
             )
@@ -913,13 +964,27 @@ class TechnicalSignalGenerator:
                 or (direction == "SHORT" and not indicators.get("above_vwap", True))
             )
             spread_ok = indicators.get("spread_pct", 1) <= 0.5
+            # Strict overextension: must be within 2% of VWAP
+            vwap_dist = abs(indicators.get("vwap_distance_pct", 0))
+            not_overextended_momentum = vwap_dist <= 2.0
+
+            # Strong breakout candle check: last candle must be decisive
+            strong_candle = False
+            if bars_5m and len(bars_5m) >= 2:
+                last_candle = bars_5m[-1]
+                candle_body = abs(last_candle["c"] - last_candle["o"])
+                candle_range = last_candle["h"] - last_candle["l"]
+                if candle_range > 0 and candle_body / candle_range >= 0.6:
+                    strong_candle = True  # Body >= 60% of range = decisive candle
 
             momentum_mode = (
-                indicators["rel_vol"] >= 2.0
+                indicators["rel_vol"] >= 2.5  # Raised from 2.0
                 and is_breakout_setup
                 and has_clear_structure
                 and vwap_aligned
                 and spread_ok
+                and strong_candle
+                and not_overextended_momentum
                 and not fake
                 and not overextended
             )
@@ -927,12 +992,15 @@ class TechnicalSignalGenerator:
             # Momentum mode reasons for diagnostics
             momentum_reasons = []
             if momentum_mode:
-                momentum_reasons.append(f"RelVol {indicators['rel_vol']:.1f}x")
+                momentum_reasons.append(f"RelVol {indicators['rel_vol']:.1f}x (>2.5)")
                 momentum_reasons.append(f"Setup: {best_setup['type']}")
-                momentum_reasons.append(f"Structure: HH/HL" if direction == "LONG" else f"Structure: LH/LL")
-                momentum_reasons.append(f"VWAP aligned ({direction})")
+                momentum_reasons.append("Structure: HH/HL" if direction == "LONG" else "Structure: LH/LL")
+                momentum_reasons.append(f"VWAP aligned ({direction}), dist {vwap_dist:.1f}%")
+                momentum_reasons.append("Strong breakout candle")
             momentum_miss_reasons = []
             if indicators["rel_vol"] >= 2.0 and not momentum_mode:
+                if indicators["rel_vol"] < 2.5:
+                    momentum_miss_reasons.append(f"RelVol {indicators['rel_vol']:.1f}x < 2.5 threshold")
                 if not is_breakout_setup:
                     momentum_miss_reasons.append("No breakout/breakdown setup")
                 if not has_clear_structure:
@@ -941,6 +1009,10 @@ class TechnicalSignalGenerator:
                     momentum_miss_reasons.append("VWAP not aligned with direction")
                 if not spread_ok:
                     momentum_miss_reasons.append(f"Spread too wide: {indicators.get('spread_pct', 0):.2f}%")
+                if not strong_candle:
+                    momentum_miss_reasons.append("Weak breakout candle (body < 60% of range)")
+                if not not_overextended_momentum:
+                    momentum_miss_reasons.append(f"Overextended from VWAP: {vwap_dist:.1f}% (max 2%)")
                 if fake:
                     momentum_miss_reasons.append("Fake breakout detected")
                 if overextended:
@@ -1071,15 +1143,19 @@ class TechnicalSignalGenerator:
                 elif indicators.get("ema_bearish") and indicators.get("rsi", 50) < 50:
                     direction = "SHORT"
 
-            # Confidence scoring
-            base_confidence = 45
+            # Confidence scoring (RECALIBRATED: base=35, wider distribution)
+            base_confidence = 35
             if best_setup:
                 base_confidence += min(best_setup.get("confidence_boost", 0), 18)
             rel_vol = indicators.get("rel_vol", 0)
-            if rel_vol >= 2.0:
-                base_confidence += 8
-            elif rel_vol >= 1.3:
+            if rel_vol >= 2.5:
+                base_confidence += 6
+            elif rel_vol >= 2.0:
                 base_confidence += 4
+            elif rel_vol >= 1.3:
+                base_confidence += 2
+            elif rel_vol < 1.0:
+                base_confidence -= 3
             rsi = indicators.get("rsi", 50)
             if 40 <= rsi <= 60:
                 base_confidence += 3
@@ -1087,21 +1163,30 @@ class TechnicalSignalGenerator:
                 base_confidence += 1
             macd = indicators.get("macd", {})
             if macd.get("crossover") == "bullish" and direction == "LONG":
-                base_confidence += 5
+                base_confidence += 4
             elif macd.get("crossover") == "bearish" and direction == "SHORT":
+                base_confidence += 4
+            # Structure alignment
+            if structure.get("structure") == "bullish" and direction == "LONG":
                 base_confidence += 5
-            if fake:
-                base_confidence -= 20
-            if overextended:
-                base_confidence -= 15
-            if indicators.get("spread_pct", 0) > 0.5:
+            elif structure.get("structure") == "bearish" and direction == "SHORT":
+                base_confidence += 5
+            elif structure.get("structure") == "ranging":
+                base_confidence += 1
+            else:
                 base_confidence -= 5
+            if fake:
+                base_confidence -= 22
+            if overextended:
+                base_confidence -= 18
+            if indicators.get("spread_pct", 0) > 0.5:
+                base_confidence -= 12
             elif indicators.get("spread_pct", 0) > 0.3:
-                base_confidence -= 2
+                base_confidence -= 5
             base_confidence = max(0, min(100, base_confidence))
 
             momentum_mode = (
-                rel_vol >= 2.0
+                rel_vol >= 2.5  # Raised from 2.0
                 and structure.get("structure") in ("bullish", "bearish")
                 and best_setup is not None
                 and best_setup.get("type", "") in (
@@ -1111,6 +1196,7 @@ class TechnicalSignalGenerator:
                 and not fake
                 and not overextended
                 and indicators.get("spread_pct", 1) <= 0.5
+                and abs(indicators.get("vwap_distance_pct", 0)) <= 2.0
             )
 
             # Stop/target from setup or ATR

@@ -4325,6 +4325,12 @@ async def get_auto_trade_history(limit: int = Query(default=50, ge=1, le=200), a
     """Get auto-trade execution history"""
     return await auto_orchestrator.get_trade_history(limit)
 
+@api_router.get("/auto-trade/trade-log")
+async def get_trade_log(limit: int = Query(default=50, ge=1, le=200), auth: bool = Depends(verify_access)):
+    """Get comprehensive trade log with full details (direction, SL, TP, P&L, setup, MTF status)"""
+    return await auto_orchestrator.get_trade_log(limit)
+
+
 @api_router.post("/auto-trade/emergency-pause")
 async def emergency_pause(pause: bool = True, auth: bool = Depends(verify_access)):
     """Emergency pause/resume auto-trading"""

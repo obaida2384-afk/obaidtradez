@@ -927,12 +927,14 @@ class DayTradingEngine:
         # 4. RelVol filter (>= 1.3, Momentum Mode bypasses to 1.0)
         rel_vol = indicators.get("rel_vol", 0)
         if momentum_mode:
-            # Momentum mode: relaxed RelVol (already guaranteed >= 2.0)
+            # Momentum mode: relaxed RelVol (already guaranteed >= 2.5)
             entry_reasons.append(f"MOMENTUM MODE: RelVol {rel_vol:.1f}x (explosive volume)")
         elif rel_vol < 1.3:
             reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (min 1.3x)")
-        if rel_vol >= 2.0:
+        if rel_vol >= 2.5:
             entry_reasons.append(f"Strong volume surge: {rel_vol:.1f}x")
+        elif rel_vol >= 2.0:
+            entry_reasons.append(f"Elevated volume: {rel_vol:.1f}x")
 
         # 5. Overextension check — Momentum Mode does NOT bypass this
         if ta_signal.get("overextended"):
@@ -1032,6 +1034,9 @@ class DayTradingEngine:
                     entry_reasons.append(f"  Momentum: {r}")
 
         # === DECISION ===
+        # Determine correct action based on direction: LONG→BUY, SHORT→SELL
+        positive_action = "BUY" if direction == "LONG" else "SELL"
+
         # Hard filter rejects (never bypassed, even by momentum mode)
         hard_reject_keywords = ["spread too wide", "overextended", "mtf conflict"]
         hard_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in hard_reject_keywords)]
@@ -1052,7 +1057,7 @@ class DayTradingEngine:
             explanation.action = "REJECT"
             explanation.reject_reasons = reject_reasons
         elif len(entry_reasons) >= 2 and len(effective_rejects) <= 1:
-            explanation.action = "BUY"
+            explanation.action = positive_action
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
         elif len(entry_reasons) >= 1:
@@ -1634,10 +1639,10 @@ class AutoTradeOrchestrator:
                 "lt_score": 0,
             }
 
-            if explanation.action == "BUY" and confidence >= dt_threshold:
+            if explanation.action in ("BUY", "SELL") and confidence >= dt_threshold:
                 funnel.record("confidence_passed")
                 day_trade_candidates.append(entry)
-            elif explanation.action == "BUY" and confidence >= (dt_threshold - 10):
+            elif explanation.action in ("BUY", "SELL") and confidence >= (dt_threshold - 10):
                 diagnostics.add_near_miss(
                     symbol, "DAY_TRADE", confidence, "NEAR_MISS",
                     explanation.reject_reasons or [f"Confidence {confidence} < {dt_threshold}"])
@@ -1756,8 +1761,13 @@ class AutoTradeOrchestrator:
             f"Cache hit: {cache_stats.get('hit_rate', 0)}%"
         )
 
+        # Get market session info for pre-market awareness
+        from auto_trade_scheduler import MarketSessionManager
+        current_session = MarketSessionManager.get_session()
+
         return {
             "auto_enabled": settings.auto_enabled,
+            "market_session": current_session.value,
             "market_regime": market_regime,
             "day_trades": day_trade_candidates[:20],
             "long_term": long_term_candidates[:20],
@@ -1783,6 +1793,13 @@ class AutoTradeOrchestrator:
                 "long_term_candidates": len(long_term_candidates),
                 "watchlist": len(watchlist),
                 "rejected": len(rejected),
+                "confidence_distribution": {
+                    "elite_85_95": len([c for c in day_trade_candidates if 85 <= c.get("confidence", 0) <= 95]),
+                    "strong_75_85": len([c for c in day_trade_candidates if 75 <= c.get("confidence", 0) < 85]),
+                    "acceptable_65_75": len([c for c in day_trade_candidates if 65 <= c.get("confidence", 0) < 75]),
+                    "below_65": len([c for c in day_trade_candidates if c.get("confidence", 0) < 65]),
+                },
+                "momentum_pct": round(momentum_mode_count / max(1, len(final_ta_results)) * 100, 1),
             },
             "timing": timing,
             "dynamic_thresholds": dynamic,
@@ -1793,7 +1810,9 @@ class AutoTradeOrchestrator:
         }
     
     async def execute_auto_cycle(self) -> Dict:
-        """Run one full auto-trade cycle: scan → classify → risk check → execute"""
+        """Run one full auto-trade cycle: scan → classify → risk check → execute.
+        PRE-MARKET SAFETY: Hard disable execution before 9:30 AM ET.
+        Pre-market signals are still scanned and logged as informational only."""
         settings = await self.get_settings()
         
         if not settings.auto_enabled:
@@ -1802,10 +1821,22 @@ class AutoTradeOrchestrator:
         if settings.emergency_pause:
             return {"status": "paused", "message": "Emergency pause active"}
         
-        if settings.alert_only_mode:
-            # Just scan and log, don't execute
+        # PRE-MARKET SAFETY GATE (Option A: Hard disable before 9:30 AM ET)
+        from auto_trade_scheduler import MarketSessionManager, MarketSession
+        session = MarketSessionManager.get_session()
+        is_pre_market = session == MarketSession.PRE_MARKET
+        is_after_hours = session == MarketSession.AFTER_HOURS
+        is_closed = session == MarketSession.CLOSED
+        
+        if is_closed:
+            return {"status": "market_closed", "message": "Market is closed"}
+        
+        if settings.alert_only_mode or is_pre_market:
+            # Scan and log but do NOT execute
             opportunities = await self.scan_opportunities()
-            return {"status": "alert_only", "opportunities": opportunities["stats"]}
+            status = "pre_market_scan_only" if is_pre_market else "alert_only"
+            msg = "Pre-market: scan only, no execution before 9:30 AM ET" if is_pre_market else "Alert-only mode active"
+            return {"status": status, "message": msg, "opportunities": opportunities["stats"]}
         
         # Get account and positions
         account = await self.get_account()
@@ -1817,11 +1848,16 @@ class AutoTradeOrchestrator:
         executed = []
         skipped = []
         
-        # Process day trade candidates
+        # Process day trade candidates — direction-aware execution
         for candidate in opportunities["day_trades"][:5]:  # Top 5
             symbol = candidate["symbol"]
             confidence = candidate["confidence"]
             signal = candidate.get("signal", {})
+            direction = candidate.get("direction", "LONG")
+            action = candidate.get("action", "BUY")
+            
+            # Determine Alpaca order side from direction
+            order_side = "buy" if direction == "LONG" else "sell"
             
             approved, checks = await self.risk_manager.check_all(
                 signal, confidence, "DAY_TRADE", settings, account, positions, market_regime
@@ -1841,16 +1877,17 @@ class AutoTradeOrchestrator:
                 )
                 
                 if size["shares"] > 0:
-                    # Execute via Alpaca
-                    result = await self._place_order(symbol, size["shares"], "buy", "DAY_TRADE", candidate)
+                    result = await self._place_order(symbol, size["shares"], order_side, "DAY_TRADE", candidate)
                     if result.get("success"):
                         executed.append(result)
+                        # Log comprehensive trade record
+                        await self._log_trade(symbol, direction, action, signal, candidate, result)
                     else:
                         skipped.append({"symbol": symbol, "reason": result.get("error", "Order failed")})
             else:
                 skipped.append({"symbol": symbol, "reason": "; ".join(c for c in checks if "VIOLATION" in c)})
         
-        # Process long-term candidates
+        # Process long-term candidates (always BUY for long-term)
         for candidate in opportunities["long_term"][:3]:  # Top 3
             symbol = candidate["symbol"]
             confidence = candidate["confidence"]
@@ -1870,6 +1907,7 @@ class AutoTradeOrchestrator:
                     result = await self._place_order(symbol, size["shares"], "buy", "LONG_TERM", candidate)
                     if result.get("success"):
                         executed.append(result)
+                        await self._log_trade(symbol, "LONG", "BUY", signal, candidate, result)
                     else:
                         skipped.append({"symbol": symbol, "reason": result.get("error", "Order failed")})
             else:
@@ -1881,6 +1919,7 @@ class AutoTradeOrchestrator:
         return {
             "status": "completed",
             "cycle_time": datetime.now(timezone.utc).isoformat(),
+            "market_session": session.value,
             "executed_buys": len(executed),
             "skipped": len(skipped),
             "sells_triggered": len(sell_results),
@@ -1933,6 +1972,53 @@ class AutoTradeOrchestrator:
                     return {"success": False, "error": resp.text}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def _log_trade(self, symbol: str, direction: str, action: str,
+                         signal: Dict, candidate: Dict, result: Dict):
+        """Comprehensive trade logging for every executed or simulated trade.
+        Stores: ticker, direction, entry price, SL, TP, setup type, confidence,
+        entry reasons, reject reasons, momentum mode, MTF status."""
+        explanation = candidate.get("explanation", {})
+        ki = explanation.get("key_indicators", {})
+        exit_plan = explanation.get("exit_plan", {})
+        
+        trade_record = {
+            "symbol": symbol,
+            "direction": direction,
+            "action": action,
+            "entry_price": round(signal.get("price", 0), 2),
+            "stop_loss": round(signal.get("stop_loss", 0), 2),
+            "take_profit": round(signal.get("take_profit", 0), 2),
+            "rr_ratio": signal.get("rr_ratio", 0),
+            "exit_price": None,  # Populated on close
+            "pnl_dollars": None,  # Populated on close
+            "pnl_percent": None,  # Populated on close
+            "setup_type": candidate.get("best_setup", "unknown"),
+            "confidence_score": candidate.get("confidence", 0),
+            "entry_reasons": explanation.get("entry_reasons", []),
+            "reject_reasons": explanation.get("reject_reasons", []),
+            "exit_reasons": [],  # Populated on close
+            "momentum_mode": ki.get("momentum_mode", False),
+            "momentum_bypass_active": ki.get("momentum_bypass_active", False),
+            "mtf_aligned": ki.get("mtf_aligned", False),
+            "mtf_5m": ki.get("mtf_5m", "?"),
+            "mtf_15m": ki.get("mtf_15m", "?"),
+            "mtf_1m": ki.get("mtf_1m", "?"),
+            "rel_vol": ki.get("rel_vol", 0),
+            "spread_pct": ki.get("spread_pct", 0),
+            "structure": ki.get("structure", "?"),
+            "order_id": result.get("order_id"),
+            "shares": result.get("shares", 0),
+            "classification": candidate.get("classification", "DAY_TRADE"),
+            "status": "OPEN",
+            "opened_at": datetime.now(timezone.utc).isoformat(),
+            "closed_at": None,
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        }
+        await self.db.trade_log.insert_one(trade_record)
+        logger.info(f"TRADE LOG: {action} {symbol} dir={direction} conf={trade_record['confidence_score']} "
+                     f"setup={trade_record['setup_type']} mtf={trade_record['mtf_aligned']} "
+                     f"momentum={trade_record['momentum_mode']}")
     
     async def _monitor_positions(self, settings: AutoTradeSettings, market_regime: Dict) -> List[Dict]:
         """Check existing positions for sell signals"""
@@ -1947,9 +2033,9 @@ class AutoTradeOrchestrator:
             if not current_price or not entry_price:
                 continue
             
-            # Check trade log for classification
+            # Check trade log for classification (check both BUY and SELL actions)
             trade_log = await self.db.auto_trade_log.find_one(
-                {"symbol": symbol, "action": "BUY"},
+                {"symbol": symbol, "action": {"$in": ["BUY", "SELL"]}},
                 sort=[("timestamp", -1)]
             )
             
@@ -1983,16 +2069,32 @@ class AutoTradeOrchestrator:
                         "explanation": explanation.dict()
                     })
                     if result.get("success"):
-                        pnl = (current_price - entry_price) * qty
+                        pnl_dollars = (current_price - entry_price) * qty
+                        pnl_pct = ((current_price / entry_price) - 1) * 100 if entry_price > 0 else 0
+                        # Update trade_log with close info
+                        await self.db.trade_log.update_one(
+                            {"symbol": symbol, "status": "OPEN"},
+                            {"$set": {
+                                "status": "CLOSED",
+                                "exit_price": round(current_price, 2),
+                                "pnl_dollars": round(pnl_dollars, 2),
+                                "pnl_percent": round(pnl_pct, 2),
+                                "exit_reasons": explanation.exit_reasons if hasattr(explanation, 'exit_reasons') else [],
+                                "closed_at": datetime.now(timezone.utc).isoformat(),
+                            }}
+                        )
                         await self.db.auto_trade_log.update_one(
                             {"order_id": result.get("order_id")},
-                            {"$set": {"pnl": round(pnl, 2)}}
+                            {"$set": {"pnl": round(pnl_dollars, 2)}}
                         )
                         sell_results.append({
                             "symbol": symbol,
-                            "reason": explanation.exit_reasons,
-                            "pnl": round(pnl, 2)
+                            "reason": explanation.exit_reasons if hasattr(explanation, 'exit_reasons') else [],
+                            "pnl": round(pnl_dollars, 2),
+                            "pnl_pct": round(pnl_pct, 2)
                         })
+        
+        return sell_results
         
         return sell_results
     
@@ -2001,6 +2103,13 @@ class AutoTradeOrchestrator:
         cursor = self.db.auto_trade_log.find(
             {}, {"_id": 0}
         ).sort("timestamp", -1).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def get_trade_log(self, limit: int = 50) -> List[Dict]:
+        """Get comprehensive trade log with full details"""
+        cursor = self.db.trade_log.find(
+            {}, {"_id": 0}
+        ).sort("opened_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
     
     async def get_status(self) -> Dict:

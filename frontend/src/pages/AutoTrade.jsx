@@ -244,6 +244,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
                 </Badge>
                 <Badge variant="outline" className={`text-[10px] ${
                   item.action === "BUY" ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' :
+                  item.action === "SELL" ? 'border-red-500/30 text-red-400 bg-red-500/10' :
                   item.action === "WATCHLIST" ? 'border-amber-500/30 text-amber-400' :
                   item.action === "NEAR_MISS" ? 'border-purple-500/30 text-purple-400' :
                   'border-red-500/30 text-red-400'
@@ -380,6 +381,7 @@ const AutoTrade = () => {
   const [opportunities, setOpportunities] = useState(null);
   const [history, setHistory] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [tradeLog, setTradeLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -430,6 +432,13 @@ const AutoTrade = () => {
     try {
       const resp = await fetch(`${API}/scheduler/notifications?limit=30`, { headers });
       if (resp.ok) setNotifications(await resp.json());
+    } catch (e) { console.error(e); }
+  }, [token]);
+
+  const fetchTradeLog = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API}/auto-trade/trade-log?limit=50`, { headers });
+      if (resp.ok) setTradeLog(await resp.json());
     } catch (e) { console.error(e); }
   }, [token]);
 
@@ -646,6 +655,7 @@ const AutoTrade = () => {
         setActiveTab(v);
         if (v === "notifications") fetchNotifications();
         if (v === "history") fetchHistory();
+        if (v === "trade-log") fetchTradeLog();
       }}>
         <TabsList className="w-full justify-start bg-slate-900 border border-slate-800 p-1 h-auto flex-wrap">
           <TabsTrigger value="scheduler" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400"><Timer className="w-4 h-4 mr-1" /> Scheduler</TabsTrigger>
@@ -653,6 +663,7 @@ const AutoTrade = () => {
           <TabsTrigger value="candidates" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><Eye className="w-4 h-4 mr-1" /> Candidates</TabsTrigger>
           <TabsTrigger value="day-trades" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Zap className="w-4 h-4 mr-1" /> Day ({opportunities?.day_trades?.length || 0})</TabsTrigger>
           <TabsTrigger value="long-term" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><TrendingUp className="w-4 h-4 mr-1" /> Long ({opportunities?.long_term?.length || 0})</TabsTrigger>
+          <TabsTrigger value="trade-log" className="data-[state=active]:bg-teal-500/20 data-[state=active]:text-teal-400"><Database className="w-4 h-4 mr-1" /> Trade Log</TabsTrigger>
           <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Bell className="w-4 h-4 mr-1" /> Alerts</TabsTrigger>
           <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Activity className="w-4 h-4 mr-1" /> History</TabsTrigger>
           <TabsTrigger value="settings" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-white"><Settings className="w-4 h-4 mr-1" /> Config</TabsTrigger>
@@ -791,8 +802,59 @@ const AutoTrade = () => {
                   MTF Rule: LONG requires 5m bullish + 15m supportive | SHORT requires 5m bearish + 15m supportive | 1m = timing only
                 </p>
                 <p className="text-[10px] text-slate-600">
-                  Momentum Mode: RelVol&gt;2, breakout/breakdown, clear HH/HL or LH/LL, VWAP aligned, tight spread — bypasses soft filters only
+                  Momentum Mode: RelVol&gt;2.5, breakout/breakdown, strong candle, clear HH/HL or LH/LL, VWAP aligned (&lt;2%), tight spread — bypasses soft filters only
                 </p>
+              </div>
+            </Card>
+          )}
+          {/* Confidence Distribution + Momentum % */}
+          {opportunities?.stats?.confidence_distribution && (
+            <Card className="terminal-card p-4" data-testid="confidence-distribution">
+              <h3 className="text-xs text-amber-400 mb-3 flex items-center gap-2"><BarChart2 className="w-4 h-4" /> Confidence Score Distribution</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div className="text-center p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                  <p className="text-[10px] text-emerald-400">Elite (85-95)</p>
+                  <p className="text-emerald-400 font-mono text-2xl">{opportunities.stats.confidence_distribution.elite_85_95 || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-blue-500/10 border border-blue-500/20">
+                  <p className="text-[10px] text-blue-400">Strong (75-85)</p>
+                  <p className="text-blue-400 font-mono text-2xl">{opportunities.stats.confidence_distribution.strong_75_85 || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-[10px] text-amber-400">Acceptable (65-75)</p>
+                  <p className="text-amber-400 font-mono text-2xl">{opportunities.stats.confidence_distribution.acceptable_65_75 || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-red-500/10 border border-red-500/20">
+                  <p className="text-[10px] text-red-400">Below 65</p>
+                  <p className="text-red-400 font-mono text-2xl">{opportunities.stats.confidence_distribution.below_65 || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-orange-500/10 border border-orange-500/20">
+                  <p className="text-[10px] text-orange-400">Momentum %</p>
+                  <p className={`font-mono text-2xl ${(opportunities.stats.momentum_pct || 0) > 30 ? 'text-red-400' : 'text-orange-400'}`}>
+                    {opportunities.stats.momentum_pct || 0}%
+                  </p>
+                  <p className="text-[10px] text-slate-500">target: 10-30%</p>
+                </div>
+              </div>
+            </Card>
+          )}
+          {/* Market Session */}
+          {opportunities?.market_session && (
+            <Card className="terminal-card p-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-400" />
+                <span className="text-xs text-slate-400">Market Session:</span>
+                <Badge variant="outline" className={`text-[10px] ${
+                  opportunities.market_session === 'regular' ? 'border-emerald-500/30 text-emerald-400' :
+                  opportunities.market_session === 'pre_market' ? 'border-amber-500/30 text-amber-400' :
+                  opportunities.market_session === 'closing' ? 'border-orange-500/30 text-orange-400' :
+                  'border-red-500/30 text-red-400'
+                }`}>
+                  {opportunities.market_session.replace(/_/g, " ").toUpperCase()}
+                </Badge>
+                {opportunities.market_session === 'pre_market' && (
+                  <span className="text-[10px] text-amber-400">Auto-execution disabled until 9:30 AM ET</span>
+                )}
               </div>
             </Card>
           )}
@@ -908,6 +970,64 @@ const AutoTrade = () => {
               onToggle={() => setExpandedCard(expandedCard === `ltf-${item.symbol}` ? null : `ltf-${item.symbol}`)} />
           ))}
           {!opportunities?.long_term?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates</Card>}
+        </TabsContent>
+
+        {/* TRADE LOG TAB */}
+        <TabsContent value="trade-log" className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm text-teal-400 flex items-center gap-1"><Database className="w-4 h-4" /> Trade Log (Full Lifecycle)</h2>
+            <Button variant="outline" size="sm" onClick={fetchTradeLog} className="border-slate-700"><RefreshCw className="w-3 h-3 mr-1" /> Refresh</Button>
+          </div>
+          {tradeLog.length > 0 ? tradeLog.map((t, i) => (
+            <Card key={i} className={`terminal-card p-4 border ${t.status === "OPEN" ? "border-emerald-500/20" : t.pnl_dollars >= 0 ? "border-blue-500/20" : "border-red-500/20"}`} data-testid={`trade-log-${i}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-bold text-sm">{t.symbol}</span>
+                  <Badge variant="outline" className={`text-[10px] ${t.direction === "LONG" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
+                    {t.direction}
+                  </Badge>
+                  <Badge variant="outline" className={`text-[10px] ${t.action === "BUY" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
+                    {t.action}
+                  </Badge>
+                  <Badge variant="outline" className={`text-[10px] ${t.status === "OPEN" ? "border-amber-500/30 text-amber-400" : "border-slate-700 text-slate-400"}`}>
+                    {t.status}
+                  </Badge>
+                  {t.momentum_mode && <Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">MOMENTUM</Badge>}
+                  {t.mtf_aligned && <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">MTF OK</Badge>}
+                </div>
+                <span className="text-xs text-slate-500">{t.opened_at ? new Date(t.opened_at).toLocaleString() : ""}</span>
+              </div>
+              <div className="grid grid-cols-3 md:grid-cols-7 gap-2 text-xs">
+                <div><p className="text-slate-500">Entry</p><p className="text-white font-mono">${t.entry_price}</p></div>
+                <div><p className="text-slate-500">SL</p><p className="text-red-400 font-mono">${t.stop_loss}</p></div>
+                <div><p className="text-slate-500">TP</p><p className="text-emerald-400 font-mono">${t.take_profit}</p></div>
+                <div><p className="text-slate-500">Setup</p><p className="text-blue-400">{t.setup_type || "?"}</p></div>
+                <div><p className="text-slate-500">Conf</p><p className="text-amber-400 font-mono">{t.confidence_score}</p></div>
+                <div><p className="text-slate-500">R:R</p><p className="text-white font-mono">{t.rr_ratio}:1</p></div>
+                <div>
+                  <p className="text-slate-500">P&L</p>
+                  <p className={`font-mono ${t.pnl_dollars == null ? "text-slate-500" : t.pnl_dollars >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {t.pnl_dollars != null ? `$${t.pnl_dollars} (${t.pnl_percent}%)` : "—"}
+                  </p>
+                </div>
+              </div>
+              {t.entry_reasons?.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-slate-800">
+                  <p className="text-[10px] text-emerald-400 mb-1">Entry Reasons:</p>
+                  <p className="text-[10px] text-slate-400">{t.entry_reasons.slice(0, 4).join(" | ")}</p>
+                </div>
+              )}
+              {t.exit_reasons?.length > 0 && (
+                <div className="mt-1">
+                  <p className="text-[10px] text-red-400">Exit: {t.exit_reasons.join(", ")}</p>
+                </div>
+              )}
+            </Card>
+          )) : (
+            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
+              No trade logs yet. Trades will appear here once the system executes orders.
+            </Card>
+          )}
         </TabsContent>
 
         {/* NOTIFICATIONS TAB */}
