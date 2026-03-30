@@ -4267,6 +4267,53 @@ async def scan_auto_opportunities(auth: bool = Depends(verify_access)):
     """Scan for auto-trade opportunities with AI classification"""
     return await auto_orchestrator.scan_opportunities()
 
+_ta_refresh_running = False
+
+@api_router.post("/auto-trade/refresh-ta")
+async def refresh_ta_signals(background_tasks: BackgroundTasks, auth: bool = Depends(verify_access)):
+    """Trigger background TA analysis refresh on liquid stocks.
+    This runs in background and caches results to DB for fast scan reads.
+    Only one refresh can run at a time."""
+    global _ta_refresh_running
+    from technical_analysis_engine import TechnicalSignalGenerator, TACache
+
+    if _ta_refresh_running:
+        cached_count = await db.ta_signals.count_documents({})
+        return {"message": "TA refresh already running", "db_cached": cached_count, "mem_cache": TACache.stats()}
+
+    async def _run_ta_refresh():
+        global _ta_refresh_running
+        _ta_refresh_running = True
+        try:
+            trading_sigs = await db.trading_signals.find(
+                {}, {"_id": 0, "symbol": 1, "indicators.volume_ratio": 1}
+            ).to_list(2000)
+            # Sort by volume, take top 15 (15 stocks * 13s = ~3 min with free Polygon)
+            symbols = sorted(
+                [s for s in trading_sigs if s.get("indicators", {}).get("volume_ratio", 0) >= 0.5],
+                key=lambda x: x.get("indicators", {}).get("volume_ratio", 0),
+                reverse=True
+            )[:15]
+            symbol_list = [s["symbol"] for s in symbols]
+            logger.info(f"TA refresh starting for {len(symbol_list)} stocks (est. {len(symbol_list) * 13}s)...")
+            results = await TechnicalSignalGenerator.batch_analyze_fast(symbol_list, max_concurrent=1)
+            saved = 0
+            for r in results:
+                r["last_updated"] = datetime.now(timezone.utc).isoformat()
+                await db.ta_signals.update_one({"symbol": r["symbol"]}, {"$set": r}, upsert=True)
+                saved += 1
+            logger.info(f"TA refresh complete: {saved} signals cached from {len(symbol_list)} stocks")
+        except Exception as e:
+            logger.error(f"TA refresh error: {e}")
+        finally:
+            _ta_refresh_running = False
+
+    background_tasks.add_task(_run_ta_refresh)
+    cached_count = await db.ta_signals.count_documents({})
+    mem_cache = TACache.stats()
+    return {"message": "TA refresh triggered in background", "db_cached": cached_count, "mem_cache": mem_cache}
+
+
 @api_router.post("/auto-trade/execute-cycle")
 async def execute_auto_cycle(background_tasks: BackgroundTasks, auth: bool = Depends(verify_access)):
     """Execute one auto-trade cycle (scan → classify → risk → execute)"""

@@ -13,7 +13,7 @@ import {
   Play, Pause, Square, RefreshCw, Eye, ChevronDown, ChevronUp,
   ArrowUpRight, ArrowDownRight, Loader2, Brain, Lock, Bell,
   CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert, Filter,
-  Search, Layers, TriangleAlert
+  Search, Layers, TriangleAlert, CheckCircle, Database
 } from "lucide-react";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
@@ -110,9 +110,10 @@ const PipelineFunnel = ({ funnel }) => {
   if (!funnel?.funnel) return null;
   const stages = [
     { key: "universe_scanned", label: "Universe", icon: Layers },
-    { key: "liquidity_passed", label: "Liquidity", icon: Filter },
-    { key: "technical_passed", label: "Technical", icon: BarChart2 },
-    { key: "catalyst_passed", label: "Catalyst", icon: Zap },
+    { key: "prefilter_passed", label: "Pre-Filter", icon: Filter },
+    { key: "ta_analyzed", label: "TA Analyzed", icon: BarChart2 },
+    { key: "setup_found", label: "Setup Found", icon: Zap },
+    { key: "filters_passed", label: "Filters OK", icon: CheckCircle },
     { key: "confidence_passed", label: "Confidence", icon: Target },
     { key: "risk_approved", label: "Risk OK", icon: Shield },
     { key: "executed", label: "Executed", icon: Play },
@@ -231,7 +232,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
                   'border-red-500/30 text-red-400'
                 }`}>{item.action}</Badge>
               </div>
-              <p className="text-xs text-slate-500">{signal.name || signal.company_name || ""}</p>
+              <p className="text-xs text-slate-500">{isDay ? `${item.direction || ''} ${item.best_setup ? `- ${item.best_setup}` : ''}`.trim() : (signal.name || signal.company_name || "")}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -399,6 +400,18 @@ const AutoTrade = () => {
     setExecuting(true);
     try { await fetch(`${API}/auto-trade/execute-cycle`, { method: "POST", headers }); toast.success("Cycle executing..."); setTimeout(() => { fetchStatus(); fetchHistory(); }, 5000); } catch (e) { toast.error("Failed"); }
     setExecuting(false);
+  };
+  const [refreshingTA, setRefreshingTA] = useState(false);
+  const refreshTA = async () => {
+    setRefreshingTA(true);
+    try {
+      const resp = await fetch(`${API}/auto-trade/refresh-ta`, { method: "POST", headers });
+      if (resp.ok) {
+        const d = await resp.json();
+        toast.success(`TA refresh started (${d.db_cached} cached)`);
+      }
+    } catch (e) { toast.error("TA refresh failed"); }
+    setRefreshingTA(false);
   };
   const updateSetting = async (key, value) => {
     try { await fetch(`${API}/auto-trade/settings`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ [key]: value }) }); fetchStatus(); } catch (e) {}
@@ -635,6 +648,7 @@ const AutoTrade = () => {
             <h3 className="text-sm text-white font-medium mb-3">Manual Actions</h3>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Scan Now</Button>
+              <Button variant="outline" size="sm" onClick={refreshTA} disabled={refreshingTA} className="border-cyan-800 text-cyan-400 hover:bg-cyan-900/30"><Database className={`w-3 h-3 mr-1 ${refreshingTA ? 'animate-spin' : ''}`} /> Refresh TA Data</Button>
               <Button size="sm" onClick={executeCycle} disabled={executing} className="bg-emerald-600 hover:bg-emerald-500"><Play className={`w-3 h-3 mr-1 ${executing ? 'animate-spin' : ''}`} /> Execute Cycle</Button>
             </div>
           </Card>
@@ -648,6 +662,19 @@ const AutoTrade = () => {
           </div>
           {/* Pipeline Funnel */}
           <PipelineFunnel funnel={pipelineFunnel} />
+          {/* TA Analysis Status */}
+          {opportunities?.stats && (
+            <Card className="terminal-card p-4">
+              <h3 className="text-xs text-cyan-400 mb-3 flex items-center gap-2"><Database className="w-4 h-4" /> Technical Analysis Engine Status</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div><p className="text-slate-500">TA Analyzed</p><p className="text-cyan-400 font-mono text-lg">{opportunities.stats.ta_analyzed || 0}</p></div>
+                <div><p className="text-slate-500">Setups Found</p><p className="text-blue-400 font-mono text-lg">{opportunities.stats.setups_found || 0}</p></div>
+                <div><p className="text-slate-500">Filters Passed</p><p className="text-emerald-400 font-mono text-lg">{opportunities.stats.filters_passed || 0}</p></div>
+                <div><p className="text-slate-500">DT Candidates</p><p className="text-amber-400 font-mono text-lg">{opportunities.stats.day_trade_candidates || 0}</p></div>
+              </div>
+              <p className="text-[10px] text-slate-600 mt-2">TA uses Polygon OHLCV data (EMA, RSI, MACD, VWAP, Market Structure, FVG). Click "Refresh TA Data" to update.</p>
+            </Card>
+          )}
           {/* No Trade Panel */}
           <NoTradePanel summary={noTradeSummary} />
           {/* Dynamic Thresholds */}
@@ -683,10 +710,12 @@ const AutoTrade = () => {
           </div>
           {opportunities?.stats && (
             <Card className="terminal-card p-4">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+              <div className="grid grid-cols-3 md:grid-cols-7 gap-3 text-center">
                 <div><p className="text-2xl font-mono text-white">{opportunities.stats.total_scanned}</p><p className="text-[10px] text-slate-500">Scanned</p></div>
+                <div><p className="text-2xl font-mono text-cyan-400">{opportunities.stats.ta_analyzed || 0}</p><p className="text-[10px] text-slate-500">TA Analyzed</p></div>
+                <div><p className="text-2xl font-mono text-blue-400">{opportunities.stats.setups_found || 0}</p><p className="text-[10px] text-slate-500">Setups</p></div>
                 <div><p className="text-2xl font-mono text-amber-400">{opportunities.stats.day_trade_candidates}</p><p className="text-[10px] text-slate-500">Day Trades</p></div>
-                <div><p className="text-2xl font-mono text-blue-400">{opportunities.stats.long_term_candidates}</p><p className="text-[10px] text-slate-500">Long Term</p></div>
+                <div><p className="text-2xl font-mono text-purple-400">{opportunities.stats.long_term_candidates}</p><p className="text-[10px] text-slate-500">Long Term</p></div>
                 <div><p className="text-2xl font-mono text-slate-400">{opportunities.stats.watchlist}</p><p className="text-[10px] text-slate-500">Watchlist</p></div>
                 <div><p className="text-2xl font-mono text-red-400">{opportunities.stats.rejected}</p><p className="text-[10px] text-slate-500">Rejected</p></div>
               </div>
@@ -726,7 +755,23 @@ const AutoTrade = () => {
             <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `dtf-${item.symbol}`}
               onToggle={() => setExpandedCard(expandedCard === `dtf-${item.symbol}` ? null : `dtf-${item.symbol}`)} />
           ))}
-          {!opportunities?.day_trades?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates</Card>}
+          {!opportunities?.day_trades?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates — click "Refresh TA Data" first, then "Scan Now"</Card>}
+          {/* Rejected DT Near-Misses */}
+          {(() => {
+            const dtRejected = (opportunities?.rejected_details || []).filter(r => r.classification === "DAY_TRADE");
+            if (dtRejected.length === 0) return null;
+            return (
+              <div className="mt-4">
+                <h3 className="text-xs text-red-400/70 mb-2 flex items-center gap-1"><TriangleAlert className="w-3 h-3" /> Rejected / Near-Miss DT ({dtRejected.length})</h3>
+                <div className="space-y-2">
+                  {dtRejected.slice(0, 10).map((item) => (
+                    <ExplanationCard key={`rej-${item.symbol}`} item={item} expanded={expandedCard === `rejdt-${item.symbol}`}
+                      onToggle={() => setExpandedCard(expandedCard === `rejdt-${item.symbol}` ? null : `rejdt-${item.symbol}`)} />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </TabsContent>
 
         {/* LONG TERM TAB */}

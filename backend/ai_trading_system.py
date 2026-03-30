@@ -35,7 +35,7 @@ class AutoTradeSettings(BaseModel):
     dt_risk_per_trade_pct: float = 0.04  # 4% of capital
     dt_high_conf_risk_pct: float = 0.08  # 8% for high confidence
     dt_max_positions: int = 6
-    dt_confidence_threshold: int = 80  # Raised from 60
+    dt_confidence_threshold: int = 65  # TA-first: lowered from 80
     dt_take_profit_pct: float = 2.5  # 2.5%
     dt_stop_loss_pct: float = 0.8  # 0.8%
     dt_time_exit_days: int = 2
@@ -46,7 +46,7 @@ class AutoTradeSettings(BaseModel):
     lt_enabled: bool = True
     lt_max_position_pct: float = 0.15  # 15% of capital
     lt_max_positions: int = 8
-    lt_confidence_threshold: int = 75  # Raised from 55
+    lt_confidence_threshold: int = 70  # Adjusted from 75
     lt_trailing_stop_pct: float = 15.0  # 15%
     lt_rebalance_threshold_pct: float = 25.0  # rebalance if +25% overweight
     lt_valuation_margin_pct: float = 10.0  # margin of safety
@@ -80,10 +80,10 @@ class TradeExplanation(BaseModel):
 class DynamicThresholdManager:
     """Adjusts confidence thresholds based on market regime, recent performance, post-cooldown state"""
 
-    DT_FLOOR = 70
-    DT_DEFAULT = 80
-    LT_FLOOR = 65
-    LT_DEFAULT = 75
+    DT_FLOOR = 55
+    DT_DEFAULT = 65
+    LT_FLOOR = 60
+    LT_DEFAULT = 70
 
     @staticmethod
     def get_thresholds(market_regime: Dict, settings: "AutoTradeSettings",
@@ -94,18 +94,22 @@ class DynamicThresholdManager:
         dt_thresh = settings.dt_confidence_threshold
         lt_thresh = settings.lt_confidence_threshold
 
-        # Regime adjustments
-        if regime in ("bearish", "neutral_bearish"):
-            dt_thresh += 8
-            lt_thresh += 6
-        elif regime == "high_volatility":
+        # Regime adjustments (calibrated for TA-first engine)
+        # User-specified: Neutral/Neutral Bearish: 65, Bullish: 60-65, Bearish: 68-70
+        if regime == "bearish":
             dt_thresh += 5
-            lt_thresh += 3
+            lt_thresh += 4
+        elif regime == "neutral_bearish":
+            dt_thresh += 0  # Stays at base (65)
+            lt_thresh += 2
+        elif regime == "high_volatility":
+            dt_thresh += 3
+            lt_thresh += 2
         elif regime == "bullish":
             dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 5)
             lt_thresh = max(DynamicThresholdManager.LT_FLOOR, lt_thresh - 4)
         elif regime == "neutral_bullish":
-            dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 2)
+            dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 3)
             lt_thresh = max(DynamicThresholdManager.LT_FLOOR, lt_thresh - 2)
 
         # Post-cooldown boost (+5 for safety after consecutive losses)
@@ -159,9 +163,10 @@ class TradePipelineFunnel:
     def __init__(self):
         self.stages = {
             "universe_scanned": 0,
-            "liquidity_passed": 0,
-            "technical_passed": 0,
-            "catalyst_passed": 0,
+            "prefilter_passed": 0,
+            "ta_analyzed": 0,
+            "setup_found": 0,
+            "filters_passed": 0,
             "confidence_passed": 0,
             "risk_approved": 0,
             "executed": 0,
@@ -782,7 +787,7 @@ class PositionSizer:
             regime_mult = 0.85
 
         # Confidence-near-threshold reduction (if just barely above threshold, reduce size)
-        threshold = 80 if classification == "DAY_TRADE" else 75
+        threshold = 65 if classification == "DAY_TRADE" else 70
         if dynamic_thresholds:
             threshold = (dynamic_thresholds.get("dt_threshold", 80) if classification == "DAY_TRADE"
                          else dynamic_thresholds.get("lt_threshold", 75))
@@ -863,190 +868,185 @@ class DayTradingEngine:
     """Day trading buy/sell decision engine"""
     
     @staticmethod
-    def evaluate_buy(signal: Dict, market_regime: Dict, settings: AutoTradeSettings) -> TradeExplanation:
-        """Evaluate if a day trade buy should be triggered.
-        Requires: strong catalyst OR strong technical breakout + volume.
-        Blocks: weak sentiment, no catalyst + weak momentum, conflicting signals."""
-        ticker = signal.get("symbol", "")
+    def evaluate_buy(ta_signal: Dict, news_data: Optional[Dict],
+                     market_regime: Dict, settings: AutoTradeSettings) -> TradeExplanation:
+        """Evaluate day trade using Technical Analysis signal as PRIMARY driver.
+        News is used ONLY as a confidence boost, never as a gate.
+        Technical structure drives the decision. No catalyst gate."""
+        symbol = ta_signal.get("symbol", "")
         explanation = TradeExplanation(
-            ticker=ticker,
+            ticker=symbol,
             classification="DAY_TRADE",
             timestamp=datetime.now(timezone.utc).isoformat()
         )
-        
-        indicators = signal.get("indicators", {})
-        entry_reasons = []
-        reject_reasons = []
-        diagnostic_tags = []  # For zero-trade diagnostics
-        
-        price = signal.get("price", signal.get("entry", 0))
-        entry_price = signal.get("entry", price)
-        target = signal.get("target", 0)
-        stop = signal.get("stop_loss", 0)
-        
-        # === CATALYST & SENTIMENT CHECK ===
-        has_strong_catalyst = False
-        has_moderate_catalyst = False
-        has_volume_confirmation = False
-        has_technical_breakout = False
-        sentiment_positive = False
-        sentiment_conflicting = False
 
-        news = signal.get("news_sentiment")
-        catalyst_score = 0
-        if news and isinstance(news, dict):
-            composite = _safe_float(news.get("composite_score", 0.5), 0.5)
-            catalyst_score = _safe_float(news.get("catalyst_score", 0), 0)
-            cat_label = news.get("catalyst_label", "")
-            velocity = news.get("news_velocity", "low")
-            
-            if catalyst_score >= 80 or cat_label in ("STRONG_BULLISH", "STRONG_BEARISH"):
-                has_strong_catalyst = True
-                entry_reasons.append(f"Strong catalyst detected: score {catalyst_score}/100 ({cat_label})")
-            elif catalyst_score >= 60 or cat_label in ("MODERATE_BULLISH",):
-                has_moderate_catalyst = True
-                diagnostic_tags.append("moderate_catalyst_only")
-            else:
-                diagnostic_tags.append("weak_or_no_catalyst")
-            
-            if composite >= 0.7:
-                sentiment_positive = True
-                entry_reasons.append(f"Strong sentiment: {composite:.2f}")
-            elif composite >= 0.55:
-                sentiment_positive = True
-            elif composite < 0.35:
-                reject_reasons.append(f"Negative sentiment: {composite:.2f}")
-            
-            if velocity in ("high",):
-                entry_reasons.append("High news velocity (accelerating coverage)")
-            
-            # Conflicting = moderate sentiment but bearish catalyst or vice versa
-            if composite >= 0.5 and cat_label in ("MODERATE_BEARISH", "STRONG_BEARISH"):
-                sentiment_conflicting = True
-                reject_reasons.append("Conflicting signals: positive price but bearish catalyst")
-        else:
-            diagnostic_tags.append("no_news_data")
-        
-        # === TECHNICAL SIGNALS ===
-        
-        # 1. Momentum confirmation
-        momentum_5d = indicators.get("momentum_5d", 0)
-        if momentum_5d > 1:
-            entry_reasons.append(f"Positive 5-day momentum: +{momentum_5d:.1f}%")
-        elif momentum_5d < -2:
-            reject_reasons.append(f"Negative momentum: {momentum_5d:.1f}%")
-            diagnostic_tags.append("weak_momentum")
-        
-        # 2. Volume surge
-        vol_ratio = indicators.get("volume_ratio", 0)
-        if vol_ratio >= 2.0:
-            has_volume_confirmation = True
-            entry_reasons.append(f"Volume surge: {vol_ratio:.1f}x average")
-        elif vol_ratio >= 1.5:
-            has_volume_confirmation = True
-            entry_reasons.append(f"Above-average volume: {vol_ratio:.1f}x")
-        elif vol_ratio < 0.8:
-            reject_reasons.append(f"Weak volume: {vol_ratio:.1f}x average")
-            diagnostic_tags.append("low_volume")
-        
-        # 3. Technical structure (breakout / support)
-        structure = indicators.get("structure_type", "")
-        if structure:
-            has_technical_breakout = True
-            entry_reasons.append(f"Technical setup: {structure}")
-        else:
-            diagnostic_tags.append("no_breakout_signal")
-        
-        # 4. ATR in tradable range
-        atr_pct = indicators.get("atr_pct", 0)
-        if 1.0 <= atr_pct <= 10.0:
-            entry_reasons.append(f"ATR in range: {atr_pct:.1f}%")
-        elif atr_pct > 10:
-            reject_reasons.append(f"Too volatile: ATR {atr_pct:.1f}%")
-        elif atr_pct < 0.5:
-            reject_reasons.append(f"Low volatility: ATR {atr_pct:.1f}%")
-        
-        # 5. Risk-reward ratio
-        rr = indicators.get("rr_ratio", 0)
-        if rr >= 2.0:
-            entry_reasons.append(f"Good R:R ratio: {rr:.1f}:1")
-        elif rr < 1.5 and rr > 0:
-            reject_reasons.append(f"Poor R:R ratio: {rr:.1f}:1")
-        
-        # 6. Confluence check
-        confluence = indicators.get("confluence_factors", 0)
-        if confluence >= 2:
-            entry_reasons.append(f"Strong confluence: {confluence} factors aligned")
-        
-        # 7. Market regime check
-        regime = market_regime.get("regime", "neutral")
-        if regime in ["bearish", "high_volatility"]:
-            reject_reasons.append(f"Unfavorable market: {regime}")
-            diagnostic_tags.append("market_regime_blocking")
-        
-        # === CATALYST GATE (CRITICAL) ===
-        # Require: strong catalyst OR (technical breakout + volume + positive sentiment)
-        catalyst_gate_passed = False
-        if has_strong_catalyst:
-            catalyst_gate_passed = True
-        elif has_technical_breakout and has_volume_confirmation and sentiment_positive:
-            catalyst_gate_passed = True
-            entry_reasons.append("Technical breakout + volume + sentiment confirmation")
-        elif has_moderate_catalyst and has_volume_confirmation:
-            catalyst_gate_passed = True
-        
-        if not catalyst_gate_passed:
-            reject_reasons.append("Catalyst gate: no strong catalyst and insufficient technical confirmation")
-            diagnostic_tags.append("catalyst_gate_failed")
-        
-        if sentiment_conflicting:
-            catalyst_gate_passed = False
-            diagnostic_tags.append("conflicting_sentiment")
-        
-        # === DECISION ===
-        buy_strength = len(entry_reasons)
-        reject_strength = len(reject_reasons)
-        
-        if catalyst_gate_passed and buy_strength >= 3 and reject_strength <= 1:
-            explanation.action = "BUY"
-            explanation.entry_reasons = entry_reasons
-        elif catalyst_gate_passed and buy_strength >= 2 and reject_strength == 0:
-            explanation.action = "BUY"
-            explanation.entry_reasons = entry_reasons
-        elif reject_strength >= 3 or not catalyst_gate_passed:
+        indicators = ta_signal.get("indicators", {})
+        structure = ta_signal.get("structure", {})
+        best_setup = ta_signal.get("best_setup")
+        all_setups = ta_signal.get("all_setups", [])
+        direction = ta_signal.get("direction", "NONE")
+        mtf = ta_signal.get("mtf_confirmation", {})
+        momentum_mode = ta_signal.get("momentum_mode", False)
+
+        entry_reasons = list(ta_signal.get("entry_reasons", []))
+        reject_reasons = []
+
+        price = ta_signal.get("price", 0)
+        confidence = ta_signal.get("confidence", 0)
+
+        # === TECHNICAL SETUP EVALUATION (PRIMARY DRIVER) ===
+
+        # 1. Must have a direction
+        if direction == "NONE":
+            reject_reasons.append("No trade direction identified from TA")
             explanation.action = "REJECT"
             explanation.reject_reasons = reject_reasons
-        elif buy_strength >= 2:
+            explanation.confidence_score = confidence
+            explanation.key_indicators = {"direction": "NONE", "reject_stage": "no_direction"}
+            return explanation
+
+        # 2. Must have at least one setup
+        if not best_setup:
+            reject_reasons.append("No technical setup detected (breakout/FVG/VWAP reclaim)")
+            explanation.action = "REJECT"
+            explanation.reject_reasons = reject_reasons
+            explanation.confidence_score = confidence
+            explanation.key_indicators = {"direction": direction, "reject_stage": "no_setup"}
+            return explanation
+
+        # 3. Spread filter (<= 0.5%)
+        spread = indicators.get("spread_pct", 0)
+        if spread > 0.5:
+            reject_reasons.append(f"Spread too wide: {spread:.2f}% (max 0.5%)")
+
+        # 4. RelVol filter (>= 1.3, momentum mode bypasses)
+        rel_vol = indicators.get("rel_vol", 0)
+        if rel_vol < 1.3 and not momentum_mode:
+            reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (min 1.3x)")
+        elif rel_vol >= 2.0:
+            entry_reasons.append(f"Strong volume surge: {rel_vol:.1f}x")
+
+        # 5. Overextension check
+        if ta_signal.get("overextended"):
+            reject_reasons.append(f"Overextended: {ta_signal.get('overextension_reason', 'price too far from VWAP')}")
+
+        # 6. Fake breakout penalty (not a hard reject, but heavy confidence penalty)
+        fake = ta_signal.get("fake_breakout")
+        if fake:
+            reject_reasons.append(f"Fake breakout: {fake.get('reason', 'bull/bear trap detected')}")
+
+        # 7. R:R ratio check
+        rr = ta_signal.get("rr_ratio", 0)
+        if rr >= 2.0:
+            entry_reasons.append(f"Good R:R ratio: {rr:.1f}:1")
+        elif 0 < rr < 1.2:
+            reject_reasons.append(f"Poor R:R ratio: {rr:.1f}:1")
+
+        # 8. Structure alignment
+        struct_type = structure.get("structure", "ranging")
+        if direction == "LONG" and struct_type == "bullish":
+            entry_reasons.append("Bullish market structure (HH+HL)")
+        elif direction == "SHORT" and struct_type == "bearish":
+            entry_reasons.append("Bearish market structure (LH+LL)")
+        elif struct_type == "ranging":
+            entry_reasons.append("Ranging structure (breakout potential)")
+
+        # 9. MTF confirmation
+        if mtf.get("aligned"):
+            entry_reasons.append(f"Multi-timeframe aligned ({mtf.get('score', 0)}/4)")
+
+        # 10. RSI context
+        rsi = indicators.get("rsi", 50)
+        if direction == "LONG" and rsi > 75:
+            reject_reasons.append(f"RSI overbought: {rsi:.0f}")
+        elif direction == "SHORT" and rsi < 25:
+            reject_reasons.append(f"RSI oversold: {rsi:.0f}")
+
+        # === NEWS BOOST (SECONDARY - NOT A GATE) ===
+        news_boost = 0
+        if news_data and isinstance(news_data, dict):
+            composite = _safe_float(news_data.get("composite_score", 0.5), 0.5)
+            catalyst_score = _safe_float(news_data.get("catalyst_score", 0), 0)
+
+            if composite >= 0.7 or catalyst_score >= 70:
+                news_boost = 5
+                entry_reasons.append(f"News sentiment boost: strong ({composite:.2f})")
+            elif composite >= 0.55 or catalyst_score >= 50:
+                news_boost = 2
+                entry_reasons.append(f"News sentiment boost: moderate ({composite:.2f})")
+            elif composite < 0.3:
+                entry_reasons.append(f"News: negative sentiment ({composite:.2f}), no boost")
+
+        confidence += news_boost
+
+        # === MARKET REGIME SOFT CHECK ===
+        regime = market_regime.get("regime", "neutral")
+        if regime in ("bearish", "high_volatility") and direction == "LONG":
+            confidence -= 3
+            entry_reasons.append(f"Caution: long in {regime} market (-3 conf)")
+
+        confidence = max(0, min(100, confidence))
+
+        # === DECISION ===
+        # Hard filter rejects: spread, RelVol, overextension
+        hard_reject_keywords = ["spread too wide", "relvol too low", "overextended"]
+        hard_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in hard_reject_keywords)]
+
+        if hard_rejects:
+            explanation.action = "REJECT"
+            explanation.reject_reasons = reject_reasons
+        elif len(reject_reasons) >= 3:
+            explanation.action = "REJECT"
+            explanation.reject_reasons = reject_reasons
+        elif len(entry_reasons) >= 2 and len(reject_reasons) <= 1:
+            explanation.action = "BUY"
+            explanation.entry_reasons = entry_reasons
+            explanation.reject_reasons = reject_reasons
+        elif len(entry_reasons) >= 1:
             explanation.action = "WATCHLIST"
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
         else:
             explanation.action = "REJECT"
-            explanation.reject_reasons = reject_reasons if reject_reasons else ["Insufficient buy signals"]
-        
-        # Exit plan
-        if stop and target and entry_price:
+            explanation.reject_reasons = reject_reasons if reject_reasons else ["Insufficient technical signals"]
+
+        # Exit plan from TA signal
+        stop_loss = ta_signal.get("stop_loss", 0)
+        take_profit = ta_signal.get("take_profit", 0)
+        if stop_loss and take_profit and price:
             explanation.exit_plan = {
-                "entry": round(entry_price, 2),
-                "take_profit": round(target, 2),
-                "take_profit_pct": round(((target / entry_price) - 1) * 100, 1) if entry_price else 0,
-                "stop_loss": round(stop, 2),
-                "stop_loss_pct": round(((stop / entry_price) - 1) * 100, 1) if entry_price else 0,
+                "entry": round(price, 2),
+                "take_profit": round(take_profit, 2),
+                "take_profit_pct": round(((take_profit / price) - 1) * 100, 1) if price > 0 else 0,
+                "stop_loss": round(stop_loss, 2),
+                "stop_loss_pct": round(((stop_loss / price) - 1) * 100, 1) if price > 0 else 0,
+                "rr_ratio": rr,
                 "time_exit": f"{settings.dt_time_exit_days} day(s)"
             }
-        
+
+        explanation.confidence_score = confidence
         explanation.key_indicators = {
-            "momentum_5d": momentum_5d,
-            "volume_ratio": vol_ratio,
-            "atr_pct": atr_pct,
+            "direction": direction,
+            "best_setup": best_setup.get("type", "") if best_setup else "none",
+            "setup_count": len(all_setups),
+            "structure": struct_type,
+            "rel_vol": rel_vol,
+            "spread_pct": spread,
+            "rsi": rsi,
+            "ema_bullish": indicators.get("ema_bullish", False),
+            "ema_bearish": indicators.get("ema_bearish", False),
+            "macd_crossover": indicators.get("macd", {}).get("crossover", "none"),
+            "vwap_distance_pct": indicators.get("vwap_distance_pct", 0),
+            "above_vwap": indicators.get("above_vwap"),
+            "mtf_aligned": mtf.get("aligned", False),
+            "mtf_score": f"{mtf.get('score', 0)}/4",
+            "momentum_mode": momentum_mode,
+            "news_boost": news_boost,
             "rr_ratio": rr,
-            "confluence": confluence,
-            "structure": structure,
-            "catalyst_score": catalyst_score,
-            "catalyst_gate": catalyst_gate_passed,
-            "diagnostic_tags": diagnostic_tags,
+            "overextended": ta_signal.get("overextended", False),
+            "fake_breakout": bool(fake),
         }
-        
+
         return explanation
     
     @staticmethod
@@ -1386,115 +1386,176 @@ class AutoTradeOrchestrator:
         return []
     
     async def scan_opportunities(self) -> Dict:
-        """Scan for auto-trade opportunities across both engines with pipeline funnel tracking"""
+        """Scan for auto-trade opportunities using Technical Analysis as the PRIMARY driver.
+        Day trades: TA engine (Polygon OHLCV) → setup detection → confidence → risk check.
+        Long-term: Existing fundamental scoring.
+        News is used ONLY as a confidence boost for day trades."""
         settings = await self.get_settings()
         market_regime = await self.regime_detector.detect()
-        
+
         # Dynamic thresholds based on regime
         dynamic = DynamicThresholdManager.get_thresholds(market_regime, settings)
         dt_threshold = dynamic["dt_threshold"]
         lt_threshold = dynamic["lt_threshold"]
         risk_mode = dynamic["risk_mode"]
-        
+
         # Pipeline funnel for debugging
         funnel = TradePipelineFunnel()
         diagnostics = ZeroTradeDiagnostics()
-        
-        # Get cached signals
+
+        # Get cached signals from DB
         trading_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
         investment_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
-        
-        # Build lookup
+
+        # Build lookups
         inv_lookup = {s["symbol"]: s for s in investment_signals if s.get("symbol")}
         trade_lookup = {s["symbol"]: s for s in trading_signals if s.get("symbol")}
-        
+
         # Get all unique symbols
         all_symbols = set(list(trade_lookup.keys()) + list(inv_lookup.keys()))
         funnel.record("universe_scanned", len(all_symbols))
-        
+
         # Dynamic max positions
         dt_max_pos = DynamicThresholdManager.get_max_positions("DAY_TRADE", settings, market_regime)
         lt_max_pos = DynamicThresholdManager.get_max_positions("LONG_TERM", settings, market_regime)
-        
+
+        # === PHASE 1: Pre-filter liquid stocks for TA analysis ===
+        dt_prefilter_symbols = []
+        if settings.dt_enabled:
+            for symbol in all_symbols:
+                t_sig = trade_lookup.get(symbol)
+                if t_sig:
+                    indicators = t_sig.get("indicators", {})
+                    vol_ratio = indicators.get("volume_ratio", 0)
+                    # Loose pre-filter: skip only dead-volume stocks
+                    if vol_ratio >= 0.5:
+                        dt_prefilter_symbols.append(symbol)
+                    else:
+                        funnel.reject("pre_filter_low_volume")
+
+        funnel.record("prefilter_passed", len(dt_prefilter_symbols))
+
+        # === PHASE 2: Run Technical Analysis on pre-filtered stocks ===
+        from technical_analysis_engine import TechnicalSignalGenerator, TACache
+
+        # Read cached TA results from DB (populated by background refresh)
+        ta_signals_db = await self.db.ta_signals.find({}, {"_id": 0}).to_list(2000)
+        ta_db_lookup = {s["symbol"]: s for s in ta_signals_db if s.get("symbol")}
+
+        # Use cached TA results for candidates (check ALL pre-filtered symbols)
+        ta_results = []
+        ta_missing = []
+        for sym in dt_prefilter_symbols:
+            if sym in ta_db_lookup:
+                ta_results.append(ta_db_lookup[sym])
+            else:
+                ta_missing.append(sym)
+
+        # If we have no cached data at all, run fast TA on a very small batch inline
+        if not ta_results and ta_missing:
+            inline_batch = ta_missing[:5]  # Very small batch (~65s with rate limits)
+            try:
+                inline_results = await TechnicalSignalGenerator.batch_analyze_fast(inline_batch, max_concurrent=1)
+                ta_results.extend(inline_results)
+                # Cache to DB for future scans
+                for r in inline_results:
+                    r["last_updated"] = datetime.now(timezone.utc).isoformat()
+                    await self.db.ta_signals.update_one({"symbol": r["symbol"]}, {"$set": r}, upsert=True)
+                logger.info(f"Inline TA: analyzed {len(inline_results)} of {len(inline_batch)} stocks")
+            except Exception as e:
+                logger.error(f"Inline TA error: {e}")
+
+        ta_lookup = {r["symbol"]: r for r in ta_results}
+        funnel.record("ta_analyzed", len(ta_results))
+        logger.info(f"TA phase: {len(ta_results)} cached, {len(ta_missing)} missing")
+
+        ta_lookup = {r["symbol"]: r for r in ta_results}
+        funnel.record("ta_analyzed", len(ta_results))
+
+        # === PHASE 3: Evaluate TA results for day trades ===
         day_trade_candidates = []
         long_term_candidates = []
         watchlist = []
         rejected = []
-        liquidity_passed = 0
-        technical_passed = 0
-        catalyst_passed = 0
-        
+        setup_count = 0
+        filters_passed_count = 0
+
+        for ta_sig in ta_results:
+            symbol = ta_sig["symbol"]
+            cached_sig = trade_lookup.get(symbol, {})
+
+            # Build news data for boost (from cached FMP signals)
+            news_data = None
+            if isinstance(cached_sig.get("news_sentiment"), dict):
+                news_data = cached_sig["news_sentiment"]
+            elif cached_sig.get("news_impact"):
+                news_data = {"composite_score": 0.5 + (cached_sig.get("news_impact", 0) / 100)}
+
+            # Evaluate using TA-first engine
+            explanation = DayTradingEngine.evaluate_buy(ta_sig, news_data, market_regime, settings)
+            confidence = explanation.confidence_score
+
+            # Track setup stage
+            if ta_sig.get("best_setup"):
+                setup_count += 1
+
+            # Track filter passage
+            indicators = ta_sig.get("indicators", {})
+            spread_ok = indicators.get("spread_pct", 0) <= 0.5
+            relvol_ok = indicators.get("rel_vol", 0) >= 1.3 or ta_sig.get("momentum_mode", False)
+            not_overextended = not ta_sig.get("overextended", False)
+            if spread_ok and relvol_ok and not_overextended:
+                filters_passed_count += 1
+
+            entry = {
+                "symbol": symbol,
+                "classification": "DAY_TRADE",
+                "confidence": confidence,
+                "action": explanation.action,
+                "explanation": explanation.dict(),
+                "signal": ta_sig,
+                "direction": ta_sig.get("direction", "NONE"),
+                "best_setup": ta_sig.get("best_setup", {}).get("type", "none") if ta_sig.get("best_setup") else "none",
+                "dt_score": confidence,
+                "lt_score": 0,
+            }
+
+            if explanation.action == "BUY" and confidence >= dt_threshold:
+                funnel.record("confidence_passed")
+                day_trade_candidates.append(entry)
+            elif explanation.action == "BUY" and confidence >= (dt_threshold - 10):
+                diagnostics.add_near_miss(
+                    symbol, "DAY_TRADE", confidence, "NEAR_MISS",
+                    explanation.reject_reasons or [f"Confidence {confidence} < {dt_threshold}"])
+                watchlist.append(entry)
+            elif explanation.action == "WATCHLIST":
+                if confidence >= (dt_threshold - 10):
+                    diagnostics.add_near_miss(
+                        symbol, "DAY_TRADE", confidence, "WATCHLIST",
+                        explanation.reject_reasons)
+                watchlist.append(entry)
+            else:
+                for reason in explanation.reject_reasons[:3]:
+                    funnel.reject(reason[:60])
+                rejected.append(entry)
+
+        # === PHASE 4: Process Long-Term candidates (unchanged logic) ===
         for symbol in all_symbols:
-            t_sig = trade_lookup.get(symbol)
             i_sig = inv_lookup.get(symbol)
-            
-            # Classify
+            if not i_sig or not settings.lt_enabled:
+                continue
+            if symbol in ta_lookup:
+                continue  # Already evaluated as day trade
+
+            t_sig = trade_lookup.get(symbol)
             cls_result = StockClassifier.classify(t_sig, i_sig)
             classification = cls_result["classification"]
-            
-            if classification == "DAY_TRADE" and t_sig and settings.dt_enabled:
-                indicators = t_sig.get("indicators", {})
-                
-                # Liquidity filter
-                vol_ratio = indicators.get("volume_ratio", 0)
-                if vol_ratio < 0.5:
-                    funnel.reject("low_liquidity")
-                    rejected.append({"symbol": symbol, "classification": "DAY_TRADE", "reason": "Low liquidity"})
-                    continue
-                liquidity_passed += 1
-                
-                confidence = ConfidenceScoringEngine.score_day_trade(t_sig, market_regime)
-                explanation = DayTradingEngine.evaluate_buy(t_sig, market_regime, settings)
-                explanation.confidence_score = confidence
-                
-                # Technical check (did it pass structure/confluence?)
-                key_ind = explanation.key_indicators
-                if key_ind.get("structure") or key_ind.get("confluence", 0) >= 2:
-                    technical_passed += 1
-                
-                # Catalyst check
-                if key_ind.get("catalyst_gate", False):
-                    catalyst_passed += 1
-                
-                entry = {
-                    "symbol": symbol,
-                    "classification": "DAY_TRADE",
-                    "confidence": confidence,
-                    "action": explanation.action,
-                    "explanation": explanation.dict(),
-                    "signal": t_sig,
-                    "dt_score": cls_result["day_trading_score"],
-                    "lt_score": cls_result["long_term_score"]
-                }
-                
-                if explanation.action == "BUY" and confidence >= dt_threshold:
-                    funnel.record("confidence_passed")
-                    day_trade_candidates.append(entry)
-                elif explanation.action == "BUY" and confidence >= (dt_threshold - 12):
-                    # Near-miss: close to threshold
-                    diagnostics.add_near_miss(
-                        symbol, "DAY_TRADE", confidence, "NEAR_MISS",
-                        explanation.reject_reasons or [f"Confidence {confidence} < {dt_threshold}"])
-                    watchlist.append(entry)
-                elif explanation.action == "WATCHLIST":
-                    # Check if it's a near-miss
-                    if confidence >= (dt_threshold - 12):
-                        diagnostics.add_near_miss(
-                            symbol, "DAY_TRADE", confidence, "WATCHLIST",
-                            explanation.reject_reasons)
-                    watchlist.append(entry)
-                else:
-                    # Track rejection reasons for diagnostics
-                    tags = key_ind.get("diagnostic_tags", [])
-                    for tag in tags:
-                        funnel.reject(tag)
-                    rejected.append(entry)
-            
-            elif classification == "LONG_TERM" and i_sig and settings.lt_enabled:
+
+            if classification in ("LONG_TERM", "WATCHLIST") and i_sig:
                 confidence = ConfidenceScoringEngine.score_long_term(i_sig, market_regime)
                 explanation = LongTermEngine.evaluate_buy(i_sig, market_regime, settings)
                 explanation.confidence_score = confidence
-                
+
                 entry = {
                     "symbol": symbol,
                     "classification": "LONG_TERM",
@@ -1503,9 +1564,9 @@ class AutoTradeOrchestrator:
                     "explanation": explanation.dict(),
                     "signal": i_sig,
                     "dt_score": cls_result["day_trading_score"],
-                    "lt_score": cls_result["long_term_score"]
+                    "lt_score": cls_result["long_term_score"],
                 }
-                
+
                 if explanation.action == "BUY" and confidence >= lt_threshold:
                     funnel.record("confidence_passed")
                     long_term_candidates.append(entry)
@@ -1525,60 +1586,55 @@ class AutoTradeOrchestrator:
                     for tag in tags:
                         funnel.reject(tag)
                     rejected.append(entry)
-            
-            elif classification == "WATCHLIST":
-                watchlist.append({
-                    "symbol": symbol,
-                    "classification": "WATCHLIST",
-                    "confidence": 0,
-                    "action": "WATCH",
-                    "dt_score": cls_result["day_trading_score"],
-                    "lt_score": cls_result["long_term_score"]
-                })
-        
+
         # Update funnel counts
-        funnel.record("liquidity_passed", liquidity_passed)
-        funnel.record("technical_passed", technical_passed)
-        funnel.record("catalyst_passed", catalyst_passed)
-        
+        funnel.record("setup_found", setup_count)
+        funnel.record("filters_passed", filters_passed_count)
+
         # Sort by confidence
         day_trade_candidates.sort(key=lambda x: x["confidence"], reverse=True)
         long_term_candidates.sort(key=lambda x: x["confidence"], reverse=True)
-        
+
         # Zero-trade diagnosis
         if not day_trade_candidates:
             regime = market_regime.get("regime", "neutral")
-            vol = market_regime.get("volatility_pct", 0)
             if regime in ("bearish", "high_volatility"):
-                diagnostics.add_reason(f"Market regime ({regime}) blocking most day trades")
-            if vol and float(vol) > 25:
-                diagnostics.add_reason("High market volatility reducing opportunity quality")
-            if catalyst_passed == 0:
-                diagnostics.add_reason("No stocks passed the catalyst gate (no strong catalysts or breakouts)")
-            if liquidity_passed < 10:
-                diagnostics.add_reason("Low overall market volume / liquidity")
-        
+                diagnostics.add_reason(f"Market regime ({regime}) reducing day trade opportunities")
+            if len(ta_results) == 0:
+                diagnostics.add_reason("No stocks returned valid TA data from Polygon")
+            elif setup_count == 0:
+                diagnostics.add_reason(f"TA analyzed {len(ta_results)} stocks but no technical setups found")
+            elif filters_passed_count == 0:
+                diagnostics.add_reason(f"{setup_count} setups found but all filtered by spread/RelVol/overextension")
+            else:
+                diagnostics.add_reason(
+                    f"{filters_passed_count} stocks passed filters but confidence below threshold ({dt_threshold})")
+
         no_trade_summary = diagnostics.build_no_trade_summary(
             len(day_trade_candidates), len(long_term_candidates), market_regime)
-        
+
         return {
             "auto_enabled": settings.auto_enabled,
             "market_regime": market_regime,
             "day_trades": day_trade_candidates[:20],
             "long_term": long_term_candidates[:20],
-            "watchlist": watchlist[:30],
+            "watchlist": sorted(watchlist, key=lambda x: x.get("confidence", 0), reverse=True)[:30],
+            "rejected_details": sorted(rejected, key=lambda x: x.get("confidence", 0), reverse=True)[:30],
             "stats": {
                 "total_scanned": len(all_symbols),
+                "ta_analyzed": len(ta_results),
+                "setups_found": setup_count,
+                "filters_passed": filters_passed_count,
                 "day_trade_candidates": len(day_trade_candidates),
                 "long_term_candidates": len(long_term_candidates),
                 "watchlist": len(watchlist),
-                "rejected": len(rejected)
+                "rejected": len(rejected),
             },
             "dynamic_thresholds": dynamic,
             "risk_mode": risk_mode,
             "pipeline_funnel": funnel.to_dict(),
             "no_trade_summary": no_trade_summary,
-            "settings": settings.dict()
+            "settings": settings.dict(),
         }
     
     async def execute_auto_cycle(self) -> Dict:
@@ -1617,8 +1673,13 @@ class AutoTradeOrchestrator:
             )
             
             if approved:
-                # Calculate position size
-                stop_pct = abs(signal.get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
+                # Calculate position size using TA-computed stop loss
+                ta_price = signal.get("price", 0)
+                ta_stop = signal.get("stop_loss", 0)
+                if ta_price > 0 and ta_stop > 0:
+                    stop_pct = abs((ta_price - ta_stop) / ta_price * 100)
+                else:
+                    stop_pct = abs(signal.get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
                 size = PositionSizer.calculate(
                     "DAY_TRADE", confidence, settings,
                     float(account.get("equity", 0)), stop_pct, signal

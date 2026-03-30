@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import math
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 import httpx
@@ -19,6 +20,35 @@ logger = logging.getLogger(__name__)
 POLYGON_KEY = os.environ.get("POLYGON_API_KEY", "")
 
 
+# ===================== TA CACHE =====================
+
+class TACache:
+    """In-memory cache with TTL to avoid redundant Polygon API calls within a cycle"""
+    _cache: Dict[str, Dict] = {}
+    _ttl: int = 300  # 5 minutes
+
+    @classmethod
+    def get(cls, symbol: str) -> Optional[Dict]:
+        entry = cls._cache.get(symbol)
+        if entry and (time.time() - entry["ts"]) < cls._ttl:
+            return entry["data"]
+        return None
+
+    @classmethod
+    def set(cls, symbol: str, data: Dict):
+        cls._cache[symbol] = {"data": data, "ts": time.time()}
+
+    @classmethod
+    def clear(cls):
+        cls._cache.clear()
+
+    @classmethod
+    def stats(cls) -> Dict:
+        now = time.time()
+        valid = sum(1 for e in cls._cache.values() if (now - e["ts"]) < cls._ttl)
+        return {"total": len(cls._cache), "valid": valid}
+
+
 # ===================== POLYGON DATA FETCHER =====================
 
 class PolygonDataFetcher:
@@ -28,14 +58,25 @@ class PolygonDataFetcher:
 
     @staticmethod
     async def _get(url: str, params: dict, timeout: int = 12) -> Optional[dict]:
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(url, params=params, timeout=timeout)
-                if resp.status_code == 200:
-                    return resp.json()
-                logger.warning(f"Polygon {resp.status_code}: {url}")
-        except Exception as e:
-            logger.warning(f"Polygon fetch error: {e}")
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(url, params=params, timeout=timeout)
+                    if resp.status_code == 200:
+                        return resp.json()
+                    if resp.status_code == 429:
+                        wait = (attempt + 1) * 15
+                        logger.warning(f"Polygon 429 rate limit, retrying in {wait}s (attempt {attempt+1}/3)")
+                        await asyncio.sleep(wait)
+                        continue
+                    if resp.status_code == 403:
+                        logger.debug(f"Polygon 403 (endpoint requires paid plan): {url.split('?')[0]}")
+                        return None
+                    logger.warning(f"Polygon {resp.status_code}: {url.split('?')[0]}")
+            except Exception as e:
+                logger.warning(f"Polygon fetch error: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(2)
         return None
 
     @staticmethod
@@ -93,21 +134,45 @@ class PolygonDataFetcher:
 
     @staticmethod
     async def get_multi_timeframe(symbol: str) -> Dict:
-        """Fetch 1-min, 5-min, 15-min bars concurrently"""
+        """Fetch bars concurrently, build snapshot from bar data (no snapshot API needed)"""
         results = await asyncio.gather(
             PolygonDataFetcher.get_bars(symbol, "minute", 1, 100),
             PolygonDataFetcher.get_bars(symbol, "minute", 5, 100),
             PolygonDataFetcher.get_bars(symbol, "minute", 15, 60),
             PolygonDataFetcher.get_bars(symbol, "day", 1, 60),
-            PolygonDataFetcher.get_snapshot(symbol),
             return_exceptions=True
         )
+        bars_1m = results[0] if isinstance(results[0], list) else []
+        bars_5m = results[1] if isinstance(results[1], list) else []
+        bars_15m = results[2] if isinstance(results[2], list) else []
+        bars_daily = results[3] if isinstance(results[3], list) else []
+
+        # Build snapshot substitute from bar data
+        ref_bars = bars_5m or bars_1m or bars_15m
+        snapshot = {}
+        if ref_bars:
+            last_bar = ref_bars[-1]
+            prev_close = bars_daily[-2]["c"] if len(bars_daily) >= 2 else (ref_bars[0]["o"] if ref_bars else 0)
+            price = last_bar["c"]
+            snapshot = {
+                "price": price,
+                "volume": sum(b["v"] for b in ref_bars),
+                "prev_close": prev_close,
+                "today_open": ref_bars[0]["o"],
+                "today_high": max(b["h"] for b in ref_bars),
+                "today_low": min(b["l"] for b in ref_bars),
+                "change_pct": round(((price / prev_close) - 1) * 100, 2) if prev_close > 0 else 0,
+                "bid": 0,
+                "ask": 0,
+                "prev_volume": sum(b["v"] for b in bars_daily[-2:-1]) if len(bars_daily) >= 2 else 0,
+            }
+
         return {
-            "bars_1m": results[0] if isinstance(results[0], list) else [],
-            "bars_5m": results[1] if isinstance(results[1], list) else [],
-            "bars_15m": results[2] if isinstance(results[2], list) else [],
-            "bars_daily": results[3] if isinstance(results[3], list) else [],
-            "snapshot": results[4] if isinstance(results[4], dict) else {},
+            "bars_1m": bars_1m,
+            "bars_5m": bars_5m,
+            "bars_15m": bars_15m,
+            "bars_daily": bars_daily,
+            "snapshot": snapshot,
         }
 
 
@@ -201,13 +266,21 @@ class TechnicalCalculator:
         return round(sum(ranges) / len(ranges), 4) if ranges else 0
 
     @staticmethod
-    def spread_pct(snapshot: Dict) -> float:
+    def spread_pct(snapshot: Dict, bars: List[Dict] = None) -> float:
         bid = snapshot.get("bid", 0)
         ask = snapshot.get("ask", 0)
-        if bid <= 0 or ask <= 0:
-            return 0
-        mid = (bid + ask) / 2
-        return round(abs(ask - bid) / mid * 100, 3) if mid > 0 else 0
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+            return round(abs(ask - bid) / mid * 100, 3) if mid > 0 else 0
+        # Fallback: estimate spread from last bar's range vs price
+        if bars and len(bars) >= 1:
+            last = bars[-1]
+            price = last.get("c", 0)
+            if price > 0:
+                bar_range = last["h"] - last["l"]
+                # Typical spread is ~5-10% of the last bar's range for liquid stocks
+                return round(min(bar_range * 0.08 / price * 100, 1.0), 3)
+        return 0.1  # Default: assume reasonably tight spread
 
     @staticmethod
     def compute_all(bars_5m: List[Dict], bars_15m: List[Dict],
@@ -229,7 +302,7 @@ class TechnicalCalculator:
         macd_data = TechnicalCalculator.macd(closes_5m)
 
         # VWAP from 1-min bars (intraday)
-        vwap_val = TechnicalCalculator.vwap(bars_1m) if bars_1m else 0
+        vwap_val = TechnicalCalculator.vwap(bars_1m) if bars_1m else (TechnicalCalculator.vwap(bars_5m) if bars_5m else 0)
 
         # RelVol from 5-min
         rel_vol = TechnicalCalculator.relative_volume(bars_5m, 20)
@@ -237,8 +310,8 @@ class TechnicalCalculator:
         # Avg range from 5-min
         avg_rng = TechnicalCalculator.avg_range(bars_5m, 20)
 
-        # Spread
-        spread = TechnicalCalculator.spread_pct(snapshot)
+        # Spread (use bars as fallback for bid/ask estimation)
+        spread = TechnicalCalculator.spread_pct(snapshot, bars_5m)
 
         price = snapshot.get("price", 0) or (closes_5m[-1] if closes_5m else 0)
 
@@ -574,6 +647,10 @@ class TechnicalSignalGenerator:
     async def analyze(symbol: str) -> Optional[Dict]:
         """Full technical analysis pipeline for a single stock"""
         try:
+            cached = TACache.get(symbol)
+            if cached:
+                return cached
+
             data = await PolygonDataFetcher.get_multi_timeframe(symbol)
             bars_1m = data["bars_1m"]
             bars_5m = data["bars_5m"]
@@ -686,7 +763,7 @@ class TechnicalSignalGenerator:
             elif direction == "SHORT" and stop_loss > 0 and stop_loss > price:
                 rr_ratio = round((price - take_profit) / (stop_loss - price), 1)
 
-            return {
+            result = {
                 "symbol": symbol,
                 "price": round(price, 2),
                 "direction": direction,
@@ -710,13 +787,15 @@ class TechnicalSignalGenerator:
                     ([f"Wide spread: {indicators['spread_pct']:.2f}%"] if indicators["spread_pct"] > 0.5 else [])
                 ),
             }
+            TACache.set(symbol, result)
+            return result
         except Exception as e:
             logger.error(f"Technical analysis error for {symbol}: {e}")
             return None
 
     @staticmethod
-    async def batch_analyze(symbols: List[str], max_concurrent: int = 5) -> List[Dict]:
-        """Analyze multiple symbols with controlled concurrency"""
+    async def batch_analyze(symbols: List[str], max_concurrent: int = 3) -> List[Dict]:
+        """Analyze multiple symbols with controlled concurrency and rate limiting"""
         results = []
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -725,9 +804,152 @@ class TechnicalSignalGenerator:
                 r = await TechnicalSignalGenerator.analyze(sym)
                 if r:
                     results.append(r)
-                await asyncio.sleep(0.15)  # Rate limit courtesy
+                await asyncio.sleep(0.5)  # Rate limit courtesy
 
         tasks = [_analyze_one(s) for s in symbols]
         await asyncio.gather(*tasks, return_exceptions=True)
+        results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        return results
+
+
+    @staticmethod
+    async def analyze_fast(symbol: str) -> Optional[Dict]:
+        """Lightweight TA using only 5-min bars (1 API call). Best for rate-limited environments."""
+        try:
+            cached = TACache.get(symbol)
+            if cached:
+                return cached
+
+            bars_5m = await PolygonDataFetcher.get_bars(symbol, "minute", 5, 100)
+            if not bars_5m or len(bars_5m) < 10:
+                return None
+
+            # Build a minimal snapshot from bar data
+            last_bar = bars_5m[-1]
+            price = last_bar["c"]
+            if price <= 0:
+                return None
+
+            snapshot = {
+                "price": price,
+                "volume": sum(b["v"] for b in bars_5m),
+                "prev_close": bars_5m[0]["o"],
+                "today_open": bars_5m[0]["o"],
+                "today_high": max(b["h"] for b in bars_5m),
+                "today_low": min(b["l"] for b in bars_5m),
+                "change_pct": round(((price / bars_5m[0]["o"]) - 1) * 100, 2) if bars_5m[0]["o"] > 0 else 0,
+                "bid": 0,
+                "ask": 0,
+                "prev_volume": 0,
+            }
+
+            indicators = TechnicalCalculator.compute_all(bars_5m, [], [], snapshot)
+            structure = MarketStructureAnalyzer.analyze_structure(bars_5m)
+            setups = SetupDetector.detect_all(bars_5m, indicators, structure)
+            fake = SetupDetector.detect_fake_breakout(bars_5m, structure)
+            overextended, ext_reason = OverextensionFilter.check(indicators, bars_5m)
+
+            # Direction + setup selection (same logic as full analyze)
+            best_setup = None
+            direction = "NONE"
+            if setups:
+                setups.sort(key=lambda s: s.get("confidence_boost", 0), reverse=True)
+                best_setup = setups[0]
+                direction = best_setup.get("direction", "LONG")
+
+            if not best_setup:
+                if indicators.get("ema_bullish") and indicators.get("rsi", 50) > 50:
+                    direction = "LONG"
+                elif indicators.get("ema_bearish") and indicators.get("rsi", 50) < 50:
+                    direction = "SHORT"
+
+            # Confidence scoring
+            base_confidence = 45
+            if best_setup:
+                base_confidence += min(best_setup.get("confidence_boost", 0), 18)
+            rel_vol = indicators.get("rel_vol", 0)
+            if rel_vol >= 2.0:
+                base_confidence += 8
+            elif rel_vol >= 1.3:
+                base_confidence += 4
+            rsi = indicators.get("rsi", 50)
+            if 40 <= rsi <= 60:
+                base_confidence += 3
+            elif 30 <= rsi <= 70:
+                base_confidence += 1
+            macd = indicators.get("macd", {})
+            if macd.get("crossover") == "bullish" and direction == "LONG":
+                base_confidence += 5
+            elif macd.get("crossover") == "bearish" and direction == "SHORT":
+                base_confidence += 5
+            if fake:
+                base_confidence -= 20
+            if overextended:
+                base_confidence -= 15
+            if indicators.get("spread_pct", 0) > 0.5:
+                base_confidence -= 5
+            elif indicators.get("spread_pct", 0) > 0.3:
+                base_confidence -= 2
+            base_confidence = max(0, min(100, base_confidence))
+
+            momentum_mode = rel_vol >= 2.0 and structure.get("structure") in ("bullish", "bearish")
+
+            # Stop/target from setup or ATR
+            avg_range = indicators.get("avg_range", price * 0.01)
+            if best_setup and best_setup.get("stop"):
+                stop_loss = best_setup["stop"]
+            else:
+                stop_loss = price - (avg_range * 1.5) if direction == "LONG" else price + (avg_range * 1.5)
+            if best_setup and best_setup.get("target"):
+                take_profit = best_setup["target"]
+            else:
+                take_profit = price + (avg_range * 2.5) if direction == "LONG" else price - (avg_range * 2.5)
+
+            risk_dist = abs(price - stop_loss)
+            reward_dist = abs(take_profit - price)
+            rr_ratio = round(reward_dist / risk_dist, 2) if risk_dist > 0 else 0
+
+            result = {
+                "symbol": symbol,
+                "price": round(price, 2),
+                "direction": direction,
+                "confidence": base_confidence,
+                "momentum_mode": momentum_mode,
+                "best_setup": best_setup,
+                "all_setups": setups,
+                "structure": structure,
+                "indicators": indicators,
+                "mtf_confirmation": {"aligned": False, "score": 0, "details": ["fast mode: single timeframe"]},
+                "fake_breakout": fake,
+                "overextended": overextended,
+                "overextension_reason": ext_reason,
+                "stop_loss": round(stop_loss, 2),
+                "take_profit": round(take_profit, 2),
+                "rr_ratio": rr_ratio,
+                "entry_reasons": [s["reason"] for s in setups],
+                "reject_reasons": (
+                    ([fake["reason"]] if fake else []) +
+                    ([ext_reason] if overextended else []) +
+                    ([f"Wide spread: {indicators['spread_pct']:.2f}%"] if indicators["spread_pct"] > 0.5 else [])
+                ),
+                "analysis_mode": "fast",
+            }
+            TACache.set(symbol, result)
+            return result
+        except Exception as e:
+            logger.error(f"Fast TA error for {symbol}: {e}")
+            return None
+
+    @staticmethod
+    async def batch_analyze_fast(symbols: List[str], max_concurrent: int = 1) -> List[Dict]:
+        """Analyze with 1 API call per stock. Strictly rate-limited (max ~4 calls/min for Polygon free)."""
+        results = []
+
+        for sym in symbols:
+            r = await TechnicalSignalGenerator.analyze_fast(sym)
+            if r:
+                results.append(r)
+            await asyncio.sleep(13)  # 60s / 5 calls = 12s min, use 13s for safety
+
         results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
         return results
