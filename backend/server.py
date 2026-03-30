@@ -4813,14 +4813,26 @@ app.add_middleware(
 # Startup event to initialize universe
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the investment universe on startup"""
+    """Initialize the investment universe and auto-recover scheduler on startup"""
     try:
         # Check if we have any cached signals
         count = await db.investment_signals.count_documents({})
         if count == 0:
             logger.info("No cached signals found, starting initial load...")
-            # Start with a quick initial load of top stocks
             asyncio.create_task(investment_engine.refresh_universe_signals(200))
+        
+        # Auto-recover scheduler if it was running before restart
+        saved_state = await db.scheduler_state.find_one({"_id": "config"})
+        auto_settings = await db.auto_trade_settings.find_one({"_id": "default"})
+        was_running = saved_state and saved_state.get("status") == "running"
+        is_enabled = auto_settings and auto_settings.get("auto_enabled", False)
+        
+        if was_running or is_enabled:
+            logger.info("AUTO-RECOVERY: Scheduler was running before restart — restarting automatically")
+            await auto_scheduler.initialize()
+            result = await auto_scheduler.start()
+            logger.info(f"AUTO-RECOVERY: Scheduler restored: {result}")
+        
     except Exception as e:
         logger.error(f"Startup error: {e}")
 
