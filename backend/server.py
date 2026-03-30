@@ -373,6 +373,50 @@ class MultiAPIClient:
         )
         return data if isinstance(data, list) else None
     
+    async def fmp_historical_30yr(self, symbol: str) -> Optional[List]:
+        """Get up to 30 years of historical price data by fetching in chunks"""
+        try:
+            from datetime import datetime, timedelta
+            today = datetime.now().strftime("%Y-%m-%d")
+            mid_date = (datetime.now() - timedelta(days=7300)).strftime("%Y-%m-%d")  # ~20yr ago
+            start_date = (datetime.now() - timedelta(days=11000)).strftime("%Y-%m-%d")  # ~30yr ago
+            
+            # Fetch recent chunk (last ~20 years) and older chunk in parallel
+            recent, older = await asyncio.gather(
+                self._request(
+                    f"{self.fmp_url}/historical-price-eod/full",
+                    headers={"apikey": config.FMP_API_KEY},
+                    params={"symbol": symbol, "from": mid_date, "to": today}
+                ),
+                self._request(
+                    f"{self.fmp_url}/historical-price-eod/full",
+                    headers={"apikey": config.FMP_API_KEY},
+                    params={"symbol": symbol, "from": start_date, "to": mid_date}
+                ),
+                return_exceptions=True
+            )
+            
+            recent = recent if isinstance(recent, list) else []
+            older = older if isinstance(older, list) else []
+            
+            # Merge: recent is newest-first, older is newest-first
+            # Combine: recent (newest) + older (older data)
+            combined = recent + older
+            
+            if not combined:
+                # Fallback to single call
+                data = await self._request(
+                    f"{self.fmp_url}/historical-price-eod/full",
+                    headers={"apikey": config.FMP_API_KEY},
+                    params={"symbol": symbol, "from": start_date, "to": today}
+                )
+                return data if isinstance(data, list) else None
+            
+            return combined
+        except Exception as e:
+            logger.error(f"30yr historical fetch error for {symbol}: {e}")
+            return None
+    
     # Polygon Methods
     async def polygon_quote(self, symbol: str) -> Optional[Dict]:
         data = await self._request(

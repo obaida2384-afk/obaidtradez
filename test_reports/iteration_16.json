@@ -1,0 +1,115 @@
+{
+  "summary": "Completed testing of Historical Performance feature for Investments. Backend API returns historical_performance data correctly with 30-year price analysis. Frontend displays Historical Performance section in expanded investment cards with all metrics (CAGR values, Max Drawdown, Volatility, Win/Loss Years, vs ATH, Best/Worst years) and color-coded values.",
+  
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "passed_tests": [
+    "Access gate login with code Bullishalmarkhan7.7 - SUCCESS",
+    "Navigate to Investments page - SUCCESS",
+    "Investment cards load with data (1096 stocks analyzed) - SUCCESS",
+    "Expand investment card to see detailed analysis - SUCCESS",
+    "Historical Performance section appears with data-testid='historical-performance' - SUCCESS",
+    "CAGR values (1Y, 3Y, 5Y, 10Y, 20Y) displayed with color coding - SUCCESS",
+    "Max Drawdown metric visible with recovery time - SUCCESS",
+    "Volatility metric visible - SUCCESS",
+    "Win/Loss Years metric visible - SUCCESS",
+    "vs ATH metric visible with 200 SMA trend - SUCCESS",
+    "Historical Rating badge (Strong) displayed - SUCCESS",
+    "Best/Worst year info shown at bottom - SUCCESS",
+    "Total Return percentage displayed - SUCCESS",
+    "Backend /api/investments/scan returns signals with historical_performance field - SUCCESS",
+    "Backend /api/investments/refresh triggers background 30yr analysis - SUCCESS",
+    "AAPL has 29 years of historical data with 10Y CAGR of 25.1% - SUCCESS"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/tests/test_historical_performance.py",
+    "/app/test_reports/pytest/pytest_historical_performance.xml"
+  ],
+  
+  "action_items": [],
+  
+  "critical_code_review_comments": [
+    "Historical Performance feature fully implemented and working",
+    "fmp_historical_30yr() correctly fetches data in two chunks (~20yr + ~10yr) to bypass FMP's 5000-item limit",
+    "_compute_historical_performance() calculates all metrics correctly: CAGR (1yr/3yr/5yr/10yr/20yr/30yr), max drawdown, recovery time, volatility, best/worst years, win/loss years, vs ATH, 200 SMA trend",
+    "Frontend Investments.jsx correctly renders Historical Performance section with data-testid='historical-performance'",
+    "Color coding implemented: green for positive CAGR (>=15%), blue for moderate (>=8%), white for low positive, red for negative",
+    "All data-testid attributes present for testing"
+  ],
+  
+  "updated_files": [
+    "/app/backend/tests/test_historical_performance.py"
+  ],
+  
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (All Historical Performance features working correctly)"
+  },
+  
+  "test_credentials": {
+    "access_code": "Bullishalmarkhan7.7"
+  },
+  
+  "seed_data_creation": "~100 stocks have fresh 30yr historical data from investment refresh",
+  
+  "retest_needed": false,
+  
+  "should_main_agent_self_test": false,
+  
+  "context_for_next_testing_agent": "Historical Performance feature fully tested and working. Backend returns historical_performance field with years_of_data, CAGR values (1Y-30Y), max_drawdown_pct, recovery_months, annualized_volatility, positive_years, negative_years, best_year, worst_year, current_vs_ath_pct, sma_200_trend, and historical_rating. Frontend displays all metrics in expanded investment cards with proper color coding. AAPL shows 29yr data with 10Y CAGR of 25.1% as expected.",
+  
+  "verified_features": {
+    "historical_performance_backend": {
+      "endpoint": "/api/investments/scan",
+      "returns_historical_performance": true,
+      "fields_present": [
+        "years_of_data",
+        "total_return_pct",
+        "cagr_1yr", "cagr_3yr", "cagr_5yr", "cagr_10yr", "cagr_20yr", "cagr_30yr",
+        "max_drawdown_pct", "max_drawdown_date", "recovery_months",
+        "annualized_volatility",
+        "positive_years", "negative_years",
+        "best_year_pct", "best_year",
+        "worst_year_pct", "worst_year",
+        "current_vs_ath_pct",
+        "sma_200_trend",
+        "historical_rating"
+      ],
+      "status": "WORKING"
+    },
+    "historical_performance_frontend": {
+      "location": "Expanded investment card, bottom section",
+      "data_testid": "historical-performance",
+      "displays": [
+        "Years of data badge",
+        "Historical rating badge (Exceptional/Strong/Average/Weak/Poor)",
+        "CAGR grid (1Y, 3Y, 5Y, 10Y, 20Y, 30Y)",
+        "Max Drawdown with recovery time",
+        "Volatility percentage",
+        "Win/Loss Years ratio",
+        "vs ATH percentage with 200 SMA trend",
+        "Best/Worst year with percentage",
+        "Total Return percentage"
+      ],
+      "color_coding": "Green (>=15%), Blue (>=8%), White (>=0%), Red (<0%)",
+      "status": "WORKING"
+    },
+    "fmp_historical_30yr": {
+      "method": "Two-chunk parallel fetch",
+      "chunk1": "Last ~20 years (mid_date to today)",
+      "chunk2": "Older ~10 years (start_date to mid_date)",
+      "fallback": "Single call if chunks fail",
+      "status": "WORKING"
+    }
+  }
+}

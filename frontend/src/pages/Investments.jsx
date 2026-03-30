@@ -31,6 +31,7 @@ import {
   Globe,
   Gauge,
   Star,
+  Clock,
   Download
 } from "lucide-react";
 import { toast } from "sonner";
@@ -505,6 +506,111 @@ const InvestmentCard = memo(({ signal, expanded, onToggle, token, inWatchlist, o
                   <p className="text-slate-300">{signal.growth_profile.growth_rating}</p>
                 </div>
               </div>
+            </div>
+          )}
+          
+          {/* Historical Performance (30yr) */}
+          {signal.historical_performance && (
+            <div className="p-3 rounded bg-slate-900/50 border border-slate-800" data-testid="historical-performance">
+              <p className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+                <Clock className="w-3 h-3" /> Historical Performance ({signal.historical_performance.years_of_data}yr data)
+                <span className={`ml-auto text-[10px] font-medium px-2 py-0.5 rounded ${
+                  signal.historical_performance.historical_rating === 'Exceptional' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                  signal.historical_performance.historical_rating === 'Strong' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                  signal.historical_performance.historical_rating === 'Average' ? 'bg-slate-500/20 text-slate-400 border border-slate-500/30' :
+                  'bg-red-500/20 text-red-400 border border-red-500/30'
+                }`}>
+                  {signal.historical_performance.historical_rating}
+                </span>
+              </p>
+              
+              {/* CAGR Returns */}
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs mb-3">
+                {[
+                  { label: '1Y', value: signal.historical_performance.cagr_1yr },
+                  { label: '3Y', value: signal.historical_performance.cagr_3yr },
+                  { label: '5Y', value: signal.historical_performance.cagr_5yr },
+                  { label: '10Y', value: signal.historical_performance.cagr_10yr },
+                  { label: '20Y', value: signal.historical_performance.cagr_20yr },
+                  { label: '30Y', value: signal.historical_performance.cagr_30yr },
+                ].filter(c => c.value !== null && c.value !== undefined).map((c) => (
+                  <div key={c.label} className="text-center p-1.5 rounded bg-slate-800/50">
+                    <p className="text-slate-500 text-[10px]">{c.label} CAGR</p>
+                    <p className={`font-mono font-medium ${c.value >= 15 ? 'text-emerald-400' : c.value >= 8 ? 'text-blue-400' : c.value >= 0 ? 'text-white' : 'text-red-400'}`}>
+                      {c.value > 0 ? '+' : ''}{c.value?.toFixed(1)}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Risk & Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                {signal.historical_performance.max_drawdown_pct !== null && (
+                  <div>
+                    <p className="text-slate-500">Max Drawdown</p>
+                    <p className={`font-mono ${signal.historical_performance.max_drawdown_pct > -30 ? 'text-emerald-400' : signal.historical_performance.max_drawdown_pct > -50 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {signal.historical_performance.max_drawdown_pct?.toFixed(1)}%
+                    </p>
+                    {signal.historical_performance.recovery_months && (
+                      <p className="text-[10px] text-slate-600">Recovery: {signal.historical_performance.recovery_months}mo</p>
+                    )}
+                  </div>
+                )}
+                {signal.historical_performance.annualized_volatility !== null && (
+                  <div>
+                    <p className="text-slate-500">Volatility</p>
+                    <p className={`font-mono ${signal.historical_performance.annualized_volatility < 25 ? 'text-emerald-400' : signal.historical_performance.annualized_volatility < 40 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {signal.historical_performance.annualized_volatility?.toFixed(1)}%
+                    </p>
+                  </div>
+                )}
+                {signal.historical_performance.positive_years > 0 && (
+                  <div>
+                    <p className="text-slate-500">Win/Loss Years</p>
+                    <p className="font-mono text-white">
+                      <span className="text-emerald-400">{signal.historical_performance.positive_years}</span>
+                      <span className="text-slate-600"> / </span>
+                      <span className="text-red-400">{signal.historical_performance.negative_years}</span>
+                    </p>
+                  </div>
+                )}
+                {signal.historical_performance.current_vs_ath_pct !== null && (
+                  <div>
+                    <p className="text-slate-500">vs ATH</p>
+                    <p className={`font-mono ${signal.historical_performance.current_vs_ath_pct > -10 ? 'text-emerald-400' : signal.historical_performance.current_vs_ath_pct > -30 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {signal.historical_performance.current_vs_ath_pct?.toFixed(1)}%
+                    </p>
+                    {signal.historical_performance.sma_200_trend && (
+                      <p className={`text-[10px] ${signal.historical_performance.sma_200_trend === 'Above' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {signal.historical_performance.sma_200_trend} 200 SMA
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {/* Best/Worst Years */}
+              {(signal.historical_performance.best_year || signal.historical_performance.worst_year) && (
+                <div className="flex gap-4 mt-2 text-xs">
+                  {signal.historical_performance.best_year && (
+                    <span className="text-slate-500">
+                      Best: <span className="text-emerald-400 font-mono">{signal.historical_performance.best_year} (+{signal.historical_performance.best_year_pct?.toFixed(0)}%)</span>
+                    </span>
+                  )}
+                  {signal.historical_performance.worst_year && (
+                    <span className="text-slate-500">
+                      Worst: <span className="text-red-400 font-mono">{signal.historical_performance.worst_year} ({signal.historical_performance.worst_year_pct?.toFixed(0)}%)</span>
+                    </span>
+                  )}
+                  {signal.historical_performance.total_return_pct !== null && (
+                    <span className="text-slate-500 ml-auto">
+                      Total Return: <span className={`font-mono ${signal.historical_performance.total_return_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {signal.historical_performance.total_return_pct > 0 ? '+' : ''}{signal.historical_performance.total_return_pct?.toFixed(0)}%
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
           

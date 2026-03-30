@@ -45,6 +45,30 @@ class GrowthProfile(BaseModel):
     growth_trend: str = "N/A"  # "Accelerating", "Stable", "Decelerating", "Declining"
     growth_rating: str = "N/A"
 
+class HistoricalPerformance(BaseModel):
+    """30-year historical price performance analysis"""
+    years_of_data: int = 0
+    total_return_pct: Optional[float] = None
+    cagr_1yr: Optional[float] = None
+    cagr_3yr: Optional[float] = None
+    cagr_5yr: Optional[float] = None
+    cagr_10yr: Optional[float] = None
+    cagr_20yr: Optional[float] = None
+    cagr_30yr: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+    max_drawdown_date: Optional[str] = None
+    recovery_months: Optional[int] = None
+    annualized_volatility: Optional[float] = None
+    positive_years: int = 0
+    negative_years: int = 0
+    best_year_pct: Optional[float] = None
+    best_year: Optional[str] = None
+    worst_year_pct: Optional[float] = None
+    worst_year: Optional[str] = None
+    current_vs_ath_pct: Optional[float] = None
+    sma_200_trend: Optional[str] = None  # "Above" or "Below"
+    historical_rating: str = "N/A"  # "Exceptional", "Strong", "Average", "Weak", "Poor"
+
 class EnhancedInvestmentSignal(BaseModel):
     symbol: str
     name: str
@@ -64,6 +88,7 @@ class EnhancedInvestmentSignal(BaseModel):
     valuation_summary: ValuationSummary
     business_quality: BusinessQuality
     growth_profile: GrowthProfile
+    historical_performance: Optional[HistoricalPerformance] = None
     score_drivers: ScoreDrivers
     
     # Cases
@@ -126,6 +151,174 @@ class EnhancedInvestmentEngine:
         self.api_client = api_client
         self.db = db
     
+    def _compute_historical_performance(self, historical: list, current_price: float) -> Optional[HistoricalPerformance]:
+        """Compute comprehensive metrics from up to 30 years of daily price data"""
+        if not historical or len(historical) < 30:
+            return None
+        
+        try:
+            # historical is sorted newest first from FMP
+            prices = historical[::-1]  # reverse to oldest first
+            
+            years_of_data = max(1, len(prices) // 252)
+            oldest_price = prices[0].get('close', 0)
+            newest_price = prices[-1].get('close', 0) if prices else current_price
+            
+            if not oldest_price or oldest_price <= 0:
+                return None
+            
+            # Total return
+            total_return = ((newest_price / oldest_price) - 1) * 100
+            
+            # CAGR calculations
+            def calc_cagr(start_price, end_price, years):
+                if not start_price or start_price <= 0 or years <= 0:
+                    return None
+                return ((end_price / start_price) ** (1 / years) - 1) * 100
+            
+            trading_days = len(prices)
+            cagr_1yr = None
+            cagr_3yr = None
+            cagr_5yr = None
+            cagr_10yr = None
+            cagr_20yr = None
+            cagr_30yr = None
+            
+            if trading_days >= 252:
+                p = prices[-252].get('close', 0)
+                cagr_1yr = calc_cagr(p, newest_price, 1)
+            if trading_days >= 756:
+                p = prices[-756].get('close', 0)
+                cagr_3yr = calc_cagr(p, newest_price, 3)
+            if trading_days >= 1260:
+                p = prices[-1260].get('close', 0)
+                cagr_5yr = calc_cagr(p, newest_price, 5)
+            if trading_days >= 2520:
+                p = prices[-2520].get('close', 0)
+                cagr_10yr = calc_cagr(p, newest_price, 10)
+            if trading_days >= 5040:
+                p = prices[-5040].get('close', 0)
+                cagr_20yr = calc_cagr(p, newest_price, 20)
+            if trading_days >= 7560:
+                p = prices[-7560].get('close', 0)
+                cagr_30yr = calc_cagr(p, newest_price, 30)
+            
+            # Max drawdown
+            peak = 0
+            max_dd = 0
+            max_dd_date = None
+            dd_start_idx = 0
+            recovery_idx = None
+            worst_dd_peak_idx = 0
+            
+            for i, day in enumerate(prices):
+                close = day.get('close', 0)
+                if close > peak:
+                    peak = close
+                    dd_start_idx = i
+                if peak > 0:
+                    dd = ((close - peak) / peak) * 100
+                    if dd < max_dd:
+                        max_dd = dd
+                        max_dd_date = day.get('date', '')
+                        worst_dd_peak_idx = dd_start_idx
+            
+            # Recovery from worst drawdown
+            recovery_months = None
+            if worst_dd_peak_idx > 0 and max_dd < -5:
+                peak_price = prices[worst_dd_peak_idx].get('close', 0)
+                for i in range(worst_dd_peak_idx + 1, len(prices)):
+                    if prices[i].get('close', 0) >= peak_price:
+                        recovery_days = i - worst_dd_peak_idx
+                        recovery_months = max(1, recovery_days // 21)
+                        break
+            
+            # Annualized volatility (using daily returns)
+            daily_returns = []
+            for i in range(1, min(len(prices), 2520)):  # Use up to 10yr for vol
+                prev = prices[i-1].get('close', 0)
+                curr = prices[i].get('close', 0)
+                if prev > 0:
+                    daily_returns.append((curr / prev) - 1)
+            
+            ann_vol = None
+            if daily_returns:
+                import math
+                mean_ret = sum(daily_returns) / len(daily_returns)
+                variance = sum((r - mean_ret) ** 2 for r in daily_returns) / len(daily_returns)
+                ann_vol = round(math.sqrt(variance * 252) * 100, 1)
+            
+            # Yearly returns
+            yearly_data = {}
+            for day in prices:
+                year = day.get('date', '')[:4]
+                close = day.get('close', 0)
+                if year and close:
+                    if year not in yearly_data:
+                        yearly_data[year] = {'first': close, 'last': close}
+                    yearly_data[year]['last'] = close
+            
+            yearly_returns = {}
+            for year, data in yearly_data.items():
+                if data['first'] > 0:
+                    yearly_returns[year] = ((data['last'] / data['first']) - 1) * 100
+            
+            positive_years = sum(1 for r in yearly_returns.values() if r > 0)
+            negative_years = sum(1 for r in yearly_returns.values() if r <= 0)
+            
+            best_year = max(yearly_returns, key=yearly_returns.get) if yearly_returns else None
+            worst_year = min(yearly_returns, key=yearly_returns.get) if yearly_returns else None
+            
+            # All-time high distance
+            ath = max((d.get('close', 0) for d in prices), default=0)
+            ath_pct = ((newest_price / ath) - 1) * 100 if ath > 0 else None
+            
+            # 200-day SMA trend
+            sma_200_trend = None
+            if trading_days >= 200:
+                sma_200 = sum(d.get('close', 0) for d in prices[-200:]) / 200
+                sma_200_trend = "Above" if newest_price > sma_200 else "Below"
+            
+            # Historical rating
+            best_cagr = cagr_10yr or cagr_5yr or cagr_3yr or cagr_1yr or 0
+            if best_cagr >= 15 and max_dd > -40:
+                hist_rating = "Exceptional"
+            elif best_cagr >= 10:
+                hist_rating = "Strong"
+            elif best_cagr >= 5:
+                hist_rating = "Average"
+            elif best_cagr >= 0:
+                hist_rating = "Weak"
+            else:
+                hist_rating = "Poor"
+            
+            return HistoricalPerformance(
+                years_of_data=years_of_data,
+                total_return_pct=round(total_return, 1),
+                cagr_1yr=round(cagr_1yr, 1) if cagr_1yr is not None else None,
+                cagr_3yr=round(cagr_3yr, 1) if cagr_3yr is not None else None,
+                cagr_5yr=round(cagr_5yr, 1) if cagr_5yr is not None else None,
+                cagr_10yr=round(cagr_10yr, 1) if cagr_10yr is not None else None,
+                cagr_20yr=round(cagr_20yr, 1) if cagr_20yr is not None else None,
+                cagr_30yr=round(cagr_30yr, 1) if cagr_30yr is not None else None,
+                max_drawdown_pct=round(max_dd, 1),
+                max_drawdown_date=max_dd_date,
+                recovery_months=recovery_months,
+                annualized_volatility=ann_vol,
+                positive_years=positive_years,
+                negative_years=negative_years,
+                best_year_pct=round(yearly_returns[best_year], 1) if best_year else None,
+                best_year=best_year,
+                worst_year_pct=round(yearly_returns[worst_year], 1) if worst_year else None,
+                worst_year=worst_year,
+                current_vs_ath_pct=round(ath_pct, 1) if ath_pct is not None else None,
+                sma_200_trend=sma_200_trend,
+                historical_rating=hist_rating
+            )
+        except Exception as e:
+            logger.error(f"Historical analysis error: {e}")
+            return None
+    
     def _get_market_cap_label(self, market_cap: float) -> str:
         if not market_cap:
             return "Unknown"
@@ -142,13 +335,14 @@ class EnhancedInvestmentEngine:
     async def analyze_stock(self, symbol: str) -> Optional[EnhancedInvestmentSignal]:
         """Comprehensive stock analysis with proper field mapping and explanations"""
         try:
-            # Fetch all data sources
-            quote, profile, ratios, metrics, growth = await asyncio.gather(
+            # Fetch all data sources + 30 years of historical prices
+            quote, profile, ratios, metrics, growth, historical = await asyncio.gather(
                 self.api_client.fmp_quote(symbol),
                 self.api_client.fmp_profile(symbol),
                 self.api_client.fmp_ratios(symbol),
                 self.api_client.fmp_metrics(symbol),
                 self.api_client.fmp_growth(symbol),
+                self.api_client.fmp_historical_30yr(symbol),
                 return_exceptions=True
             )
             
@@ -158,9 +352,10 @@ class EnhancedInvestmentEngine:
             ratios = None if isinstance(ratios, Exception) else ratios
             metrics = None if isinstance(metrics, Exception) else metrics
             growth = None if isinstance(growth, Exception) else growth
+            historical = None if isinstance(historical, Exception) else historical
             
             # Calculate data completeness
-            data_sources = [quote, profile, ratios, metrics, growth]
+            data_sources = [quote, profile, ratios, metrics, growth, historical]
             available_sources = sum(1 for d in data_sources if d)
             data_completeness = (available_sources / len(data_sources)) * 100
             
@@ -566,6 +761,28 @@ class EnhancedInvestmentEngine:
                 growth_rating=growth_rating
             )
             
+            # ==================== HISTORICAL PERFORMANCE (30yr) ====================
+            hist_perf = self._compute_historical_performance(historical, price) if historical else None
+            
+            # Boost/penalize score based on long-term track record
+            if hist_perf:
+                best_cagr = hist_perf.cagr_10yr or hist_perf.cagr_5yr or hist_perf.cagr_3yr
+                if best_cagr is not None:
+                    if best_cagr >= 15:
+                        overall_score = min(100, overall_score + 3)
+                        bull_case.append(f"Long-term CAGR: {best_cagr:.1f}% (Exceptional)")
+                        score_boosters.append(f"Strong historical performance ({best_cagr:.1f}% CAGR)")
+                    elif best_cagr >= 10:
+                        overall_score = min(100, overall_score + 1.5)
+                        bull_case.append(f"Long-term CAGR: {best_cagr:.1f}% (Strong)")
+                    elif best_cagr < 0:
+                        overall_score = max(0, overall_score - 2)
+                        bear_case.append(f"Negative long-term CAGR: {best_cagr:.1f}%")
+                        score_detractors.append("Poor historical price performance")
+                
+                if hist_perf.max_drawdown_pct and hist_perf.max_drawdown_pct < -60:
+                    risks.append(f"Severe max drawdown: {hist_perf.max_drawdown_pct:.1f}%")
+            
             score_drivers = ScoreDrivers(
                 boosters=score_boosters[:6],
                 detractors=score_detractors[:6],
@@ -597,6 +814,7 @@ class EnhancedInvestmentEngine:
                 valuation_summary=valuation_summary,
                 business_quality=business_quality,
                 growth_profile=growth_profile,
+                historical_performance=hist_perf,
                 score_drivers=score_drivers,
                 bull_case=bull_case[:5],
                 bear_case=bear_case[:5],
@@ -726,5 +944,6 @@ def convert_to_legacy_format(signal: EnhancedInvestmentSignal) -> dict:
         "valuation_summary": signal.valuation_summary.dict(),
         "business_quality": signal.business_quality.dict(),
         "growth_profile": signal.growth_profile.dict(),
+        "historical_performance": signal.historical_performance.dict() if signal.historical_performance else None,
         "score_drivers": signal.score_drivers.dict()
     }
