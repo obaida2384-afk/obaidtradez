@@ -33,6 +33,9 @@ from ai_trading_system import (
     ConfidenceScoringEngine, MarketRegimeDetector
 )
 
+# Import enhanced news engine
+from news_sentiment_engine import EnhancedNewsSentimentEngine
+
 # ===================== CONFIGURATION =====================
 class Config:
     MONGO_URL = os.environ['MONGO_URL']
@@ -4241,6 +4244,48 @@ async def emergency_pause(pause: bool = True, auth: bool = Depends(verify_access
     settings.emergency_pause = pause
     await auto_orchestrator.save_settings(settings)
     return {"emergency_pause": pause, "message": f"Auto-trading {'PAUSED' if pause else 'RESUMED'}"}
+
+# ===================== ENHANCED NEWS & SENTIMENT ENDPOINTS =====================
+
+news_engine = EnhancedNewsSentimentEngine(db)
+
+@api_router.get("/news/analyze/{symbol}")
+async def analyze_stock_news(symbol: str, auth: bool = Depends(verify_access)):
+    """Get AI-powered news analysis for a stock"""
+    return await news_engine.analyze_stock(symbol.upper())
+
+@api_router.post("/news/refresh")
+async def refresh_news(
+    background_tasks: BackgroundTasks,
+    symbols: str = Query(default=""),
+    auth: bool = Depends(verify_access)
+):
+    """Refresh news for specific symbols or top trading candidates"""
+    if symbols:
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        # Default: top trading signals + top investment picks
+        trading = await db.trading_signals.find(
+            {}, {"_id": 0, "symbol": 1}
+        ).sort("confidence", -1).limit(30).to_list(30)
+        investing = await db.investment_signals.find(
+            {"overall_score": {"$gte": 70}}, {"_id": 0, "symbol": 1}
+        ).sort("overall_score", -1).limit(30).to_list(30)
+        sym_list = list(dict.fromkeys(
+            [s["symbol"] for s in trading] + [s["symbol"] for s in investing]
+        ))[:50]
+    background_tasks.add_task(news_engine.batch_analyze, sym_list)
+    return {"message": f"Analyzing news for {len(sym_list)} stocks", "symbols": sym_list[:10]}
+
+@api_router.get("/news/breaking")
+async def get_breaking_news(auth: bool = Depends(verify_access)):
+    """Get high-impact breaking news with catalysts"""
+    return await news_engine.get_breaking_news()
+
+@api_router.get("/news/overview")
+async def get_news_overview(auth: bool = Depends(verify_access)):
+    """Get sentiment distribution across all analyzed stocks"""
+    return await news_engine.get_sentiment_overview()
 
 # Paper Execution Endpoints
 
