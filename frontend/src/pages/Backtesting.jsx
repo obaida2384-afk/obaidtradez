@@ -286,6 +286,9 @@ const Backtesting = () => {
                 <SelectItem value="1y">1 Year</SelectItem>
                 <SelectItem value="2y">2 Years</SelectItem>
                 <SelectItem value="5y">5 Years</SelectItem>
+                <SelectItem value="10y">10 Years</SelectItem>
+                <SelectItem value="20y">20 Years</SelectItem>
+                <SelectItem value="30y">30 Years</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -379,21 +382,26 @@ const Backtesting = () => {
               </Badge>
             </div>
             
-            <div className="grid md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <div className="p-4 rounded bg-slate-900 border border-slate-800">
                 <p className="text-xs text-slate-500 mb-1">Total Return</p>
                 <p className={`font-mono text-2xl ${results.total_return >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {results.total_return >= 0 ? '+' : ''}{results.total_return}%
                 </p>
+                {results.annualized_return !== undefined && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {results.annualized_return >= 0 ? '+' : ''}{results.annualized_return}% annualized
+                  </p>
+                )}
               </div>
               
               <div className="p-4 rounded bg-slate-900 border border-slate-800">
                 <p className="text-xs text-slate-500 mb-1">Final Value</p>
                 <p className="font-mono text-2xl text-white">
-                  ${results.final_value.toLocaleString()}
+                  ${results.final_value?.toLocaleString()}
                 </p>
                 <p className="text-xs text-slate-500">
-                  from ${results.initial_capital.toLocaleString()}
+                  from ${results.initial_capital?.toLocaleString()} ({results.years_tested}yr)
                 </p>
               </div>
               
@@ -411,6 +419,33 @@ const Backtesting = () => {
                 </p>
               </div>
             </div>
+            
+            {/* Benchmark Comparison */}
+            {results.benchmark_return !== null && results.benchmark_return !== undefined && (
+              <div className="p-4 rounded bg-slate-900/50 border border-slate-700 mb-6" data-testid="benchmark-comparison">
+                <p className="text-xs text-slate-500 mb-3">vs S&P 500 (SPY) Buy & Hold</p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center">
+                    <p className="text-xs text-slate-500">Your Strategy</p>
+                    <p className={`font-mono text-lg ${results.total_return >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {results.total_return >= 0 ? '+' : ''}{results.total_return}%
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-slate-500">S&P 500</p>
+                    <p className={`font-mono text-lg ${results.benchmark_return >= 0 ? 'text-blue-400' : 'text-red-400'}`}>
+                      {results.benchmark_return >= 0 ? '+' : ''}{results.benchmark_return}%
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-slate-500">Alpha</p>
+                    <p className={`font-mono text-lg ${results.alpha >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {results.alpha >= 0 ? '+' : ''}{results.alpha}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="grid md:grid-cols-5 gap-4">
               <div className="p-3 rounded bg-slate-800/50">

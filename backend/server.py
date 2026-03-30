@@ -2654,28 +2654,34 @@ class BacktestRequest(BaseModel):
     take_profit_pct: float = 0.10
 
 class BacktestEngine:
-    """Simple backtesting engine using historical data"""
+    """Backtesting engine using up to 30 years of historical data"""
     
     PERIOD_DAYS = {
         "3m": 90,
         "6m": 180,
         "1y": 365,
         "2y": 730,
-        "5y": 1825
+        "5y": 1825,
+        "10y": 3650,
+        "20y": 7300,
+        "30y": 11000
     }
     
     async def get_historical_data(self, symbol: str, days: int) -> List[Dict]:
-        """Get historical price data"""
+        """Get historical price data - uses 30yr fetch for longer periods"""
         cache_key = f"historical_{symbol}_{days}"
-        cached = get_cached(cache_key, 3600)  # 1 hour cache
+        cached = get_cached(cache_key, 3600)
         if cached:
             return cached
         
         try:
-            # Try FMP first
-            data = await api_client.fmp_historical(symbol)
+            if days > 1825:
+                # Use 30yr fetch for periods longer than 5 years
+                data = await api_client.fmp_historical_30yr(symbol)
+            else:
+                data = await api_client.fmp_historical(symbol, days=min(days + 50, 5000))
+            
             if data and len(data) > 0:
-                # Limit to requested days
                 data = data[:days] if len(data) > days else data
                 data = list(reversed(data))  # Oldest first
                 set_cached(cache_key, data)
@@ -2684,6 +2690,19 @@ class BacktestEngine:
             logger.error(f"Historical data error for {symbol}: {e}")
         
         return []
+    
+    async def get_benchmark_return(self, days: int) -> Optional[float]:
+        """Get S&P 500 buy & hold return for comparison"""
+        try:
+            data = await self.get_historical_data("SPY", days)
+            if data and len(data) >= 2:
+                start = data[0].get("close", 0)
+                end = data[-1].get("close", 0)
+                if start > 0:
+                    return round(((end / start) - 1) * 100, 2)
+        except:
+            pass
+        return None
     
     async def run_backtest(self, request: BacktestRequest) -> Dict:
         """Run a backtest simulation"""
@@ -2870,6 +2889,14 @@ class BacktestEngine:
         best_trade = max([t["pnl_pct"] for t in trades]) if trades else 0
         worst_trade = min([t["pnl_pct"] for t in trades]) if trades else 0
         
+        # Get S&P 500 benchmark
+        benchmark_return = await self.get_benchmark_return(days)
+        alpha = round(total_return - (benchmark_return or 0), 2) if benchmark_return is not None else None
+        
+        # Annualized return
+        years = max(days / 365, 0.25)
+        annualized = round(((1 + total_return / 100) ** (1 / years) - 1) * 100, 2) if total_return > -100 else -100
+        
         return {
             "symbol": request.symbol.upper(),
             "strategy": request.strategy,
@@ -2877,6 +2904,7 @@ class BacktestEngine:
             "initial_capital": request.initial_capital,
             "final_value": round(final_value, 2),
             "total_return": round(total_return, 2),
+            "annualized_return": annualized,
             "max_drawdown": round(max_drawdown, 2),
             "sharpe_ratio": round(sharpe, 2),
             "total_trades": total_trades,
@@ -2885,7 +2913,11 @@ class BacktestEngine:
             "losses": losses,
             "best_trade": round(best_trade, 2),
             "worst_trade": round(worst_trade, 2),
-            "trades": trades[-10:],  # Last 10 trades
+            "benchmark_return": benchmark_return,
+            "alpha": alpha,
+            "data_points": len(data),
+            "years_tested": round(years, 1),
+            "trades": trades[-20:],
             "equity_curve": equity_curve
         }
 
