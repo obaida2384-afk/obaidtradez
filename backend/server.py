@@ -36,6 +36,9 @@ from ai_trading_system import (
 # Import enhanced news engine
 from news_sentiment_engine import EnhancedNewsSentimentEngine
 
+# Import auto-trade scheduler
+from auto_trade_scheduler import AutoTradeScheduler
+
 # ===================== CONFIGURATION =====================
 class Config:
     MONGO_URL = os.environ['MONGO_URL']
@@ -62,6 +65,9 @@ config = Config()
 # MongoDB
 client = AsyncIOMotorClient(config.MONGO_URL)
 db = client[config.DB_NAME]
+
+# Enhanced News Engine (initialized early for route handlers)
+enhanced_news_engine = EnhancedNewsSentimentEngine(db)
 
 # FastAPI App
 app = FastAPI(title="ObaidTradez API", description="AI Trading & Investing Platform")
@@ -2416,16 +2422,48 @@ async def sanity_check_stocks(auth: bool = Depends(verify_access)):
         }
     }
 
-# News & Sentiment
-@api_router.get("/news/market")
-async def get_market_news(auth: bool = Depends(verify_access)):
-    """Get general market news"""
-    return await news_engine.get_market_news()
+# News & Sentiment (Enhanced AI-powered engine)
+@api_router.get("/news/breaking")
+async def get_breaking_news(auth: bool = Depends(verify_access)):
+    """Get high-impact breaking news with catalysts"""
+    return await enhanced_news_engine.get_breaking_news()
+
+@api_router.get("/news/overview")
+async def get_news_overview(auth: bool = Depends(verify_access)):
+    """Get sentiment distribution across all analyzed stocks"""
+    return await enhanced_news_engine.get_sentiment_overview()
+
+@api_router.get("/news/analyze/{symbol}")
+async def analyze_stock_news(symbol: str, auth: bool = Depends(verify_access)):
+    """Get AI-powered news analysis for a stock"""
+    return await enhanced_news_engine.analyze_stock(symbol.upper())
+
+@api_router.post("/news/refresh")
+async def refresh_news(
+    background_tasks: BackgroundTasks,
+    symbols: str = Query(default=""),
+    auth: bool = Depends(verify_access)
+):
+    """Refresh news for specific symbols or top trading candidates"""
+    if symbols:
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        trading = await db.trading_signals.find(
+            {}, {"_id": 0, "symbol": 1}
+        ).sort("confidence", -1).limit(30).to_list(30)
+        investing = await db.investment_signals.find(
+            {"overall_score": {"$gte": 70}}, {"_id": 0, "symbol": 1}
+        ).sort("overall_score", -1).limit(30).to_list(30)
+        sym_list = list(dict.fromkeys(
+            [s["symbol"] for s in trading] + [s["symbol"] for s in investing]
+        ))[:50]
+    background_tasks.add_task(enhanced_news_engine.batch_analyze, sym_list)
+    return {"message": f"Analyzing news for {len(sym_list)} stocks", "symbols": sym_list[:10]}
 
 @api_router.get("/news/{symbol}")
 async def get_symbol_news(symbol: str, auth: bool = Depends(verify_access)):
-    """Get news for specific symbol"""
-    return await news_engine.get_news_for_symbol(symbol.upper())
+    """Get news for specific symbol (redirects to enhanced analysis)"""
+    return await enhanced_news_engine.analyze_stock(symbol.upper())
 
 # Alpaca Account
 @api_router.get("/account")
@@ -4191,6 +4229,9 @@ paper_execution = PaperExecutionEngine()
 # AI Auto-Trade Orchestrator
 auto_orchestrator = AutoTradeOrchestrator(db, api_client, paper_execution)
 
+# Auto-Trade Scheduler
+auto_scheduler = AutoTradeScheduler(db, auto_orchestrator, enhanced_news_engine)
+
 # ===================== AUTO-TRADE AI ENDPOINTS =====================
 
 @api_router.get("/auto-trade/status")
@@ -4245,47 +4286,65 @@ async def emergency_pause(pause: bool = True, auth: bool = Depends(verify_access
     await auto_orchestrator.save_settings(settings)
     return {"emergency_pause": pause, "message": f"Auto-trading {'PAUSED' if pause else 'RESUMED'}"}
 
-# ===================== ENHANCED NEWS & SENTIMENT ENDPOINTS =====================
+# ===================== SCHEDULER ENDPOINTS =====================
 
-news_engine = EnhancedNewsSentimentEngine(db)
+@api_router.post("/scheduler/start")
+async def start_scheduler(auth: bool = Depends(verify_access)):
+    """Start the auto-trade scheduler"""
+    await auto_scheduler.initialize()
+    return await auto_scheduler.start()
 
-@api_router.get("/news/analyze/{symbol}")
-async def analyze_stock_news(symbol: str, auth: bool = Depends(verify_access)):
-    """Get AI-powered news analysis for a stock"""
-    return await news_engine.analyze_stock(symbol.upper())
+@api_router.post("/scheduler/stop")
+async def stop_scheduler(auth: bool = Depends(verify_access)):
+    """Stop the auto-trade scheduler"""
+    return await auto_scheduler.stop()
 
-@api_router.post("/news/refresh")
-async def refresh_news(
-    background_tasks: BackgroundTasks,
-    symbols: str = Query(default=""),
+@api_router.post("/scheduler/emergency-stop")
+async def scheduler_emergency_stop(auth: bool = Depends(verify_access)):
+    """Emergency stop - halt all trading immediately"""
+    return await auto_scheduler.emergency_stop()
+
+@api_router.post("/scheduler/clear-emergency")
+async def scheduler_clear_emergency(auth: bool = Depends(verify_access)):
+    """Clear emergency stop state"""
+    return await auto_scheduler.clear_emergency()
+
+@api_router.get("/scheduler/status")
+async def get_scheduler_status(auth: bool = Depends(verify_access)):
+    """Get scheduler status, next run timer, deployment mode"""
+    return await auto_scheduler.get_status()
+
+@api_router.post("/scheduler/deploy-mode")
+async def set_deploy_mode(mode: str = Query(...), auth: bool = Depends(verify_access)):
+    """Set deployment mode: paper, shadow, limited_live, full_live"""
+    return await auto_scheduler.set_deployment_mode(mode)
+
+@api_router.get("/scheduler/notifications")
+async def get_scheduler_notifications(
+    limit: int = Query(default=50, ge=1, le=200),
     auth: bool = Depends(verify_access)
 ):
-    """Refresh news for specific symbols or top trading candidates"""
-    if symbols:
-        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    else:
-        # Default: top trading signals + top investment picks
-        trading = await db.trading_signals.find(
-            {}, {"_id": 0, "symbol": 1}
-        ).sort("confidence", -1).limit(30).to_list(30)
-        investing = await db.investment_signals.find(
-            {"overall_score": {"$gte": 70}}, {"_id": 0, "symbol": 1}
-        ).sort("overall_score", -1).limit(30).to_list(30)
-        sym_list = list(dict.fromkeys(
-            [s["symbol"] for s in trading] + [s["symbol"] for s in investing]
-        ))[:50]
-    background_tasks.add_task(news_engine.batch_analyze, sym_list)
-    return {"message": f"Analyzing news for {len(sym_list)} stocks", "symbols": sym_list[:10]}
+    """Get scheduler notifications"""
+    return await auto_scheduler.get_notifications(limit)
 
-@api_router.get("/news/breaking")
-async def get_breaking_news(auth: bool = Depends(verify_access)):
-    """Get high-impact breaking news with catalysts"""
-    return await news_engine.get_breaking_news()
+@api_router.post("/scheduler/notifications/read")
+async def mark_notifications_read(auth: bool = Depends(verify_access)):
+    """Mark all notifications as read"""
+    count = await auto_scheduler.mark_notifications_read()
+    return {"marked_read": count}
 
-@api_router.get("/news/overview")
-async def get_news_overview(auth: bool = Depends(verify_access)):
-    """Get sentiment distribution across all analyzed stocks"""
-    return await news_engine.get_sentiment_overview()
+@api_router.get("/scheduler/execution-log")
+async def get_scheduler_execution_log(
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: bool = Depends(verify_access)
+):
+    """Get scheduler execution log"""
+    return await auto_scheduler.get_execution_log(limit)
+
+@api_router.post("/scheduler/settings")
+async def update_scheduler_settings(data: Dict, auth: bool = Depends(verify_access)):
+    """Update scheduler settings"""
+    return await auto_scheduler.update_settings(data)
 
 # Paper Execution Endpoints
 
