@@ -15,6 +15,7 @@ ObaidTradez is a secure, dark-themed AI trading and investing platform protected
 - **Internal TA Math**: EMA, RSI, MACD, VWAP, Market Structure, FVG calculated internally from Polygon OHLCV bars (NO external indicator APIs)
 - **Aggressive Caching**: Bar-level + TA-level caching to prevent Polygon rate limits
 - **News = Confidence Boost Only**: Never a hard gate for trades
+- **Direction Consistency**: LONG→BUY, SHORT→SELL across backend, API, UI, and execution layer
 
 ## Completed Features
 
@@ -28,46 +29,54 @@ ObaidTradez is a secure, dark-themed AI trading and investing platform protected
 
 ### P1 (Quality & Momentum) - Completed Mar 30, 2026
 - [x] **Multi-Timeframe Confirmation (MTF)**
-  - 1-min = entry timing only
-  - 5-min = structure (must be supportive for trade direction)
-  - 15-min = trend direction (must be supportive/neutral)
+  - 1-min = entry timing only, 5-min = structure gate, 15-min = trend gate
   - Hard reject if 5m/15m oppose trade direction
-  - 1m conflict = soft downgrade (-5 conf), not hard reject
-  - MTF scoring: aligned=+12, partial=+5, tf_conflict=-15, 1m_conflict=-5
-  - MTF reflected in confidence scoring, rejection reasons, and execution approval
+  - 1m conflict = soft downgrade, not hard reject
+  - Explicit logging for every MTF rejection
 - [x] **Momentum Mode Bypass**
-  - Requirements: RelVol>2, breakout/breakdown setup, clear HH/HL or LH/LL, VWAP aligned, spread<=0.5%, NOT overextended, NOT fake breakout
-  - Bypasses: soft conservative filters (RelVol minimum)
-  - Does NOT bypass: risk rules, fake breakout detection, overextension, spread/liquidity, MTF conflicts
-- [x] **Frontend Diagnostics**
-  - MTF Confirmation panel in expanded candidate cards (15m Trend, 5m Structure, 1m Timing, MTF Score)
-  - MTF OK / TF CONFLICT / MOMENTUM / BYPASS ACTIVE badges on candidate cards
-  - Multi-Timeframe & Momentum Mode stats card in Diagnostics
-  - Pipeline Funnel with MTF rejection reasons highlighted in red
-  - 9-column stats grid: Scanned, T1, T2, Setups, MTF Conflicts, Momentum, DT, Watchlist, Rejected
+  - Requirements: RelVol>2.5, breakout/breakdown setup, strong candle (body>=60% range), clear HH/HL or LH/LL, VWAP aligned, spread<=0.5%, within 2% of VWAP, NOT overextended, NOT fake breakout
+  - Bypasses soft conservative filters only
+  - Does NOT bypass: risk rules, fake breakout, overextension, spread/liquidity, MTF conflicts
+
+### Critical Fixes - Completed Mar 30, 2026
+- [x] **Direction Bug Fix**: LONG→BUY, SHORT→SELL consistently across backend logic, API responses, UI display, and execution layer
+- [x] **Confidence Score Normalization**: Base lowered from 45→35, wider distribution (85-95 elite, 75-85 strong, 65-75 acceptable, <65 reject), added penalties for weak structure, borderline RelVol, structure opposition
+- [x] **Momentum Mode Control**: Tightened to RelVol>2.5 (from 2.0), strong breakout candle check, <2% VWAP distance requirement
+- [x] **Pre-Market Safety**: Hard disable auto-execution before 9:30 AM ET, scan-only mode in pre-market, signals logged as informational only
+- [x] **MTF Conflict Detection**: Verified working (5+ conflicts per scan), explicit logging for every rejection with reasons
+- [x] **Trade Logging System**: MongoDB `trade_log` collection storing full lifecycle (ticker, direction, entry/SL/TP, exit price, P&L $+%, setup type, confidence, entry/exit reasons, MTF status, momentum mode)
+- [x] **Frontend Diagnostics**: Confidence distribution card (elite/strong/acceptable/below), momentum %, market session badge with pre-market warning, Trade Log tab with full trade details
 
 ### Infrastructure
 - [x] 1,000+ stock universe with background batch scanning
 - [x] 83+ risky/meme stock blocklist for AutoTrade
 - [x] Screener presets, CSV exports, Decision Clarity UI
-- [x] Investment scoring engine with category tabs
 
 ## Upcoming Tasks
 - [ ] P2: Compare stocks side-by-side
 - [ ] P3: Scheduler Performance Tracker (win rate, Sharpe ratio)
-- [ ] Refactor: server.py modularization into routes/ directory (~4,700 lines)
+- [ ] Refactor: server.py modularization into routes/ directory (~4,800 lines)
 
 ## Key Files
-- `/app/backend/technical_analysis_engine.py` - Core TA math, MTF Confirmer, Tier 1/2 processing
-- `/app/backend/ai_trading_system.py` - Trade evaluation, MTF gates, Momentum bypass, scan orchestration
+- `/app/backend/technical_analysis_engine.py` - Core TA math, MTF Confirmer, confidence scoring (base=35)
+- `/app/backend/ai_trading_system.py` - Trade evaluation (LONG→BUY, SHORT→SELL), MTF gates, Momentum bypass (RelVol>2.5), pre-market safety, trade logging
+- `/app/backend/auto_trade_scheduler.py` - Market session management, scheduler loop
 - `/app/backend/server.py` - FastAPI routes, background tasks
-- `/app/frontend/src/pages/AutoTrade.jsx` - AutoTrade dashboard with MTF/Momentum diagnostics
+- `/app/frontend/src/pages/AutoTrade.jsx` - AutoTrade dashboard with all diagnostics
 
 ## Key API Endpoints
-- `GET /api/auto-trade/scan` - Executes Tiered pipeline, returns candidates + diagnostics
-- `POST /api/auto-trade/refresh-ta` - Triggers background TA data refresh
+- `GET /api/auto-trade/scan` - Tiered pipeline scan with confidence_distribution, momentum_pct, market_session
+- `GET /api/auto-trade/trade-log` - Full trade lifecycle log
+- `POST /api/auto-trade/refresh-ta` - Background TA data refresh
 - `GET /api/auto-trade/settings` - Current threshold settings
 - `POST /api/auth/access` - Verify access code
+
+## Key DB Collections
+- `trade_log` - Comprehensive trade lifecycle (entry/exit/P&L/setup/confidence/reasons/MTF/momentum)
+- `auto_trade_log` - Order execution log
+- `trading_signals`, `investment_signals` - Signal data
+- `settings` - Dynamic thresholds
+- `scheduler_state`, `scheduler_notifications`, `scheduler_execution_log` - Scheduler data
 
 ## Access
 - Access Code: `Bullishalmarkhan7.7`
