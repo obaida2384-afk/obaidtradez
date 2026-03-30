@@ -292,6 +292,11 @@ class AutoTradeScheduler:
                 self._post_cooldown_active = True
                 self._cooldown_until = None
 
+        # Fetch recovery metadata from DB
+        saved_state = await self.db.scheduler_state.find_one({"_id": "config"}, {"_id": 0})
+        last_recovery = saved_state.get("last_auto_recovery") if saved_state else None
+        last_updated = saved_state.get("updated_at") if saved_state else None
+
         return {
             "status": self._status.value,
             "deployment_mode": self._deployment_mode.value,
@@ -311,6 +316,9 @@ class AutoTradeScheduler:
             "post_cooldown_active": self._post_cooldown_active,
             "daily_loss_pct_of_max": self._daily_loss_pct_of_max,
             "api_failure_count": self._api_failure_count,
+            "auto_recovery_enabled": True,
+            "last_auto_recovery": last_recovery,
+            "last_state_save": last_updated,
             "settings": self._scheduler_settings,
         }
 

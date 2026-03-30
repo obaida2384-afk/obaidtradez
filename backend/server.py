@@ -4823,14 +4823,20 @@ async def startup_event():
         
         # Auto-recover scheduler if it was running before restart
         saved_state = await db.scheduler_state.find_one({"_id": "config"})
-        auto_settings = await db.auto_trade_settings.find_one({"_id": "default"})
+        auto_settings = await db.auto_trade_settings.find_one({})
         was_running = saved_state and saved_state.get("status") == "running"
         is_enabled = auto_settings and auto_settings.get("auto_enabled", False)
         
         if was_running or is_enabled:
-            logger.info("AUTO-RECOVERY: Scheduler was running before restart — restarting automatically")
+            logger.info(f"AUTO-RECOVERY: was_running={was_running}, auto_enabled={is_enabled} — restarting scheduler")
             await auto_scheduler.initialize()
             result = await auto_scheduler.start()
+            # Record recovery timestamp
+            await db.scheduler_state.update_one(
+                {"_id": "config"},
+                {"$set": {"last_auto_recovery": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
             logger.info(f"AUTO-RECOVERY: Scheduler restored: {result}")
         
     except Exception as e:

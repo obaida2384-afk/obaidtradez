@@ -902,6 +902,60 @@ const AutoTrade = () => {
 
         {/* SCHEDULER TAB */}
         <TabsContent value="scheduler" className="space-y-4">
+          {/* System Status Dashboard */}
+          <Card className="terminal-card p-4 border border-slate-800" data-testid="system-status-dashboard">
+            <h3 className="text-sm text-white font-medium flex items-center gap-2 mb-3"><Radio className="w-4 h-4 text-emerald-400 animate-pulse" /> System Status</h3>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Scheduler</p>
+                <p className={`text-sm font-bold font-mono ${sch.status === "running" ? "text-emerald-400" : sch.status === "emergency_stop" ? "text-red-400" : "text-slate-400"}`}>
+                  {(sch.status || "OFF").toUpperCase()}
+                </p>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Auto-Recovery</p>
+                <p className={`text-sm font-bold ${sch.auto_recovery_enabled ? "text-emerald-400" : "text-red-400"}`}>
+                  {sch.auto_recovery_enabled ? "ENABLED" : "OFF"}
+                </p>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Deploy Mode</p>
+                <p className="text-sm font-bold text-blue-400 font-mono uppercase">{sch.deployment_mode || "?"}</p>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Market</p>
+                <p className={`text-sm font-bold font-mono ${sch.can_execute ? "text-emerald-400" : "text-amber-400"}`}>
+                  {(sch.market_session || "?").replace("_", " ").toUpperCase()}
+                </p>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Cycles</p>
+                <p className="text-sm font-bold text-white font-mono">{sch.cycle_count || 0}</p>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Execution</p>
+                <p className={`text-sm font-bold ${sch.can_execute ? "text-emerald-400" : "text-slate-400"}`}>
+                  {sch.can_execute ? "ARMED" : "BLOCKED"}
+                </p>
+                <p className="text-[9px] text-slate-600 truncate">{sch.execution_reason || ""}</p>
+              </div>
+            </div>
+            {/* Recovery & Timing Row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <div className="bg-slate-900/50 rounded px-3 py-2 border border-slate-800 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Last Auto-Recovery</span>
+                <span className="text-[10px] text-emerald-400 font-mono">{sch.last_auto_recovery ? new Date(sch.last_auto_recovery).toLocaleString() : "None yet"}</span>
+              </div>
+              <div className="bg-slate-900/50 rounded px-3 py-2 border border-slate-800 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Last State Save</span>
+                <span className="text-[10px] text-slate-300 font-mono">{sch.last_state_save ? new Date(sch.last_state_save).toLocaleString() : "N/A"}</span>
+              </div>
+              <div className="bg-slate-900/50 rounded px-3 py-2 border border-slate-800 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Last DT Scan</span>
+                <span className="text-[10px] text-slate-300 font-mono">{sch.last_dt_scan ? new Date(sch.last_dt_scan).toLocaleString() : "Pending"}</span>
+              </div>
+            </div>
+          </Card>
           {/* Deploy Stages */}
           <Card className="terminal-card p-4">
             <h3 className="text-sm text-white font-medium flex items-center gap-2 mb-3"><Gauge className="w-4 h-4 text-blue-400" /> Deployment Stage</h3>
