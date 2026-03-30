@@ -27,6 +27,12 @@ load_dotenv(ROOT_DIR / '.env')
 # Import enhanced investment engine
 from enhanced_investment_engine import EnhancedInvestmentEngine, convert_to_legacy_format
 
+# Import AI trading system
+from ai_trading_system import (
+    AutoTradeOrchestrator, AutoTradeSettings, StockClassifier,
+    ConfidenceScoringEngine, MarketRegimeDetector
+)
+
 # ===================== CONFIGURATION =====================
 class Config:
     MONGO_URL = os.environ['MONGO_URL']
@@ -4178,6 +4184,63 @@ class PaperExecutionEngine:
         })
 
 paper_execution = PaperExecutionEngine()
+
+# AI Auto-Trade Orchestrator
+auto_orchestrator = AutoTradeOrchestrator(db, api_client, paper_execution)
+
+# ===================== AUTO-TRADE AI ENDPOINTS =====================
+
+@api_router.get("/auto-trade/status")
+async def get_auto_trade_status(auth: bool = Depends(verify_access)):
+    """Get full auto-trade system status"""
+    return await auto_orchestrator.get_status()
+
+@api_router.get("/auto-trade/settings")
+async def get_auto_trade_settings(auth: bool = Depends(verify_access)):
+    """Get auto-trade settings"""
+    settings = await auto_orchestrator.get_settings()
+    return settings.dict()
+
+@api_router.post("/auto-trade/settings")
+async def update_auto_trade_settings(data: Dict, auth: bool = Depends(verify_access)):
+    """Update auto-trade settings"""
+    current = await auto_orchestrator.get_settings()
+    update_data = current.dict()
+    update_data.update({k: v for k, v in data.items() if k in AutoTradeSettings.__fields__})
+    new_settings = AutoTradeSettings(**update_data)
+    return await auto_orchestrator.save_settings(new_settings)
+
+@api_router.post("/auto-trade/toggle")
+async def toggle_auto_trade(enabled: bool, auth: bool = Depends(verify_access)):
+    """Toggle auto-trade ON/OFF"""
+    settings = await auto_orchestrator.get_settings()
+    settings.auto_enabled = enabled
+    await auto_orchestrator.save_settings(settings)
+    return {"auto_enabled": enabled, "message": f"Auto-trading {'ENABLED' if enabled else 'DISABLED'}"}
+
+@api_router.get("/auto-trade/scan")
+async def scan_auto_opportunities(auth: bool = Depends(verify_access)):
+    """Scan for auto-trade opportunities with AI classification"""
+    return await auto_orchestrator.scan_opportunities()
+
+@api_router.post("/auto-trade/execute-cycle")
+async def execute_auto_cycle(background_tasks: BackgroundTasks, auth: bool = Depends(verify_access)):
+    """Execute one auto-trade cycle (scan → classify → risk → execute)"""
+    background_tasks.add_task(auto_orchestrator.execute_auto_cycle)
+    return {"message": "Auto-trade cycle triggered", "status": "processing"}
+
+@api_router.get("/auto-trade/history")
+async def get_auto_trade_history(limit: int = Query(default=50, ge=1, le=200), auth: bool = Depends(verify_access)):
+    """Get auto-trade execution history"""
+    return await auto_orchestrator.get_trade_history(limit)
+
+@api_router.post("/auto-trade/emergency-pause")
+async def emergency_pause(pause: bool = True, auth: bool = Depends(verify_access)):
+    """Emergency pause/resume auto-trading"""
+    settings = await auto_orchestrator.get_settings()
+    settings.emergency_pause = pause
+    await auto_orchestrator.save_settings(settings)
+    return {"emergency_pause": pause, "message": f"Auto-trading {'PAUSED' if pause else 'RESUMED'}"}
 
 # Paper Execution Endpoints
 
