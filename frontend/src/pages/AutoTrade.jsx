@@ -14,7 +14,7 @@ import {
   ArrowUpRight, ArrowDownRight, Loader2, Brain, Lock, Bell,
   CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert, Filter,
   Search, Layers, TriangleAlert, CheckCircle, Database,
-  ArrowUp, ArrowDown, Grid3x3
+  ArrowUp, ArrowDown, Grid3x3, BookOpen
 } from "lucide-react";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
@@ -875,6 +875,7 @@ const AutoTrade = () => {
           <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Bell className="w-4 h-4 mr-1" /> Alerts</TabsTrigger>
           <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Activity className="w-4 h-4 mr-1" /> History</TabsTrigger>
           <TabsTrigger value="settings" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-white"><Settings className="w-4 h-4 mr-1" /> Config</TabsTrigger>
+          <TabsTrigger value="algo-guide" className="data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-400"><BookOpen className="w-4 h-4 mr-1" /> Algorithm Explanation</TabsTrigger>
         </TabsList>
 
         {/* SCHEDULER TAB */}
@@ -1310,6 +1311,176 @@ const AutoTrade = () => {
               <div><label className="text-xs text-slate-500 block mb-1">Max Position: {((s.lt_max_position_pct || 0.15) * 100).toFixed(0)}%</label><Slider value={[(s.lt_max_position_pct || 0.15) * 100]} min={5} max={25} step={1} onValueChange={([v]) => updateSetting("lt_max_position_pct", v / 100)} /></div>
               <div><label className="text-xs text-slate-500 block mb-1">Max Positions: {s.lt_max_positions}</label><Slider value={[s.lt_max_positions || 8]} min={1} max={20} step={1} onValueChange={([v]) => updateSetting("lt_max_positions", v)} /></div>
               <div><label className="text-xs text-slate-500 block mb-1">Trailing Stop: {s.lt_trailing_stop_pct}%</label><Slider value={[s.lt_trailing_stop_pct || 15]} min={5} max={30} step={1} onValueChange={([v]) => updateSetting("lt_trailing_stop_pct", v)} /></div>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* ALGORITHM EXPLANATION TAB */}
+        <TabsContent value="algo-guide" className="space-y-4" data-testid="algo-guide-tab">
+          <h2 className="text-sm text-indigo-400 flex items-center gap-2"><BookOpen className="w-4 h-4" /> Complete Algorithm Explanation & User Guide</h2>
+
+          {/* How the System Works */}
+          <Card className="terminal-card p-5">
+            <h3 className="text-white font-medium text-sm mb-3">How the System Works</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              The AI scans ~1,250 liquid stocks through a <span className="text-cyan-400">Tiered Technical Analysis Pipeline</span>. Tier 1 runs a fast composite score on all stocks. The top candidates advance to Tier 2, where deep multi-timeframe analysis (15m trend, 5m structure, 1m entry timing) determines if a trade is worth taking. Every decision is logged with full transparency — you can see exactly why a trade was taken or rejected.
+            </p>
+          </Card>
+
+          {/* Mode 1: Autonomous */}
+          <Card className="terminal-card p-5 border-emerald-500/10">
+            <h3 className="text-emerald-400 font-medium text-sm mb-3 flex items-center gap-2"><Play className="w-4 h-4" /> MODE 1: Fully Autonomous Trading (Trades While You're Offline)</h3>
+            <div className="space-y-3 text-xs text-slate-400 leading-relaxed">
+              <p>This makes the system scan the market and execute trades <span className="text-white">automatically on a timer</span> during market hours (9:30 AM - 4:00 PM ET).</p>
+
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-2">Step 1 — Go to the Scheduler tab</p>
+                <p>At the top-right, you'll see a green <span className="text-emerald-400">Start</span> button. Before clicking it, configure these settings:</p>
+              </div>
+
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-2">Step 2 — Choose Deployment Stage</p>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="p-2 rounded bg-blue-500/5 border border-blue-500/20"><p className="text-blue-400 font-medium text-[11px]">Paper Trading (recommended)</p><p className="text-[10px] text-slate-500">Simulated orders via Alpaca Paper — no real money.</p></div>
+                  <div className="p-2 rounded bg-slate-500/5 border border-slate-700"><p className="text-slate-300 font-medium text-[11px]">Shadow Mode</p><p className="text-[10px] text-slate-500">Recommends trades but does NOT execute.</p></div>
+                  <div className="p-2 rounded bg-slate-500/5 border border-slate-700"><p className="text-slate-300 font-medium text-[11px]">Limited Live</p><p className="text-[10px] text-slate-500">Executes with smaller position sizes.</p></div>
+                  <div className="p-2 rounded bg-slate-500/5 border border-slate-700"><p className="text-slate-300 font-medium text-[11px]">Full Live</p><p className="text-[10px] text-slate-500">Full execution with normal sizes.</p></div>
+                </div>
+              </div>
+
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-2">Step 3 — Set Scan Intervals</p>
+                <p><span className="text-amber-400">DT interval</span>: How often the system scans for day trades (default: every 5 min).</p>
+                <p><span className="text-blue-400">LT interval</span>: How often it scans for investment setups (default: every 30 min).</p>
+              </div>
+
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-2">Step 4 — Market Session Rules</p>
+                <p><span className="text-amber-400">Pre-Market Execution</span>: OFF by default (recommended). Still scans, but won't execute until 9:30 AM ET.</p>
+                <p><span className="text-amber-400">After-Hours Execution</span>: OFF by default. Scans but won't trade after 4 PM ET.</p>
+              </div>
+
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-2">Step 5 — Safety Controls</p>
+                <p><span className="text-red-400">Max Daily Loss</span>: System auto-pauses if you lose this % in one day (default: 3%).</p>
+                <p><span className="text-red-400">Max Drawdown</span>: Emergency stop if portfolio drops by this % (default: 10%).</p>
+                <p><span className="text-red-400">Loss Cooldown</span>: After X consecutive losses, system pauses for Y minutes (default: 2 losses, 30 min).</p>
+              </div>
+
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-2">Step 6 — Trade Parameters (Config tab)</p>
+                <p><span className="text-amber-400">Day Trading</span>: Confidence threshold (65), risk/trade (4%), max positions (6), TP (2.5%), SL (0.8%).</p>
+                <p><span className="text-blue-400">Long-Term</span>: Confidence threshold (70), max position (15%), trailing stop (15%).</p>
+              </div>
+
+              <div className="p-3 rounded bg-emerald-500/5 border border-emerald-500/20">
+                <p className="text-emerald-400 font-medium mb-1">Step 7 — Click Start</p>
+                <p>The system will scan ~1,250 stocks every 5 min, classify through MTF, execute only high-quality setups, log every trade, and auto-sell at TP/SL. <span className="text-white">You can close the browser.</span> The scheduler runs on the server.</p>
+                <p className="mt-1">To stop: click <span className="text-slate-300">Stop</span> or <span className="text-red-400">Emergency Stop</span>.</p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Mode 2: Manual */}
+          <Card className="terminal-card p-5 border-blue-500/10">
+            <h3 className="text-blue-400 font-medium text-sm mb-3 flex items-center gap-2"><Eye className="w-4 h-4" /> MODE 2: Manual Only (You Decide, System Advises)</h3>
+            <div className="space-y-3 text-xs text-slate-400 leading-relaxed">
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-1">Option A — Shadow Mode (recommended for manual)</p>
+                <p>Set Deployment Stage to <span className="text-blue-400">Shadow Mode</span> and click Start. The system scans on a timer, shows candidates, but executes nothing. You review Day Trades and MTF Heatmap tabs, then trade manually.</p>
+              </div>
+              <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
+                <p className="text-slate-300 font-medium mb-1">Option B — Don't Start the Scheduler</p>
+                <p>Use <span className="text-cyan-400">Scan Now</span> and <span className="text-cyan-400">Refresh TA Data</span> buttons manually whenever you want a fresh scan. Review results in Day Trades / MTF Heatmap / Candidates tabs and trade yourself.</p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Tab Guide */}
+          <Card className="terminal-card p-5">
+            <h3 className="text-white font-medium text-sm mb-3">Tab-by-Tab Guide</h3>
+            <div className="space-y-2 text-xs">
+              {[
+                { tab: "Scheduler", color: "text-emerald-400", desc: "Deployment stage, scan intervals, session rules, safety controls, manual scan/execute buttons." },
+                { tab: "Diagnostics", color: "text-purple-400", desc: "Pipeline funnel (how many stocks passed each filter), MTF stats, confidence distribution, cache performance." },
+                { tab: "Candidates", color: "text-blue-400", desc: "Summary view of all day trade + long-term candidates side by side." },
+                { tab: "Day (N)", color: "text-amber-400", desc: "Full list of day trade candidates with entry/exit plans, reasons, MTF confirmation. Also shows rejected near-misses." },
+                { tab: "Long (N)", color: "text-blue-400", desc: "Long-term investment candidates." },
+                { tab: "MTF Heatmap", color: "text-cyan-400", desc: "Color-coded grid of ALL analyzed stocks showing 15m/5m/1m alignment, confidence, volume, VWAP." },
+                { tab: "Trade Log", color: "text-teal-400", desc: "Every executed trade with entry, SL, TP, P&L, setup type, confidence, and reasons." },
+                { tab: "Alerts", color: "text-amber-400", desc: "System notifications (trade executed, emergency pause, etc.)." },
+                { tab: "History", color: "text-purple-400", desc: "Past execution cycles and their results." },
+                { tab: "Config", color: "text-slate-300", desc: "Tune confidence thresholds, risk %, max positions, TP/SL." },
+              ].map(({ tab, color, desc }) => (
+                <div key={tab} className="flex gap-3 py-1.5 border-b border-slate-800/50 last:border-0">
+                  <span className={`${color} font-medium w-24 shrink-0`}>{tab}</span>
+                  <span className="text-slate-400">{desc}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Badge Reference */}
+          <Card className="terminal-card p-5">
+            <h3 className="text-white font-medium text-sm mb-3">What the Badges Mean</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {[
+                { badge: "PAPER", cls: "border-blue-500/30 text-blue-400 bg-blue-500/10", desc: "Paper trading mode (simulated)" },
+                { badge: "BUY", cls: "border-emerald-500/30 text-emerald-400 bg-emerald-500/10", desc: "Long trade signal (LONG)" },
+                { badge: "SELL", cls: "border-red-500/30 text-red-400 bg-red-500/10", desc: "Short trade signal (SHORT)" },
+                { badge: "MTF OK", cls: "border-cyan-500/30 text-cyan-400", desc: "15m + 5m confirm direction" },
+                { badge: "TF CONFLICT", cls: "border-red-500/40 text-red-400 bg-red-500/10", desc: "Higher timeframe opposes trade" },
+                { badge: "MOMENTUM", cls: "border-orange-500/40 text-orange-400 bg-orange-500/10", desc: "RelVol > 2.5 + breakout" },
+                { badge: "WATCHLIST", cls: "border-amber-500/30 text-amber-400", desc: "Good setup, timing not ready" },
+                { badge: "NEAR_MISS", cls: "border-purple-500/30 text-purple-400", desc: "Close to qualifying" },
+              ].map(({ badge, cls, desc }) => (
+                <div key={badge} className="p-2 rounded bg-slate-800/30">
+                  <Badge variant="outline" className={`text-[10px] mb-1 ${cls}`}>{badge}</Badge>
+                  <p className="text-[10px] text-slate-500">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Quality Filters */}
+          <Card className="terminal-card p-5">
+            <h3 className="text-white font-medium text-sm mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-red-400" /> Strict Quality Filters Applied</h3>
+            <div className="space-y-2 text-xs text-slate-400">
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">15m Trend:</span><span>Ranging 15m = heavy penalty. Rejected unless RelVol &gt; 2 + strong breakout.</span></div>
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">MTF Alignment:</span><span>LONG requires 15m bullish + 5m bullish. SHORT requires 15m bearish + 5m bearish. Ranging does not count.</span></div>
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">Volume:</span><span>RelVol &lt; 1.0 = hard reject. 1.0-1.3 = penalized. &ge; 1.5 = preferred.</span></div>
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">Entry Timing:</span><span>Only executes when 1m timing = entry_ready. Early or weak = watchlist only.</span></div>
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">Spread:</span><span>&gt; 0.5% = rejected. &gt; 0.3% = penalized.</span></div>
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">Pre-Market:</span><span>No execution before 9:30 AM ET. Scan-only mode.</span></div>
+              <div className="flex items-start gap-2"><span className="text-red-400 shrink-0">Momentum Mode:</span><span>RelVol &gt; 2.5, strong breakout candle, clear HH/HL, VWAP aligned, &lt; 2% distance. Cannot bypass MTF or risk rules.</span></div>
+            </div>
+          </Card>
+
+          {/* Quick Start */}
+          <Card className="terminal-card p-5 border-emerald-500/10">
+            <h3 className="text-emerald-400 font-medium text-sm mb-3">Quick-Start Recommendations</h3>
+            <div className="grid md:grid-cols-2 gap-4 text-xs text-slate-400 leading-relaxed">
+              <div className="p-3 rounded bg-emerald-500/5 border border-emerald-500/15">
+                <p className="text-emerald-400 font-medium mb-2">Just Starting?</p>
+                <ol className="space-y-1 list-decimal list-inside">
+                  <li>Keep <span className="text-white">Paper Trading</span> mode</li>
+                  <li>Click <span className="text-emerald-400">Start</span></li>
+                  <li>Leave intervals at default (5 min DT, 30 min LT)</li>
+                  <li>Keep pre-market and after-hours OFF</li>
+                  <li>Check <span className="text-amber-400">Day Trades</span> and <span className="text-teal-400">Trade Log</span> tabs daily</li>
+                  <li>After a week, review win rate before considering real money</li>
+                </ol>
+              </div>
+              <div className="p-3 rounded bg-blue-500/5 border border-blue-500/15">
+                <p className="text-blue-400 font-medium mb-2">Want Manual Control?</p>
+                <ol className="space-y-1 list-decimal list-inside">
+                  <li>Set to <span className="text-white">Shadow Mode</span></li>
+                  <li>Click <span className="text-emerald-400">Start</span> (scans but won't execute)</li>
+                  <li>Check <span className="text-cyan-400">MTF Heatmap</span> for visual overview</li>
+                  <li>Check <span className="text-amber-400">Day Trades</span> for specific recommendations</li>
+                  <li>Execute trades yourself through your broker</li>
+                </ol>
+              </div>
             </div>
           </Card>
         </TabsContent>
