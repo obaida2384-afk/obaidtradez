@@ -1619,7 +1619,13 @@ class AutoTradeOrchestrator:
             "day_trades": day_trade_candidates[:20],
             "long_term": long_term_candidates[:20],
             "watchlist": sorted(watchlist, key=lambda x: x.get("confidence", 0), reverse=True)[:30],
-            "rejected_details": sorted(rejected, key=lambda x: x.get("confidence", 0), reverse=True)[:30],
+            "rejected_details": sorted(
+                [r for r in rejected if r.get("classification") == "DAY_TRADE"],
+                key=lambda x: x.get("confidence", 0), reverse=True
+            )[:20] + sorted(
+                [r for r in rejected if r.get("classification") != "DAY_TRADE"],
+                key=lambda x: x.get("confidence", 0), reverse=True
+            )[:15],
             "stats": {
                 "total_scanned": len(all_symbols),
                 "ta_analyzed": len(ta_results),
