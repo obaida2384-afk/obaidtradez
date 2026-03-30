@@ -664,6 +664,15 @@ const AutoTrade = () => {
     return () => clearInterval(interval);
   }, [fetchStatus, fetchScheduler, fetchOpportunities, fetchHistory]);
 
+  // Auto-refresh trade log and analytics when those tabs are active
+  useEffect(() => {
+    if (activeTab !== "trade-log" && activeTab !== "analytics") return;
+    const fn = activeTab === "trade-log" ? fetchTradeLog : fetchAnalytics;
+    fn(); // fetch immediately on tab switch
+    const interval = setInterval(fn, 30000); // refresh every 30s
+    return () => clearInterval(interval);
+  }, [activeTab, fetchTradeLog, fetchAnalytics]);
+
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
