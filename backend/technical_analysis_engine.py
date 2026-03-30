@@ -801,12 +801,12 @@ class MultiTimeframeConfirmer:
 
 class MTFClassifier:
     """Classify stocks into MTF categories using the same data as MultiTimeframeConfirmer.
-    Categories:
-    - BULLISH_ALIGNED: 15m bullish/neutral + 5m bullish + 1m supportive
-    - BEARISH_ALIGNED: 15m bearish/neutral + 5m bearish + 1m supportive
+    STRICT alignment definition:
+    - BULLISH_ALIGNED: 15m=bullish AND 5m=bullish (ranging NOT counted as aligned)
+    - BEARISH_ALIGNED: 15m=bearish AND 5m=bearish (ranging NOT counted as aligned)
     - MOMENTUM_CANDIDATE: aligned + RelVol>2.5 + breakout setup
-    - NEAR_MISS: partially aligned, close to qualifying
-    - MIXED: some timeframes disagree but not fully conflicting
+    - NEAR_MISS: partially aligned, close to qualifying (e.g. one TF ranging)
+    - MIXED: some timeframes disagree / low quality
     - CONFLICT: 5m or 15m directly oppose the trade direction
     """
 
@@ -841,19 +841,36 @@ class MTFClassifier:
         else:
             timing_status = "early"
 
+        # STRICT alignment: both 5m AND 15m must be directionally matching (not just ranging)
+        strict_bullish = s15 == "bullish" and s5 == "bullish" and direction == "LONG"
+        strict_bearish = s15 == "bearish" and s5 == "bearish" and direction == "SHORT"
+        is_strict_aligned = strict_bullish or strict_bearish
+
+        # Near-miss: one timeframe is ranging but the other is directional
+        near_bullish = direction == "LONG" and (
+            (s15 == "bullish" and s5 == "ranging") or
+            (s15 == "ranging" and s5 == "bullish")
+        )
+        near_bearish = direction == "SHORT" and (
+            (s15 == "bearish" and s5 == "ranging") or
+            (s15 == "ranging" and s5 == "bearish")
+        )
+        is_near_aligned = near_bullish or near_bearish
+
         # Classify
         if tf_conflict:
             category = "CONFLICT"
-        elif aligned and momentum:
+        elif is_strict_aligned and momentum:
             category = "MOMENTUM_CANDIDATE"
-        elif aligned and direction == "LONG" and s5 in ("bullish", "ranging") and s15 in ("bullish", "ranging"):
-            category = "BULLISH_ALIGNED"
-        elif aligned and direction == "SHORT" and s5 in ("bearish", "ranging") and s15 in ("bearish", "ranging"):
-            category = "BEARISH_ALIGNED"
-        elif not aligned and not tf_conflict:
-            # Partial alignment = near miss or mixed
-            mtf_score = mtf.get("score", 0)
-            if mtf_score >= 2 and confidence >= 55:
+        elif is_strict_aligned:
+            category = "BULLISH_ALIGNED" if direction == "LONG" else "BEARISH_ALIGNED"
+        elif is_near_aligned and confidence >= 60:
+            category = "NEAR_MISS"
+        elif is_near_aligned:
+            category = "MIXED"
+        elif aligned and not is_strict_aligned:
+            # Was "aligned" by old logic (ranging counted), but not strict — downgrade
+            if confidence >= 55 and rel_vol >= 1.5:
                 category = "NEAR_MISS"
             else:
                 category = "MIXED"
@@ -955,29 +972,55 @@ class TechnicalSignalGenerator:
                 setup_boost = min(best_setup["confidence_boost"], 18)
                 base_confidence += setup_boost
 
-            # MTF scoring: aligned = 5m+15m supportive
-            if mtf["aligned"]:
-                base_confidence += 10  # Full alignment
+            # === STRICT 15m TREND FILTER ===
+            struct_15m = mtf.get("struct_15m", "unknown")
+            is_15m_ranging = struct_15m in ("ranging", "unknown")
+
+            # MTF scoring: STRICT alignment = 5m+15m both directionally supportive
+            if mtf["aligned"] and not is_15m_ranging:
+                # True alignment: 15m is directionally bullish/bearish
+                base_confidence += 12
                 if mtf.get("timing_1m_aligned"):
                     base_confidence += 3  # All 3 timeframes aligned
+            elif mtf["aligned"] and is_15m_ranging:
+                # 15m is ranging — significantly reduce unless strong breakout volume
+                if indicators["rel_vol"] >= 2.0 and best_setup and best_setup.get("type", "") in (
+                    "breakout_long", "breakdown_short"
+                ):
+                    base_confidence += 5  # Allow with reduced boost
+                else:
+                    base_confidence += 0  # No boost for ranging 15m
+                    base_confidence -= 8  # Heavy penalty
             elif mtf["score"] >= 2:
-                base_confidence += 4  # Partial alignment
+                base_confidence += 2  # Partial alignment, minimal boost
             # Hard penalty: timeframe conflict (5m or 15m opposing direction)
             if mtf.get("has_tf_conflict"):
-                base_confidence -= 18
+                base_confidence -= 20
             # Soft penalty: 1m conflicts with higher timeframes
             if mtf.get("has_1m_conflict"):
                 base_confidence -= 6
 
-            # Volume (max +6)
+            # Volume: STRICT FILTER
+            # RelVol < 1.0 → hard reject (handled in evaluate_buy, but penalize here too)
             if indicators["rel_vol"] >= 2.5:
                 base_confidence += 6
             elif indicators["rel_vol"] >= 2.0:
                 base_confidence += 4
+            elif indicators["rel_vol"] >= 1.5:
+                base_confidence += 3  # Preferred tier
             elif indicators["rel_vol"] >= 1.3:
-                base_confidence += 2
-            elif indicators["rel_vol"] < 1.0:
-                base_confidence -= 3  # Penalty for borderline RelVol
+                base_confidence += 1
+            elif indicators["rel_vol"] >= 1.0:
+                base_confidence -= 4  # Penalize 1.0-1.3
+            else:
+                base_confidence -= 10  # Heavy penalty for < 1.0
+
+            # 1m Timing penalty in confidence scoring
+            if not mtf.get("timing_1m_aligned"):
+                if mtf.get("has_1m_conflict"):
+                    base_confidence -= 4  # Weak timing
+                else:
+                    base_confidence -= 2  # Early timing (not entry ready)
 
             # RSI context (max +3)
             rsi = indicators["rsi"]
@@ -1003,10 +1046,10 @@ class TechnicalSignalGenerator:
             elif structure["structure"] == "bearish" and direction == "SHORT":
                 base_confidence += 5
             elif structure["structure"] == "ranging":
-                base_confidence += 1  # Neutral
+                base_confidence -= 2  # Ranging structure is now a penalty
             else:
                 # Structure opposes direction
-                base_confidence -= 5
+                base_confidence -= 6
 
             # R:R ratio bonus (max +4)
             rr_prelim = 0
@@ -1231,7 +1274,7 @@ class TechnicalSignalGenerator:
                 elif indicators.get("ema_bearish") and indicators.get("rsi", 50) < 50:
                     direction = "SHORT"
 
-            # Confidence scoring (RECALIBRATED: base=35, wider distribution)
+            # Confidence scoring (RECALIBRATED: base=35, stricter with 15m/volume/timing)
             base_confidence = 35
             if best_setup:
                 base_confidence += min(best_setup.get("confidence_boost", 0), 18)
@@ -1240,10 +1283,14 @@ class TechnicalSignalGenerator:
                 base_confidence += 6
             elif rel_vol >= 2.0:
                 base_confidence += 4
+            elif rel_vol >= 1.5:
+                base_confidence += 3
             elif rel_vol >= 1.3:
-                base_confidence += 2
-            elif rel_vol < 1.0:
-                base_confidence -= 3
+                base_confidence += 1
+            elif rel_vol >= 1.0:
+                base_confidence -= 4
+            else:
+                base_confidence -= 10  # Hard penalty < 1.0
             rsi = indicators.get("rsi", 50)
             if 40 <= rsi <= 60:
                 base_confidence += 3
@@ -1254,15 +1301,15 @@ class TechnicalSignalGenerator:
                 base_confidence += 4
             elif macd.get("crossover") == "bearish" and direction == "SHORT":
                 base_confidence += 4
-            # Structure alignment
+            # Structure alignment (strict)
             if structure.get("structure") == "bullish" and direction == "LONG":
                 base_confidence += 5
             elif structure.get("structure") == "bearish" and direction == "SHORT":
                 base_confidence += 5
             elif structure.get("structure") == "ranging":
-                base_confidence += 1
+                base_confidence -= 2  # Ranging is now a penalty
             else:
-                base_confidence -= 5
+                base_confidence -= 6
             if fake:
                 base_confidence -= 22
             if overextended:

@@ -923,18 +923,26 @@ class DayTradingEngine:
         spread = indicators.get("spread_pct", 0)
         if spread > 0.5:
             reject_reasons.append(f"Spread too wide: {spread:.2f}% (max 0.5%)")
+        elif spread > 0.3:
+            reject_reasons.append(f"Spread elevated: {spread:.2f}% (penalized)")
 
-        # 4. RelVol filter (>= 1.3, Momentum Mode bypasses to 1.0)
+        # 4. Volume filter — STRICT
+        # RelVol < 1.0 → HARD REJECT (never bypassed)
+        # RelVol 1.0-1.3 → PENALIZE
+        # RelVol >= 1.5 → PREFERRED
         rel_vol = indicators.get("rel_vol", 0)
+        if rel_vol < 1.0:
+            reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (min 1.0x, HARD REJECT)")
+        elif rel_vol < 1.3 and not momentum_mode:
+            reject_reasons.append(f"RelVol weak: {rel_vol:.1f}x (min 1.3x preferred)")
         if momentum_mode:
-            # Momentum mode: relaxed RelVol (already guaranteed >= 2.5)
             entry_reasons.append(f"MOMENTUM MODE: RelVol {rel_vol:.1f}x (explosive volume)")
-        elif rel_vol < 1.3:
-            reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (min 1.3x)")
         if rel_vol >= 2.5:
             entry_reasons.append(f"Strong volume surge: {rel_vol:.1f}x")
         elif rel_vol >= 2.0:
             entry_reasons.append(f"Elevated volume: {rel_vol:.1f}x")
+        elif rel_vol >= 1.5:
+            entry_reasons.append(f"Preferred volume: {rel_vol:.1f}x")
 
         # 5. Overextension check — Momentum Mode does NOT bypass this
         if ta_signal.get("overextended"):
@@ -959,30 +967,50 @@ class DayTradingEngine:
         elif direction == "SHORT" and struct_type == "bearish":
             entry_reasons.append("Bearish market structure (LH+LL)")
         elif struct_type == "ranging":
-            entry_reasons.append("Ranging structure (breakout potential)")
+            reject_reasons.append("Ranging structure (low quality)")
 
         # === MULTI-TIMEFRAME CONFIRMATION (STRICT GATE) ===
         mtf_aligned = mtf.get("aligned", False)
         has_tf_conflict = mtf.get("has_tf_conflict", False)
         has_1m_conflict = mtf.get("has_1m_conflict", False)
         mtf_reject_reasons = mtf.get("reject_reasons", [])
+        struct_15m = mtf.get("struct_15m", "unknown")
+        is_15m_ranging = struct_15m in ("ranging", "unknown")
 
-        if mtf_aligned:
+        # STRICT 15m Trend Filter
+        if is_15m_ranging:
+            if rel_vol >= 2.0 and best_setup and best_setup.get("type", "") in (
+                "breakout_long", "breakdown_short"
+            ):
+                entry_reasons.append(f"15m ranging BUT strong breakout + RelVol {rel_vol:.1f}x (exception)")
+            else:
+                reject_reasons.append(f"15m trend is ranging (low conviction, no strong breakout volume)")
+                confidence -= 5
+
+        if mtf_aligned and not is_15m_ranging:
             entry_reasons.append(f"MTF aligned: 5m+15m confirm {direction} ({mtf.get('score', 0)}/{mtf.get('max', 5)})")
             if mtf.get("timing_1m_aligned"):
                 entry_reasons.append("1m timing confirms entry")
+        elif mtf_aligned and is_15m_ranging:
+            entry_reasons.append(f"MTF partial: 5m supports {direction}, 15m ranging ({mtf.get('score', 0)}/{mtf.get('max', 5)})")
         elif has_tf_conflict and not momentum_mode:
-            # HARD REJECT: 5m or 15m opposing direction (not bypassed by Momentum Mode)
             for r in mtf_reject_reasons:
                 reject_reasons.append(f"MTF CONFLICT: {r}")
         elif has_tf_conflict and momentum_mode:
-            # Momentum Mode does NOT bypass timeframe conflict
             for r in mtf_reject_reasons:
                 reject_reasons.append(f"MTF CONFLICT: {r} (not bypassed by Momentum Mode)")
 
-        # 1m conflict: soft downgrade (not a hard reject)
+        # 1m conflict: soft downgrade
         if has_1m_conflict:
             reject_reasons.append(f"1m timing conflicts with {direction} direction (soft downgrade)")
+
+        # === ENTRY TIMING GATE ===
+        # Only execute when 1m timing = "entry_ready"
+        # early or weak → watchlist / near-miss, DO NOT execute
+        timing_1m_aligned = mtf.get("timing_1m_aligned", False)
+        timing_status = "entry_ready" if timing_1m_aligned else ("weak" if has_1m_conflict else "early")
+        if not timing_1m_aligned:
+            reject_reasons.append(f"1m timing not entry-ready ({timing_status}) — watchlist only")
 
         # 10. RSI context
         rsi = indicators.get("rsi", 50)
@@ -1038,12 +1066,17 @@ class DayTradingEngine:
         positive_action = "BUY" if direction == "LONG" else "SELL"
 
         # Hard filter rejects (never bypassed, even by momentum mode)
-        hard_reject_keywords = ["spread too wide", "overextended", "mtf conflict"]
+        hard_reject_keywords = ["spread too wide", "overextended", "mtf conflict",
+                                "relvol too low", "hard reject"]
         hard_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in hard_reject_keywords)]
 
         # Soft rejects (can be bypassed by momentum mode)
-        soft_reject_keywords = ["relvol too low", "poor r:r", "1m timing conflicts"]
+        soft_reject_keywords = ["relvol weak", "poor r:r", "1m timing conflicts",
+                                "spread elevated", "ranging structure"]
         soft_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in soft_reject_keywords)]
+
+        # Entry timing gate rejects (force watchlist, not hard reject)
+        timing_rejects = [r for r in reject_reasons if "not entry-ready" in r.lower()]
 
         # Filter out soft rejects if momentum mode is active
         effective_rejects = reject_reasons.copy()
@@ -1055,6 +1088,11 @@ class DayTradingEngine:
             explanation.reject_reasons = reject_reasons
         elif len(effective_rejects) >= 3:
             explanation.action = "REJECT"
+            explanation.reject_reasons = reject_reasons
+        elif timing_rejects and not momentum_bypass_active:
+            # 1m not entry-ready → WATCHLIST (do not execute, but keep visible)
+            explanation.action = "WATCHLIST"
+            explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
         elif len(entry_reasons) >= 2 and len(effective_rejects) <= 1:
             explanation.action = positive_action
@@ -1102,6 +1140,8 @@ class DayTradingEngine:
             "mtf_15m": mtf.get("struct_15m", "?"),
             "mtf_1m": mtf.get("timing_1m", "?"),
             "has_tf_conflict": has_tf_conflict,
+            "is_15m_ranging": is_15m_ranging,
+            "timing_status": timing_status,
             "momentum_mode": momentum_mode,
             "momentum_bypass_active": momentum_bypass_active,
             "news_boost": news_boost,
