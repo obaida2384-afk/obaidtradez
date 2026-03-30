@@ -26,12 +26,16 @@ class TACache:
     """In-memory cache with TTL to avoid redundant Polygon API calls within a cycle"""
     _cache: Dict[str, Dict] = {}
     _ttl: int = 300  # 5 minutes
+    _hits: int = 0
+    _misses: int = 0
 
     @classmethod
     def get(cls, symbol: str) -> Optional[Dict]:
         entry = cls._cache.get(symbol)
         if entry and (time.time() - entry["ts"]) < cls._ttl:
+            cls._hits += 1
             return entry["data"]
+        cls._misses += 1
         return None
 
     @classmethod
@@ -41,6 +45,47 @@ class TACache:
     @classmethod
     def clear(cls):
         cls._cache.clear()
+        cls._hits = 0
+        cls._misses = 0
+
+    @classmethod
+    def stats(cls) -> Dict:
+        now = time.time()
+        valid = sum(1 for e in cls._cache.values() if (now - e["ts"]) < cls._ttl)
+        total_req = cls._hits + cls._misses
+        return {
+            "total": len(cls._cache), "valid": valid,
+            "hits": cls._hits, "misses": cls._misses,
+            "hit_rate": round(cls._hits / total_req * 100, 1) if total_req > 0 else 0,
+        }
+
+    @classmethod
+    def reset_counters(cls):
+        cls._hits = 0
+        cls._misses = 0
+
+
+class BarCache:
+    """Timeframe-aware cache for raw Polygon bar data (2-min TTL)."""
+    _cache: Dict[str, Dict] = {}
+    _ttl: int = 120  # 2 minutes
+
+    @classmethod
+    def key(cls, symbol: str, timespan: str, multiplier: int) -> str:
+        return f"{symbol}:{timespan}:{multiplier}"
+
+    @classmethod
+    def get(cls, symbol: str, timespan: str, multiplier: int) -> Optional[List[Dict]]:
+        k = cls.key(symbol, timespan, multiplier)
+        entry = cls._cache.get(k)
+        if entry and (time.time() - entry["ts"]) < cls._ttl:
+            return entry["data"]
+        return None
+
+    @classmethod
+    def set(cls, symbol: str, timespan: str, multiplier: int, data: List[Dict]):
+        k = cls.key(symbol, timespan, multiplier)
+        cls._cache[k] = {"data": data, "ts": time.time()}
 
     @classmethod
     def stats(cls) -> Dict:
@@ -65,26 +110,30 @@ class PolygonDataFetcher:
                     if resp.status_code == 200:
                         return resp.json()
                     if resp.status_code == 429:
-                        wait = (attempt + 1) * 15
-                        logger.warning(f"Polygon 429 rate limit, retrying in {wait}s (attempt {attempt+1}/3)")
+                        wait = (attempt + 1) * 5  # Starter plan: shorter waits
+                        logger.warning(f"Polygon 429, retrying in {wait}s (attempt {attempt+1}/3)")
                         await asyncio.sleep(wait)
                         continue
                     if resp.status_code == 403:
-                        logger.debug(f"Polygon 403 (endpoint requires paid plan): {url.split('?')[0]}")
+                        logger.debug(f"Polygon 403: {url.split('?')[0]}")
                         return None
                     logger.warning(f"Polygon {resp.status_code}: {url.split('?')[0]}")
             except Exception as e:
                 logger.warning(f"Polygon fetch error: {e}")
                 if attempt < 2:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1)
         return None
 
     @staticmethod
     async def get_bars(symbol: str, timespan: str = "minute",
                        multiplier: int = 5, limit: int = 100) -> List[Dict]:
-        """Fetch OHLCV bars. timespan: minute, hour, day. multiplier: 1,5,15"""
+        """Fetch OHLCV bars with bar-level caching. timespan: minute, hour, day."""
+        # Check bar cache first
+        cached = BarCache.get(symbol, timespan, multiplier)
+        if cached is not None:
+            return cached
+
         now = datetime.now(timezone.utc)
-        # For intraday, use today; for daily, use last 6 months
         if timespan == "day":
             from_date = (now - timedelta(days=180)).strftime("%Y-%m-%d")
             to_date = now.strftime("%Y-%m-%d")
@@ -97,6 +146,7 @@ class PolygonDataFetcher:
             {"apiKey": POLYGON_KEY, "limit": limit, "sort": "asc", "adjusted": "true"}
         )
         if not data or data.get("resultsCount", 0) == 0:
+            BarCache.set(symbol, timespan, multiplier, [])
             return []
         results = data.get("results", [])
         bars = []
@@ -107,6 +157,7 @@ class PolygonDataFetcher:
                 "v": r.get("v", 0), "t": r.get("t", 0),
                 "vw": r.get("vw", 0),
             })
+        BarCache.set(symbol, timespan, multiplier, bars)
         return bars
 
     @staticmethod
@@ -794,8 +845,8 @@ class TechnicalSignalGenerator:
             return None
 
     @staticmethod
-    async def batch_analyze(symbols: List[str], max_concurrent: int = 3) -> List[Dict]:
-        """Analyze multiple symbols with controlled concurrency and rate limiting"""
+    async def batch_analyze(symbols: List[str], max_concurrent: int = 8) -> List[Dict]:
+        """Tier 2: Full multi-timeframe analysis. Starter plan concurrency."""
         results = []
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -804,7 +855,7 @@ class TechnicalSignalGenerator:
                 r = await TechnicalSignalGenerator.analyze(sym)
                 if r:
                     results.append(r)
-                await asyncio.sleep(0.5)  # Rate limit courtesy
+                await asyncio.sleep(0.15)
 
         tasks = [_analyze_one(s) for s in symbols]
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -941,15 +992,90 @@ class TechnicalSignalGenerator:
             return None
 
     @staticmethod
-    async def batch_analyze_fast(symbols: List[str], max_concurrent: int = 1) -> List[Dict]:
-        """Analyze with 1 API call per stock. Strictly rate-limited (max ~4 calls/min for Polygon free)."""
+    async def batch_analyze_fast(symbols: List[str], max_concurrent: int = 10) -> List[Dict]:
+        """Tier 1: Fast scan (5-min bars only). Starter plan: high concurrency."""
         results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-        for sym in symbols:
-            r = await TechnicalSignalGenerator.analyze_fast(sym)
-            if r:
-                results.append(r)
-            await asyncio.sleep(13)  # 60s / 5 calls = 12s min, use 13s for safety
+        async def _analyze_one(sym):
+            async with semaphore:
+                r = await TechnicalSignalGenerator.analyze_fast(sym)
+                if r:
+                    results.append(r)
+                await asyncio.sleep(0.1)
 
+        tasks = [_analyze_one(s) for s in symbols]
+        await asyncio.gather(*tasks, return_exceptions=True)
         results.sort(key=lambda x: x.get("confidence", 0), reverse=True)
         return results
+
+    @staticmethod
+    def compute_tier1_score(ta_result: Dict) -> float:
+        """Composite prefilter score for ranking Tier 1 candidates.
+        Ranks by a blend of technical quality signals, not volume alone."""
+        score = 0.0
+        indicators = ta_result.get("indicators", {})
+        structure = ta_result.get("structure", {})
+
+        # Relative volume (0-25 pts)
+        rv = indicators.get("rel_vol", 0)
+        if rv >= 2.0:
+            score += 25
+        elif rv >= 1.5:
+            score += 18
+        elif rv >= 1.3:
+            score += 12
+        elif rv >= 0.8:
+            score += 5
+
+        # Intraday range expansion (0-20 pts)
+        avg_range = indicators.get("avg_range", 0)
+        price = ta_result.get("price", 1)
+        if price > 0 and avg_range > 0:
+            range_pct = avg_range / price * 100
+            if range_pct >= 2.0:
+                score += 20
+            elif range_pct >= 1.0:
+                score += 14
+            elif range_pct >= 0.5:
+                score += 8
+
+        # Distance from VWAP — closer is better for entries (0-15 pts)
+        vwap_dist = abs(indicators.get("vwap_distance_pct", 0))
+        if 0 < vwap_dist <= 0.5:
+            score += 15  # Very close to VWAP — ideal
+        elif vwap_dist <= 1.0:
+            score += 10
+        elif vwap_dist <= 2.0:
+            score += 5
+
+        # Setup presence / breakout proximity (0-20 pts)
+        if ta_result.get("best_setup"):
+            boost = ta_result["best_setup"].get("confidence_boost", 0)
+            score += min(boost, 20)
+
+        # Spread quality (0-10 pts) — tighter is better
+        spread = indicators.get("spread_pct", 1)
+        if spread <= 0.1:
+            score += 10
+        elif spread <= 0.3:
+            score += 7
+        elif spread <= 0.5:
+            score += 4
+
+        # Structure clarity (0-10 pts)
+        struct = structure.get("structure", "ranging")
+        if struct in ("bullish", "bearish"):
+            score += 10
+        elif struct == "ranging":
+            score += 3
+
+        # Penalties
+        if ta_result.get("overextended"):
+            score -= 20
+        if ta_result.get("fake_breakout"):
+            score -= 15
+        if indicators.get("spread_pct", 0) > 0.5:
+            score -= 10
+
+        return round(max(0, score), 1)

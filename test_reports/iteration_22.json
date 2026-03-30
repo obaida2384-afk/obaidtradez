@@ -1,0 +1,153 @@
+{
+  "summary": "Completed comprehensive testing of Tiered TA Pipeline (Starter Plan Upgrade). All 13 backend API tests passed. All frontend UI components verified working correctly. The upgrade implements a two-tier technical analysis pipeline: Tier 1 fast scan (80 stocks, 5-min bars, composite prefilter score) and Tier 2 deep analysis (top 20, full multi-timeframe).",
+  
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "passed_tests": [
+    "Backend: GET /api/auto-trade/scan returns timing object with total_cycle_sec, tier1_scan_sec, tier2_scan_sec - SUCCESS",
+    "Backend: GET /api/auto-trade/scan timing includes tier1_symbols, tier1_results, tier1_passed, tier1_rejected_early - SUCCESS",
+    "Backend: GET /api/auto-trade/scan timing includes tier2_symbols, tier2_results - SUCCESS",
+    "Backend: GET /api/auto-trade/scan timing includes ta_cache with hit_rate percentage - SUCCESS",
+    "Backend: GET /api/auto-trade/scan timing includes bar_cache stats - SUCCESS",
+    "Backend: GET /api/auto-trade/scan stats includes ta_analyzed, tier1_passed, tier2_deep, setups_found, filters_passed - SUCCESS",
+    "Backend: Tier 1 analyzes ~70+ stocks (up to 80 max) - SUCCESS (70 analyzed from 80 symbols)",
+    "Backend: Tier 1 completes in under 10 seconds - SUCCESS (0.8s observed)",
+    "Backend: Tier 2 deep analyzes top ~20 stocks - SUCCESS (20 symbols, 20 results)",
+    "Backend: Second scan within 5 min shows higher cache hit rate - SUCCESS (90% hit rate observed)",
+    "Backend: POST /api/auto-trade/refresh-ta triggers and returns db_cached count - SUCCESS",
+    "Backend: Pipeline funnel has all 8 stages (universe_scanned, prefilter_passed, ta_analyzed, setup_found, filters_passed, confidence_passed, risk_approved, executed) - SUCCESS",
+    "Backend: Day trade candidates have tier1_score and analysis_mode fields - SUCCESS",
+    "Frontend: AutoTrade page renders with data-testid='auto-trade-page' - SUCCESS",
+    "Frontend: AutoTrade page shows PAPER deploy mode badge - SUCCESS",
+    "Frontend: AutoTrade page shows CAUTIOUS risk mode badge - SUCCESS",
+    "Frontend: AutoTrade page shows NEUTRAL BEARISH | Vol: 14.8% regime badge - SUCCESS",
+    "Frontend: AutoTrade page has 'Refresh TA Data' button - SUCCESS",
+    "Frontend: AutoTrade page Diagnostics tab shows 'Tiered TA Pipeline Diagnostics' card - SUCCESS",
+    "Frontend: AutoTrade page Diagnostics tab shows T1 Fast Scan, T1 Passed, T2 Deep, Total Cycle columns - SUCCESS",
+    "Frontend: AutoTrade page Diagnostics tab shows cache stats (90% hit rate, 127 bar cache entries) - SUCCESS",
+    "Frontend: AutoTrade page Candidates tab shows stats bar with T1 Analyzed, T2 Deep columns - SUCCESS",
+    "Frontend: AutoTrade page Day Trades tab shows candidates with direction, setup, tier1_score - SUCCESS",
+    "Frontend: AutoTrade page Pipeline Funnel shows all 8 stages with counts - SUCCESS"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/tests/test_tiered_ta_pipeline.py",
+    "/app/test_reports/pytest/pytest_tiered_ta_pipeline.xml"
+  ],
+  
+  "action_items": [],
+  
+  "critical_code_review_comments": [
+    "Tiered TA Pipeline correctly implements two-tier analysis: Tier 1 fast scan (80 stocks, 5-min bars only) and Tier 2 deep analysis (top 20, full multi-timeframe)",
+    "Tier 1 composite prefilter score (compute_tier1_score) correctly uses: rel_vol (0-25pts), range expansion (0-20pts), VWAP distance (0-15pts), setup presence (0-20pts), spread quality (0-10pts), structure clarity (0-10pts)",
+    "Tier 1 early rejections correctly filter: wide_spread, illiquid, overextended, no_signal",
+    "TACache correctly tracks hit_rate percentage with hits/misses counters",
+    "BarCache is timeframe-aware with key format: symbol:timespan:multiplier",
+    "Timing object correctly includes all required fields: total_cycle_sec, tier1_scan_sec, tier2_scan_sec, tier1_symbols, tier1_results, tier1_passed, tier1_rejected_early, tier2_symbols, tier2_results, ta_cache, bar_cache",
+    "Stats object correctly includes: ta_analyzed, tier1_passed, tier2_deep, setups_found, filters_passed",
+    "Day trade candidates correctly include tier1_score and analysis_mode fields",
+    "Frontend correctly displays Tiered TA Pipeline Diagnostics card with T1 Fast Scan, T1 Passed, T2 Deep, DT Candidates, Total Cycle",
+    "Frontend stats bar correctly shows T1 Analyzed and T2 Deep columns"
+  ],
+  
+  "updated_files": [
+    "/app/backend/tests/test_tiered_ta_pipeline.py"
+  ],
+  
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (all UI components verified)"
+  },
+  
+  "test_credentials": {
+    "access_code": "Bullishalmarkhan7.7"
+  },
+  
+  "seed_data_creation": "None required - using live market data from Polygon API and cached TA signals in MongoDB",
+  
+  "retest_needed": false,
+  
+  "should_main_agent_self_test": false,
+  
+  "context_for_next_testing_agent": "Tiered TA Pipeline (Starter Plan Upgrade) fully tested. Key features verified: 1) Timing object has all required fields: total_cycle_sec, tier1_scan_sec, tier2_scan_sec, tier1_symbols, tier1_results, tier1_passed, tier1_rejected_early, tier2_symbols, tier2_results, ta_cache, bar_cache. 2) Stats include ta_analyzed, tier1_passed, tier2_deep, setups_found, filters_passed. 3) Tier 1 fast scan processes 80 stocks in ~0.8s using 5-min bars only. 4) Tier 2 deep analysis processes top 20 stocks with full multi-timeframe. 5) Cache hit rate reaches 90% on second scan. 6) Day trade candidates have tier1_score and analysis_mode fields. 7) Frontend shows Tiered TA Pipeline Diagnostics card with T1 Fast Scan, T1 Passed, T2 Deep, Total Cycle columns. 8) Frontend stats bar shows T1 Analyzed and T2 Deep columns.",
+  
+  "verified_features": {
+    "tiered_ta_pipeline": {
+      "tier1_fast_scan": {
+        "max_symbols": 80,
+        "concurrency": 10,
+        "timeframe": "5-min bars only",
+        "observed_duration": "0.8s",
+        "observed_results": 70
+      },
+      "tier2_deep_analysis": {
+        "max_symbols": 20,
+        "concurrency": 8,
+        "timeframe": "full multi-timeframe (1m, 5m, 15m, daily)",
+        "observed_duration": "0.5s",
+        "observed_results": 20
+      },
+      "tier1_composite_score": {
+        "rel_vol": "0-25 pts",
+        "range_expansion": "0-20 pts",
+        "vwap_distance": "0-15 pts",
+        "setup_presence": "0-20 pts",
+        "spread_quality": "0-10 pts",
+        "structure_clarity": "0-10 pts",
+        "penalties": "overextension, fake_breakout, wide_spread"
+      },
+      "tier1_early_rejections": ["wide_spread", "illiquid", "overextended", "no_signal"]
+    },
+    "timing_object_fields": [
+      "total_cycle_sec",
+      "tier1_scan_sec",
+      "tier2_scan_sec",
+      "tier1_symbols",
+      "tier1_results",
+      "tier1_passed",
+      "tier1_rejected_early",
+      "tier2_symbols",
+      "tier2_results",
+      "ta_cache",
+      "bar_cache"
+    ],
+    "stats_fields": [
+      "ta_analyzed",
+      "tier1_passed",
+      "tier2_deep",
+      "setups_found",
+      "filters_passed",
+      "day_trade_candidates",
+      "long_term_candidates",
+      "watchlist",
+      "rejected"
+    ],
+    "cache_performance": {
+      "ta_cache_hit_rate": "90%",
+      "bar_cache_entries": 127,
+      "ttl_ta_cache": "5 minutes",
+      "ttl_bar_cache": "2 minutes"
+    },
+    "frontend_components": {
+      "tiered_ta_diagnostics_card": "Shows T1 Fast Scan, T1 Passed, T2 Deep, DT Candidates, Total Cycle",
+      "stats_bar": "Shows Scanned, T1 Analyzed, T2 Deep, Setups, Day Trades, Watchlist, Rejected",
+      "pipeline_funnel": "Shows 8 stages with counts and bottleneck detection",
+      "refresh_ta_button": "Triggers background TA refresh for 80 stocks"
+    },
+    "observed_performance": {
+      "total_cycle": "1.6s",
+      "tier1_scan": "0.8s",
+      "tier2_scan": "0.5s",
+      "cache_hit_rate": "90%"
+    }
+  }
+}

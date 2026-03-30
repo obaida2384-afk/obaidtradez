@@ -665,14 +665,19 @@ const AutoTrade = () => {
           {/* TA Analysis Status */}
           {opportunities?.stats && (
             <Card className="terminal-card p-4">
-              <h3 className="text-xs text-cyan-400 mb-3 flex items-center gap-2"><Database className="w-4 h-4" /> Technical Analysis Engine Status</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                <div><p className="text-slate-500">TA Analyzed</p><p className="text-cyan-400 font-mono text-lg">{opportunities.stats.ta_analyzed || 0}</p></div>
-                <div><p className="text-slate-500">Setups Found</p><p className="text-blue-400 font-mono text-lg">{opportunities.stats.setups_found || 0}</p></div>
-                <div><p className="text-slate-500">Filters Passed</p><p className="text-emerald-400 font-mono text-lg">{opportunities.stats.filters_passed || 0}</p></div>
+              <h3 className="text-xs text-cyan-400 mb-3 flex items-center gap-2"><Database className="w-4 h-4" /> Tiered TA Pipeline Diagnostics</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div><p className="text-slate-500">T1 Fast Scan</p><p className="text-cyan-400 font-mono text-lg">{opportunities.stats.ta_analyzed || 0}</p><p className="text-slate-600">{opportunities.timing?.tier1_scan_sec || '?'}s</p></div>
+                <div><p className="text-slate-500">T1 Passed</p><p className="text-blue-400 font-mono text-lg">{opportunities.stats.tier1_passed || 0}</p></div>
+                <div><p className="text-slate-500">T2 Deep</p><p className="text-indigo-400 font-mono text-lg">{opportunities.stats.tier2_deep || 0}</p><p className="text-slate-600">{opportunities.timing?.tier2_scan_sec || '?'}s</p></div>
                 <div><p className="text-slate-500">DT Candidates</p><p className="text-amber-400 font-mono text-lg">{opportunities.stats.day_trade_candidates || 0}</p></div>
+                <div><p className="text-slate-500">Total Cycle</p><p className="text-emerald-400 font-mono text-lg">{opportunities.timing?.total_cycle_sec || '?'}s</p></div>
               </div>
-              <p className="text-[10px] text-slate-600 mt-2">TA uses Polygon OHLCV data (EMA, RSI, MACD, VWAP, Market Structure, FVG). Click "Refresh TA Data" to update.</p>
+              {opportunities.timing?.ta_cache && (
+                <p className="text-[10px] text-slate-600 mt-2">
+                  Cache: {opportunities.timing.ta_cache.hit_rate || 0}% hit rate ({opportunities.timing.ta_cache.hits || 0} hits / {opportunities.timing.ta_cache.misses || 0} misses) | Bar cache: {opportunities.timing.bar_cache?.valid || 0} entries
+                </p>
+              )}
             </Card>
           )}
           {/* No Trade Panel */}
@@ -712,10 +717,10 @@ const AutoTrade = () => {
             <Card className="terminal-card p-4">
               <div className="grid grid-cols-3 md:grid-cols-7 gap-3 text-center">
                 <div><p className="text-2xl font-mono text-white">{opportunities.stats.total_scanned}</p><p className="text-[10px] text-slate-500">Scanned</p></div>
-                <div><p className="text-2xl font-mono text-cyan-400">{opportunities.stats.ta_analyzed || 0}</p><p className="text-[10px] text-slate-500">TA Analyzed</p></div>
+                <div><p className="text-2xl font-mono text-cyan-400">{opportunities.stats.ta_analyzed || 0}</p><p className="text-[10px] text-slate-500">T1 Analyzed</p></div>
+                <div><p className="text-2xl font-mono text-indigo-400">{opportunities.stats.tier2_deep || 0}</p><p className="text-[10px] text-slate-500">T2 Deep</p></div>
                 <div><p className="text-2xl font-mono text-blue-400">{opportunities.stats.setups_found || 0}</p><p className="text-[10px] text-slate-500">Setups</p></div>
                 <div><p className="text-2xl font-mono text-amber-400">{opportunities.stats.day_trade_candidates}</p><p className="text-[10px] text-slate-500">Day Trades</p></div>
-                <div><p className="text-2xl font-mono text-purple-400">{opportunities.stats.long_term_candidates}</p><p className="text-[10px] text-slate-500">Long Term</p></div>
                 <div><p className="text-2xl font-mono text-slate-400">{opportunities.stats.watchlist}</p><p className="text-[10px] text-slate-500">Watchlist</p></div>
                 <div><p className="text-2xl font-mono text-red-400">{opportunities.stats.rejected}</p><p className="text-[10px] text-slate-500">Rejected</p></div>
               </div>

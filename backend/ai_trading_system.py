@@ -1386,20 +1386,21 @@ class AutoTradeOrchestrator:
         return []
     
     async def scan_opportunities(self) -> Dict:
-        """Scan for auto-trade opportunities using Technical Analysis as the PRIMARY driver.
+        """Tiered TA pipeline: Tier 1 fast scan → composite ranking → Tier 2 deep analysis.
         Day trades: TA engine (Polygon OHLCV) → setup detection → confidence → risk check.
         Long-term: Existing fundamental scoring.
         News is used ONLY as a confidence boost for day trades."""
+        import time as _time
+        cycle_start = _time.monotonic()
+
         settings = await self.get_settings()
         market_regime = await self.regime_detector.detect()
 
-        # Dynamic thresholds based on regime
         dynamic = DynamicThresholdManager.get_thresholds(market_regime, settings)
         dt_threshold = dynamic["dt_threshold"]
         lt_threshold = dynamic["lt_threshold"]
         risk_mode = dynamic["risk_mode"]
 
-        # Pipeline funnel for debugging
         funnel = TradePipelineFunnel()
         diagnostics = ZeroTradeDiagnostics()
 
@@ -1407,19 +1408,19 @@ class AutoTradeOrchestrator:
         trading_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
         investment_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
 
-        # Build lookups
         inv_lookup = {s["symbol"]: s for s in investment_signals if s.get("symbol")}
         trade_lookup = {s["symbol"]: s for s in trading_signals if s.get("symbol")}
 
-        # Get all unique symbols
         all_symbols = set(list(trade_lookup.keys()) + list(inv_lookup.keys()))
         funnel.record("universe_scanned", len(all_symbols))
 
-        # Dynamic max positions
         dt_max_pos = DynamicThresholdManager.get_max_positions("DAY_TRADE", settings, market_regime)
         lt_max_pos = DynamicThresholdManager.get_max_positions("LONG_TERM", settings, market_regime)
 
-        # === PHASE 1: Pre-filter liquid stocks for TA analysis ===
+        from technical_analysis_engine import TechnicalSignalGenerator, TACache, BarCache
+        TACache.reset_counters()
+
+        # === PHASE 1: Pre-filter liquid stocks for TA (volume >= 0.5) ===
         dt_prefilter_symbols = []
         if settings.dt_enabled:
             for symbol in all_symbols:
@@ -1427,7 +1428,6 @@ class AutoTradeOrchestrator:
                 if t_sig:
                     indicators = t_sig.get("indicators", {})
                     vol_ratio = indicators.get("volume_ratio", 0)
-                    # Loose pre-filter: skip only dead-volume stocks
                     if vol_ratio >= 0.5:
                         dt_prefilter_symbols.append(symbol)
                     else:
@@ -1435,44 +1435,81 @@ class AutoTradeOrchestrator:
 
         funnel.record("prefilter_passed", len(dt_prefilter_symbols))
 
-        # === PHASE 2: Run Technical Analysis on pre-filtered stocks ===
-        from technical_analysis_engine import TechnicalSignalGenerator, TACache
+        # === PHASE 2 (TIER 1): Fast scan on top 80 most liquid names ===
+        # Sort by volume ratio descending for initial ordering, take top 80
+        dt_prefilter_symbols.sort(
+            key=lambda s: trade_lookup.get(s, {}).get("indicators", {}).get("volume_ratio", 0),
+            reverse=True
+        )
+        tier1_candidates = dt_prefilter_symbols[:80]
 
-        # Read cached TA results from DB (populated by background refresh)
-        ta_signals_db = await self.db.ta_signals.find({}, {"_id": 0}).to_list(2000)
-        ta_db_lookup = {s["symbol"]: s for s in ta_signals_db if s.get("symbol")}
+        tier1_start = _time.monotonic()
+        tier1_results = await TechnicalSignalGenerator.batch_analyze_fast(tier1_candidates, max_concurrent=10)
+        tier1_duration = round(_time.monotonic() - tier1_start, 1)
 
-        # Use cached TA results for candidates (check ALL pre-filtered symbols)
-        ta_results = []
-        ta_missing = []
-        for sym in dt_prefilter_symbols:
-            if sym in ta_db_lookup:
-                ta_results.append(ta_db_lookup[sym])
+        # Compute composite prefilter score for each Tier 1 result
+        for r in tier1_results:
+            r["tier1_score"] = TechnicalSignalGenerator.compute_tier1_score(r)
+
+        # Tier 1 early rejection: remove obviously bad candidates
+        tier1_passed = []
+        tier1_rejected_early = []
+        for r in tier1_results:
+            indicators = r.get("indicators", {})
+            spread = indicators.get("spread_pct", 0)
+            rel_vol = indicators.get("rel_vol", 0)
+            overextended = r.get("overextended", False)
+
+            # Tier 1 quality gates (same discipline, applied early)
+            if spread > 0.5:
+                tier1_rejected_early.append({**r, "tier1_reject": "wide_spread"})
+                funnel.reject("t1_wide_spread")
+            elif rel_vol < 0.5:
+                tier1_rejected_early.append({**r, "tier1_reject": "illiquid"})
+                funnel.reject("t1_illiquid")
+            elif overextended:
+                tier1_rejected_early.append({**r, "tier1_reject": "overextended"})
+                funnel.reject("t1_overextended")
+            elif r.get("direction") == "NONE" and not r.get("best_setup"):
+                tier1_rejected_early.append({**r, "tier1_reject": "no_signal"})
+                funnel.reject("t1_no_signal")
             else:
-                ta_missing.append(sym)
+                tier1_passed.append(r)
 
-        # If we have no cached data at all, run fast TA on a very small batch inline
-        if not ta_results and ta_missing:
-            inline_batch = ta_missing[:5]  # Very small batch (~65s with rate limits)
-            try:
-                inline_results = await TechnicalSignalGenerator.batch_analyze_fast(inline_batch, max_concurrent=1)
-                ta_results.extend(inline_results)
-                # Cache to DB for future scans
-                for r in inline_results:
-                    r["last_updated"] = datetime.now(timezone.utc).isoformat()
-                    await self.db.ta_signals.update_one({"symbol": r["symbol"]}, {"$set": r}, upsert=True)
-                logger.info(f"Inline TA: analyzed {len(inline_results)} of {len(inline_batch)} stocks")
-            except Exception as e:
-                logger.error(f"Inline TA error: {e}")
+        # Rank Tier 1 passed by composite score and take top 20 for deep analysis
+        tier1_passed.sort(key=lambda x: x.get("tier1_score", 0), reverse=True)
+        tier2_candidates = tier1_passed[:20]
 
-        ta_lookup = {r["symbol"]: r for r in ta_results}
-        funnel.record("ta_analyzed", len(ta_results))
-        logger.info(f"TA phase: {len(ta_results)} cached, {len(ta_missing)} missing")
+        funnel.record("ta_analyzed", len(tier1_results))
 
-        ta_lookup = {r["symbol"]: r for r in ta_results}
-        funnel.record("ta_analyzed", len(ta_results))
+        # === PHASE 3 (TIER 2): Deep multi-timeframe analysis on top candidates ===
+        tier2_symbols = [r["symbol"] for r in tier2_candidates]
+        tier2_start = _time.monotonic()
+        tier2_results = await TechnicalSignalGenerator.batch_analyze(tier2_symbols, max_concurrent=8)
+        tier2_duration = round(_time.monotonic() - tier2_start, 1)
 
-        # === PHASE 3: Evaluate TA results for day trades ===
+        # Merge: prefer Tier 2 (full analysis) over Tier 1 (fast)
+        tier2_lookup = {r["symbol"]: r for r in tier2_results}
+        final_ta_results = []
+        for r in tier1_passed:
+            sym = r["symbol"]
+            if sym in tier2_lookup:
+                deep = tier2_lookup[sym]
+                deep["tier1_score"] = r.get("tier1_score", 0)
+                deep["analysis_mode"] = "full"
+                final_ta_results.append(deep)
+            else:
+                final_ta_results.append(r)
+
+        # Also add Tier 1 results that didn't go to Tier 2 (still valid candidates)
+        tier2_set = set(tier2_symbols)
+        for r in tier1_passed:
+            if r["symbol"] not in tier2_set and r not in final_ta_results:
+                final_ta_results.append(r)
+
+        ta_lookup = {r["symbol"]: r for r in final_ta_results}
+
+        # === PHASE 4: Evaluate final TA results for day trades ===
         day_trade_candidates = []
         long_term_candidates = []
         watchlist = []
@@ -1480,26 +1517,22 @@ class AutoTradeOrchestrator:
         setup_count = 0
         filters_passed_count = 0
 
-        for ta_sig in ta_results:
+        for ta_sig in final_ta_results:
             symbol = ta_sig["symbol"]
             cached_sig = trade_lookup.get(symbol, {})
 
-            # Build news data for boost (from cached FMP signals)
             news_data = None
             if isinstance(cached_sig.get("news_sentiment"), dict):
                 news_data = cached_sig["news_sentiment"]
             elif cached_sig.get("news_impact"):
                 news_data = {"composite_score": 0.5 + (cached_sig.get("news_impact", 0) / 100)}
 
-            # Evaluate using TA-first engine
             explanation = DayTradingEngine.evaluate_buy(ta_sig, news_data, market_regime, settings)
             confidence = explanation.confidence_score
 
-            # Track setup stage
             if ta_sig.get("best_setup"):
                 setup_count += 1
 
-            # Track filter passage
             indicators = ta_sig.get("indicators", {})
             spread_ok = indicators.get("spread_pct", 0) <= 0.5
             relvol_ok = indicators.get("rel_vol", 0) >= 1.3 or ta_sig.get("momentum_mode", False)
@@ -1516,6 +1549,8 @@ class AutoTradeOrchestrator:
                 "signal": ta_sig,
                 "direction": ta_sig.get("direction", "NONE"),
                 "best_setup": ta_sig.get("best_setup", {}).get("type", "none") if ta_sig.get("best_setup") else "none",
+                "tier1_score": ta_sig.get("tier1_score", 0),
+                "analysis_mode": ta_sig.get("analysis_mode", "fast"),
                 "dt_score": confidence,
                 "lt_score": 0,
             }
@@ -1539,13 +1574,13 @@ class AutoTradeOrchestrator:
                     funnel.reject(reason[:60])
                 rejected.append(entry)
 
-        # === PHASE 4: Process Long-Term candidates (unchanged logic) ===
+        # === PHASE 5: Process Long-Term candidates (unchanged logic) ===
         for symbol in all_symbols:
             i_sig = inv_lookup.get(symbol)
             if not i_sig or not settings.lt_enabled:
                 continue
             if symbol in ta_lookup:
-                continue  # Already evaluated as day trade
+                continue
 
             t_sig = trade_lookup.get(symbol)
             cls_result = StockClassifier.classify(t_sig, i_sig)
@@ -1587,11 +1622,9 @@ class AutoTradeOrchestrator:
                         funnel.reject(tag)
                     rejected.append(entry)
 
-        # Update funnel counts
         funnel.record("setup_found", setup_count)
         funnel.record("filters_passed", filters_passed_count)
 
-        # Sort by confidence
         day_trade_candidates.sort(key=lambda x: x["confidence"], reverse=True)
         long_term_candidates.sort(key=lambda x: x["confidence"], reverse=True)
 
@@ -1600,10 +1633,10 @@ class AutoTradeOrchestrator:
             regime = market_regime.get("regime", "neutral")
             if regime in ("bearish", "high_volatility"):
                 diagnostics.add_reason(f"Market regime ({regime}) reducing day trade opportunities")
-            if len(ta_results) == 0:
+            if len(tier1_results) == 0:
                 diagnostics.add_reason("No stocks returned valid TA data from Polygon")
             elif setup_count == 0:
-                diagnostics.add_reason(f"TA analyzed {len(ta_results)} stocks but no technical setups found")
+                diagnostics.add_reason(f"TA analyzed {len(tier1_results)} stocks but no technical setups found")
             elif filters_passed_count == 0:
                 diagnostics.add_reason(f"{setup_count} setups found but all filtered by spread/RelVol/overextension")
             else:
@@ -1612,6 +1645,33 @@ class AutoTradeOrchestrator:
 
         no_trade_summary = diagnostics.build_no_trade_summary(
             len(day_trade_candidates), len(long_term_candidates), market_regime)
+
+        cycle_duration = round(_time.monotonic() - cycle_start, 1)
+        cache_stats = TACache.stats()
+        bar_cache_stats = BarCache.stats()
+
+        # Timing diagnostics
+        timing = {
+            "total_cycle_sec": cycle_duration,
+            "tier1_scan_sec": tier1_duration,
+            "tier2_scan_sec": tier2_duration,
+            "tier1_symbols": len(tier1_candidates),
+            "tier1_results": len(tier1_results),
+            "tier1_passed": len(tier1_passed),
+            "tier1_rejected_early": len(tier1_rejected_early),
+            "tier2_symbols": len(tier2_symbols),
+            "tier2_results": len(tier2_results),
+            "final_evaluated": len(final_ta_results),
+            "ta_cache": cache_stats,
+            "bar_cache": bar_cache_stats,
+        }
+
+        logger.info(
+            f"Scan complete in {cycle_duration}s | T1: {len(tier1_results)}/{len(tier1_candidates)} in {tier1_duration}s | "
+            f"T2: {len(tier2_results)}/{len(tier2_symbols)} in {tier2_duration}s | "
+            f"DT: {len(day_trade_candidates)}, LT: {len(long_term_candidates)} | "
+            f"Cache hit: {cache_stats.get('hit_rate', 0)}%"
+        )
 
         return {
             "auto_enabled": settings.auto_enabled,
@@ -1628,7 +1688,9 @@ class AutoTradeOrchestrator:
             )[:15],
             "stats": {
                 "total_scanned": len(all_symbols),
-                "ta_analyzed": len(ta_results),
+                "ta_analyzed": len(tier1_results),
+                "tier1_passed": len(tier1_passed),
+                "tier2_deep": len(tier2_results),
                 "setups_found": setup_count,
                 "filters_passed": filters_passed_count,
                 "day_trade_candidates": len(day_trade_candidates),
@@ -1636,6 +1698,7 @@ class AutoTradeOrchestrator:
                 "watchlist": len(watchlist),
                 "rejected": len(rejected),
             },
+            "timing": timing,
             "dynamic_thresholds": dynamic,
             "risk_mode": risk_mode,
             "pipeline_funnel": funnel.to_dict(),

@@ -4288,15 +4288,15 @@ async def refresh_ta_signals(background_tasks: BackgroundTasks, auth: bool = Dep
             trading_sigs = await db.trading_signals.find(
                 {}, {"_id": 0, "symbol": 1, "indicators.volume_ratio": 1}
             ).to_list(2000)
-            # Sort by volume, take top 15 (15 stocks * 13s = ~3 min with free Polygon)
+            # Sort by volume, take top 80 (Starter plan supports high throughput)
             symbols = sorted(
                 [s for s in trading_sigs if s.get("indicators", {}).get("volume_ratio", 0) >= 0.5],
                 key=lambda x: x.get("indicators", {}).get("volume_ratio", 0),
                 reverse=True
-            )[:15]
+            )[:80]
             symbol_list = [s["symbol"] for s in symbols]
-            logger.info(f"TA refresh starting for {len(symbol_list)} stocks (est. {len(symbol_list) * 13}s)...")
-            results = await TechnicalSignalGenerator.batch_analyze_fast(symbol_list, max_concurrent=1)
+            logger.info(f"TA refresh starting for {len(symbol_list)} stocks...")
+            results = await TechnicalSignalGenerator.batch_analyze_fast(symbol_list, max_concurrent=10)
             saved = 0
             for r in results:
                 r["last_updated"] = datetime.now(timezone.utc).isoformat()
