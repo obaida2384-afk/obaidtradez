@@ -358,6 +358,13 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - "Browse All" tab added to view all 195+ signals
   - Excluded stock search shows proper exclusion reason instead of NaN
   - Categories: Hot (69), Breakout (5), Momentum (24), Watch (97)
+- [x] **30-Year Historical Performance Analysis** for Investment Ideas
+  - `fmp_historical_30yr()` two-chunk fetch (20yr + 10yr) to bypass FMP 5000-item limit
+  - CAGR computed for 1yr, 3yr, 5yr, 10yr, 20yr, 30yr periods
+  - Max drawdown with recovery time, annualized volatility
+  - Win/loss years, best/worst year, vs ATH, 200-day SMA trend
+  - Historical rating (Exceptional/Strong/Average/Weak/Poor) with score boost/penalty
+  - Frontend: Full historical section in expanded investment cards with color-coded metrics
 
 ### P2 (Medium Priority)
 - [ ] Compare stocks side-by-side
@@ -370,8 +377,10 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_13)
-- Frontend: 100% (All features working, tested Mar 2026 - iteration_14)
+- Backend: 100% (All endpoints working - iteration_16)
+- Frontend: 100% (All features working - iteration_16)
+- Historical Performance: 100% (verified iteration_16)
+- Trading Signals Full Universe: 100% (verified iteration_15)
 - Decision Clarity UI: 100% (verified iteration_14)
 - Custom Screener Presets: 100% (verified iteration_14)
 - CSV Export: 100% (verified iteration_14)
