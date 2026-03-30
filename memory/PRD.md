@@ -1,74 +1,73 @@
-# ObaidTradez — Product Requirements Document
+# ObaidTradez - Product Requirements Document
 
 ## Original Problem Statement
-Build "ObaidTradez", a secure, dark-themed AI trading and investing platform protected by access code (`Bullishalmarkhan7.7`). The platform features dual modes: "Trading" (short-term) and "Investments" (long-term). Core focus is on high performance, filtering noise, scaling to 1,000+ companies, and enforcing strict risk controls.
+ObaidTradez is a secure, dark-themed AI trading and investing platform protected by access code (`Bullishalmarkhan7.7`). The platform features a technical-analysis-first, professional-grade day trading engine. Core requirements demand high performance, filtering out noise to surface quality setups, scanning ~80+ liquid stocks rapidly, and enforcing strict risk controls.
 
-**Latest Priority (March 2026):** Transform the system from a news-first engine (which produced 0 day trades) into a **technical-analysis-first, professional-grade day trading engine** using Polygon OHLCV data for internal indicator computation.
+## Architecture
+- **Frontend**: React + Tailwind CSS + Shadcn UI
+- **Backend**: FastAPI + MongoDB
+- **Data Source**: Polygon.io (OHLCV bars, primary), FMP (fundamentals), Finnhub/Benzinga/Marketaux (news)
+- **Execution**: Alpaca Paper Trading API
+- **AI**: OpenAI GPT-5.2 via Emergent LLM Key
 
-## Core Architecture
-```
-/app/
-├── backend/
-│   ├── ai_trading_system.py (Orchestrator, TA-first DayTradingEngine, Risk Manager)
-│   ├── auto_trade_scheduler.py (Periodic execution, safety locks)
-│   ├── news_sentiment_engine.py (Multi-source aggregation, boost only)
-│   ├── technical_analysis_engine.py (EMA, RSI, MACD, VWAP, Market Structure, FVG)
-│   ├── enhanced_investment_engine.py (Fundamental scoring)
-│   └── server.py (FastAPI routes)
-├── frontend/
-│   ├── src/pages/
-│   │   ├── AutoTrade.jsx (Pipeline Funnel, TA Status, Diagnostics)
-│   │   ├── News.jsx, Investments.jsx, Trading.jsx, etc.
-```
+## Core Technical Design
+- **Tiered TA Pipeline**: Tier 1 (fast composite score on ~80 stocks) → Tier 2 (deep multi-timeframe analysis on top 20)
+- **Internal TA Math**: EMA, RSI, MACD, VWAP, Market Structure, FVG calculated internally from Polygon OHLCV bars (NO external indicator APIs)
+- **Aggressive Caching**: Bar-level + TA-level caching to prevent Polygon rate limits
+- **News = Confidence Boost Only**: Never a hard gate for trades
 
-## What's Been Implemented
+## Completed Features
 
-### Completed (March 2026)
-- [x] Access code gate with JWT auth
-- [x] Trading Signals engine with FMP data
-- [x] Investment scoring engine (1,097+ companies via batch processing)
-- [x] News Sentiment Engine (500+ articles, FMP + Finnhub + Benzinga)
-- [x] Auto-Trade Scheduler with safety controls (daily loss caps, market hours)
-- [x] Risky stock blocking (83+ meme/leveraged stocks)
-- [x] Persistent watchlist
-- [x] **P0: Technical Analysis Engine** (EMA 9/20/50, RSI 14, MACD 12/26/9, VWAP, RelVol, AvgRange, Spread, Market Structure HH/HL/LH/LL, Support/Resistance, FVG, Fake Breakout, Overextension Filter)
-- [x] **P0: TA-First Day Trading Pipeline** (Catalyst gate REMOVED, news=boost only, confidence threshold lowered to 65)
-- [x] **P0: Pipeline Funnel** (universe_scanned → prefilter_passed → ta_analyzed → setup_found → filters_passed → confidence_passed → risk_approved → executed)
-- [x] **P0: Exact Rejection Reasons** for every rejected DT candidate
-- [x] **P0: Background TA Refresh** with Polygon rate-limit management (13s delay per stock)
-- [x] **P0: TACache** (in-memory 5-min TTL + MongoDB persistence)
-- [x] CSV Export (Portfolio, AutoTrade, Investments)
-- [x] Custom Screener Presets (Investments)
-- [x] Decision Clarity UI (Investments)
+### P0 (Core Engine)
+- [x] Internal Technical Analysis engine (EMA, RSI, MACD, VWAP, FVG, Market Structure)
+- [x] Tiered Pipeline: Tier 1 fast composite → Tier 2 deep analysis
+- [x] Aggressive bar-level caching (~4s scan time)
+- [x] News as confidence boost only (not a gate)
+- [x] Dynamic threshold configuration (DT: 65, LT: 72)
+- [x] Auto Trade dashboard with timing diagnostics
 
-### Key Technical Details
-- **DT Threshold**: 65 (base), regime adjustments: bearish +5, neutral_bearish +0, bullish -5
-- **Filters**: RelVol >= 1.3, Spread <= 0.5%, no overextension
-- **Polygon API**: Free tier (5 calls/min), using sequential 13s-delay batch processing
-- **Data flow**: Polygon OHLCV → Internal math → Setups/Structure/Indicators → Confidence scoring → Risk check
-- **No external API for indicators** - all computed internally from bar data
+### P1 (Quality & Momentum) - Completed Mar 30, 2026
+- [x] **Multi-Timeframe Confirmation (MTF)**
+  - 1-min = entry timing only
+  - 5-min = structure (must be supportive for trade direction)
+  - 15-min = trend direction (must be supportive/neutral)
+  - Hard reject if 5m/15m oppose trade direction
+  - 1m conflict = soft downgrade (-5 conf), not hard reject
+  - MTF scoring: aligned=+12, partial=+5, tf_conflict=-15, 1m_conflict=-5
+  - MTF reflected in confidence scoring, rejection reasons, and execution approval
+- [x] **Momentum Mode Bypass**
+  - Requirements: RelVol>2, breakout/breakdown setup, clear HH/HL or LH/LL, VWAP aligned, spread<=0.5%, NOT overextended, NOT fake breakout
+  - Bypasses: soft conservative filters (RelVol minimum)
+  - Does NOT bypass: risk rules, fake breakout detection, overextension, spread/liquidity, MTF conflicts
+- [x] **Frontend Diagnostics**
+  - MTF Confirmation panel in expanded candidate cards (15m Trend, 5m Structure, 1m Timing, MTF Score)
+  - MTF OK / TF CONFLICT / MOMENTUM / BYPASS ACTIVE badges on candidate cards
+  - Multi-Timeframe & Momentum Mode stats card in Diagnostics
+  - Pipeline Funnel with MTF rejection reasons highlighted in red
+  - 9-column stats grid: Scanned, T1, T2, Setups, MTF Conflicts, Momentum, DT, Watchlist, Rejected
 
-## Prioritized Backlog
+### Infrastructure
+- [x] 1,000+ stock universe with background batch scanning
+- [x] 83+ risky/meme stock blocklist for AutoTrade
+- [x] Screener presets, CSV exports, Decision Clarity UI
+- [x] Investment scoring engine with category tabs
 
-### P1 - Upcoming
-- Multi-Timeframe Confirmation (1m entry, 5m structure, 15m trend) for full analysis mode
-- Momentum Mode bypass (RelVol > 2 + strong structure)
-- Deeper rejection logging in pipeline
+## Upcoming Tasks
+- [ ] P2: Compare stocks side-by-side
+- [ ] P3: Scheduler Performance Tracker (win rate, Sharpe ratio)
+- [ ] Refactor: server.py modularization into routes/ directory (~4,700 lines)
 
-### P2 - Future
-- Compare stocks side-by-side
-- Mobile-responsive sidebar
-- Sector filters for Investment Ideas
+## Key Files
+- `/app/backend/technical_analysis_engine.py` - Core TA math, MTF Confirmer, Tier 1/2 processing
+- `/app/backend/ai_trading_system.py` - Trade evaluation, MTF gates, Momentum bypass, scan orchestration
+- `/app/backend/server.py` - FastAPI routes, background tasks
+- `/app/frontend/src/pages/AutoTrade.jsx` - AutoTrade dashboard with MTF/Momentum diagnostics
 
-### P3 - Backlog
-- Scheduler Performance Tracker (win rate, Sharpe ratio)
-- server.py refactoring (4,700+ lines)
+## Key API Endpoints
+- `GET /api/auto-trade/scan` - Executes Tiered pipeline, returns candidates + diagnostics
+- `POST /api/auto-trade/refresh-ta` - Triggers background TA data refresh
+- `GET /api/auto-trade/settings` - Current threshold settings
+- `POST /api/auth/access` - Verify access code
 
-## 3rd Party Integrations
-- OpenAI GPT-5.2 (Emergent LLM Key)
-- Financial Modeling Prep (FMP) — User API Key
-- Polygon.io — User API Key (OHLCV bars for TA)
-- Benzinga — User API Key (news)
-- Finnhub — User API Key (news)
-- Alpaca — User API Key (paper trading)
-- Alpha Vantage — User API Key
+## Access
+- Access Code: `Bullishalmarkhan7.7`
