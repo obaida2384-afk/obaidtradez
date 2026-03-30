@@ -106,7 +106,7 @@ class AutoTradeScheduler:
     DT_SCAN_INTERVAL = 300
     LT_SCAN_INTERVAL = 1800
     LOOP_TICK = 15
-    MAX_CONSECUTIVE_LOSSES_COOLDOWN = 3
+    MAX_CONSECUTIVE_LOSSES_COOLDOWN = 2  # Changed from 3 to 2
     COOLDOWN_MINUTES = 30
     STALE_DATA_MINUTES = 15
     MAX_API_FAILURES = 3
@@ -131,24 +131,28 @@ class AutoTradeScheduler:
 
         self._consecutive_losses = 0
         self._cooldown_until: Optional[datetime] = None
+        self._post_cooldown_active = False  # Post-cooldown threshold boost active
         self._api_failure_count = 0
         self._last_api_failure: Optional[datetime] = None
+        self._daily_loss_pct_of_max = 0  # Track how close to daily loss limit
 
         self._scheduler_settings = {
             "dt_interval_seconds": self.DT_SCAN_INTERVAL,
             "lt_interval_seconds": self.LT_SCAN_INTERVAL,
-            "pre_market_execution": False,
-            "after_hours_execution": False,
+            "pre_market_execution": False,  # OFF by default
+            "after_hours_execution": False,  # OFF by default
             "max_daily_loss_pct": 3.0,
             "max_portfolio_drawdown_pct": 10.0,
-            "max_consecutive_losses": 3,
+            "max_consecutive_losses": 2,  # Changed from 3 to 2
             "cooldown_minutes": 30,
-            "min_confidence_day": 60,
-            "min_confidence_long": 55,
+            "min_confidence_day": 80,  # Raised from 60
+            "min_confidence_long": 75,  # Raised from 55
             "stale_data_minutes": 15,
             "max_api_failures": 3,
             "live_position_size_multiplier": 0.5,
             "live_confidence_boost": 10,
+            "post_cooldown_threshold_boost": 5,  # +5 after cooldown ends
+            "soft_lock_daily_loss_pct": 80,  # At 80% of max loss → reduce sizes
         }
 
     async def initialize(self):
@@ -282,6 +286,11 @@ class AutoTradeScheduler:
         cooldown_remaining = None
         if self._cooldown_until and now < self._cooldown_until:
             cooldown_remaining = int((self._cooldown_until - now).total_seconds())
+        elif self._cooldown_until and now >= self._cooldown_until:
+            # Cooldown just ended → activate post-cooldown boost
+            if not self._post_cooldown_active:
+                self._post_cooldown_active = True
+                self._cooldown_until = None
 
         return {
             "status": self._status.value,
@@ -299,6 +308,8 @@ class AutoTradeScheduler:
             "cycle_count": self._cycle_count,
             "consecutive_losses": self._consecutive_losses,
             "cooldown_remaining_seconds": cooldown_remaining,
+            "post_cooldown_active": self._post_cooldown_active,
+            "daily_loss_pct_of_max": self._daily_loss_pct_of_max,
             "api_failure_count": self._api_failure_count,
             "settings": self._scheduler_settings,
         }
@@ -362,7 +373,7 @@ class AutoTradeScheduler:
         logger.info("Scheduler loop ended")
 
     async def _run_day_trade_cycle(self, session: MarketSession):
-        """Run one day trading scan + execution cycle"""
+        """Run one day trading scan + execution cycle with enhanced safety"""
         safe, reasons = await self._check_safety("DAY_TRADE", session)
         if not safe:
             await self._log_execution("day_trade_skipped", {"reasons": reasons})
@@ -376,15 +387,33 @@ class AutoTradeScheduler:
                 return
 
             market_regime = await self.orchestrator.regime_detector.detect()
-            trading_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
 
+            # Use dynamic thresholds from the enhanced system
+            from ai_trading_system import (
+                DynamicThresholdManager, ConfidenceScoringEngine,
+                DayTradingEngine, PositionSizer, TradeFrequencyController,
+                TradePipelineFunnel, ZeroTradeDiagnostics
+            )
+
+            dynamic = DynamicThresholdManager.get_thresholds(
+                market_regime, settings,
+                post_cooldown=self._post_cooldown_active,
+                daily_loss_pct=self._daily_loss_pct_of_max
+            )
+            threshold = dynamic["dt_threshold"]
+
+            # Frequency control
+            freq_ctrl = TradeFrequencyController(self.db)
+            can_freq, freq_reason = await freq_ctrl.can_trade("DAY_TRADE", market_regime)
+            if not can_freq:
+                await self._log_execution("day_trade_freq_limited", {"reason": freq_reason})
+                return
+
+            trading_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
             if not trading_signals:
                 return
 
-            from ai_trading_system import (
-                StockClassifier, ConfidenceScoringEngine,
-                DayTradingEngine, PositionSizer
-            )
+            from ai_trading_system import StockClassifier
 
             account = await self.orchestrator.get_account()
             positions = await self.orchestrator.get_positions()
@@ -392,6 +421,13 @@ class AutoTradeScheduler:
 
             inv_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
             inv_lookup = {s["symbol"]: s for s in inv_signals if s.get("symbol")}
+
+            # Dynamic max positions
+            max_pos = DynamicThresholdManager.get_max_positions("DAY_TRADE", settings, market_regime)
+
+            funnel = TradePipelineFunnel()
+            diagnostics = ZeroTradeDiagnostics()
+            funnel.record("universe_scanned", len(trading_signals))
 
             candidates = []
             for sig in trading_signals:
@@ -404,10 +440,14 @@ class AutoTradeScheduler:
                     continue
 
                 confidence = ConfidenceScoringEngine.score_day_trade(sig, market_regime)
-                threshold = self._get_confidence_threshold("DAY_TRADE")
                 if confidence < threshold:
+                    if confidence >= threshold - 12:
+                        diagnostics.add_near_miss(symbol, "DAY_TRADE", confidence, "NEAR_MISS",
+                            [f"Confidence {confidence} < {threshold}"])
+                    funnel.reject("below_confidence")
                     continue
 
+                funnel.record("confidence_passed")
                 explanation = DayTradingEngine.evaluate_buy(sig, market_regime, settings)
                 explanation.confidence_score = confidence
 
@@ -418,6 +458,10 @@ class AutoTradeScheduler:
                         "explanation": explanation.dict(),
                         "signal": sig
                     })
+                else:
+                    tags = explanation.key_indicators.get("diagnostic_tags", [])
+                    for tag in tags:
+                        funnel.reject(tag)
 
             candidates.sort(key=lambda x: x["confidence"], reverse=True)
 
@@ -426,7 +470,14 @@ class AutoTradeScheduler:
 
             if can_exec and self._deployment_mode not in (DeploymentMode.SHADOW,):
                 risk_mult = self.session_manager.get_risk_multiplier(session)
-                max_to_exec = 3 if session == MarketSession.CLOSING else 5
+                max_to_exec = min(3, max_pos) if session == MarketSession.CLOSING else min(5, max_pos)
+
+                # Soft lock: reduce sizes if near daily loss limit
+                soft_lock_mult = 1.0
+                if self._daily_loss_pct_of_max >= 80:
+                    soft_lock_mult = 0.5
+                elif self._daily_loss_pct_of_max >= 60:
+                    soft_lock_mult = 0.75
 
                 for c in candidates[:max_to_exec]:
                     approved, checks = await self.orchestrator.risk_manager.check_all(
@@ -434,24 +485,33 @@ class AutoTradeScheduler:
                         settings, account, positions, market_regime
                     )
                     if approved:
+                        funnel.record("risk_approved")
                         stop_pct = abs(c["signal"].get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
                         size = PositionSizer.calculate(
-                            "DAY_TRADE", c["confidence"], settings, equity, stop_pct, c["signal"]
+                            "DAY_TRADE", c["confidence"], settings, equity, stop_pct,
+                            c["signal"], market_regime, dynamic
                         )
-                        size["shares"] = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier()))
-                        if size["shares"] > 0:
+                        shares = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier() * soft_lock_mult))
+                        if shares > 0:
                             result = await self.orchestrator._place_order(
-                                c["symbol"], size["shares"], "buy", "DAY_TRADE", c
+                                c["symbol"], shares, "buy", "DAY_TRADE", c
                             )
                             if result.get("success"):
                                 executed.append(result)
+                                funnel.record("executed")
+                                # Clear post-cooldown after successful trade
+                                self._post_cooldown_active = False
                                 await self._notify("trade_opened",
-                                    f"BUY {c['symbol']} x{size['shares']} (DT, conf={c['confidence']})", "info")
+                                    f"BUY {c['symbol']} x{shares} (DT, conf={c['confidence']}, regime={dynamic['risk_mode']})", "info")
                             else:
                                 skipped.append({"symbol": c["symbol"], "reason": result.get("error")})
                     else:
                         skipped.append({"symbol": c["symbol"], "reason": "; ".join(
                             ch for ch in checks if "VIOLATION" in ch)})
+
+            # Zero-trade diagnostics
+            no_trade_summary = diagnostics.build_no_trade_summary(
+                len(candidates), 0, market_regime)
 
             cycle_result = {
                 "engine": "day_trade",
@@ -460,6 +520,11 @@ class AutoTradeScheduler:
                 "executed": len(executed),
                 "skipped": len(skipped),
                 "mode": self._deployment_mode.value,
+                "risk_mode": dynamic["risk_mode"],
+                "threshold_used": threshold,
+                "near_misses": len(no_trade_summary.get("near_misses", [])),
+                "opportunity_quality": no_trade_summary.get("opportunity_quality", "LOW_OPPORTUNITY"),
+                "funnel": funnel.to_dict(),
                 "details": {"executed": executed, "skipped": skipped, "top_candidates": [
                     {"symbol": c["symbol"], "confidence": c["confidence"]} for c in candidates[:10]
                 ]}
@@ -468,13 +533,18 @@ class AutoTradeScheduler:
             self._cycle_count += 1
             await self._log_execution("day_trade_cycle", cycle_result)
 
+            # Full-day zero-trade alert
+            if len(candidates) == 0 and session == MarketSession.REGULAR:
+                await self._notify("no_trades",
+                    f"No day trades: {'; '.join(no_trade_summary.get('top_reasons', [])[:3])}", "info")
+
         except Exception as e:
             logger.error(f"Day trade cycle error: {e}")
             self._api_failure_count += 1
             await self._log_execution("day_trade_error", {"error": str(e)})
 
     async def _run_long_term_cycle(self, session: MarketSession):
-        """Run one long-term investment scan + execution cycle"""
+        """Run one long-term investment scan + execution cycle with enhanced safety"""
         safe, reasons = await self._check_safety("LONG_TERM", session)
         if not safe:
             await self._log_execution("long_term_skipped", {"reasons": reasons})
@@ -488,15 +558,29 @@ class AutoTradeScheduler:
                 return
 
             market_regime = await self.orchestrator.regime_detector.detect()
-            inv_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
-
-            if not inv_signals:
-                return
 
             from ai_trading_system import (
                 StockClassifier, ConfidenceScoringEngine,
-                LongTermEngine, PositionSizer
+                LongTermEngine, PositionSizer, DynamicThresholdManager,
+                TradeFrequencyController
             )
+
+            dynamic = DynamicThresholdManager.get_thresholds(
+                market_regime, settings,
+                post_cooldown=self._post_cooldown_active,
+                daily_loss_pct=self._daily_loss_pct_of_max
+            )
+            threshold = dynamic["lt_threshold"]
+
+            freq_ctrl = TradeFrequencyController(self.db)
+            can_freq, freq_reason = await freq_ctrl.can_trade("LONG_TERM", market_regime)
+            if not can_freq:
+                await self._log_execution("long_term_freq_limited", {"reason": freq_reason})
+                return
+
+            inv_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
+            if not inv_signals:
+                return
 
             account = await self.orchestrator.get_account()
             positions = await self.orchestrator.get_positions()
@@ -504,6 +588,8 @@ class AutoTradeScheduler:
 
             trade_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
             trade_lookup = {s["symbol"]: s for s in trade_signals if s.get("symbol")}
+
+            max_pos = DynamicThresholdManager.get_max_positions("LONG_TERM", settings, market_regime)
 
             candidates = []
             for sig in inv_signals:
@@ -516,7 +602,6 @@ class AutoTradeScheduler:
                     continue
 
                 confidence = ConfidenceScoringEngine.score_long_term(sig, market_regime)
-                threshold = self._get_confidence_threshold("LONG_TERM")
                 if confidence < threshold:
                     continue
 
@@ -539,7 +624,11 @@ class AutoTradeScheduler:
             if can_exec and self._deployment_mode not in (DeploymentMode.SHADOW,):
                 risk_mult = self.session_manager.get_risk_multiplier(session)
 
-                for c in candidates[:3]:
+                soft_lock_mult = 1.0
+                if self._daily_loss_pct_of_max >= 80:
+                    soft_lock_mult = 0.5
+
+                for c in candidates[:min(3, max_pos)]:
                     approved, checks = await self.orchestrator.risk_manager.check_all(
                         c["signal"], c["confidence"], "LONG_TERM",
                         settings, account, positions, market_regime
@@ -547,17 +636,19 @@ class AutoTradeScheduler:
                     if approved:
                         size = PositionSizer.calculate(
                             "LONG_TERM", c["confidence"], settings, equity,
-                            settings.lt_trailing_stop_pct, c["signal"]
+                            settings.lt_trailing_stop_pct, c["signal"],
+                            market_regime, dynamic
                         )
-                        size["shares"] = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier()))
-                        if size["shares"] > 0:
+                        shares = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier() * soft_lock_mult))
+                        if shares > 0:
                             result = await self.orchestrator._place_order(
-                                c["symbol"], size["shares"], "buy", "LONG_TERM", c
+                                c["symbol"], shares, "buy", "LONG_TERM", c
                             )
                             if result.get("success"):
                                 executed.append(result)
+                                self._post_cooldown_active = False
                                 await self._notify("trade_opened",
-                                    f"BUY {c['symbol']} x{size['shares']} (LT, conf={c['confidence']})", "info")
+                                    f"BUY {c['symbol']} x{shares} (LT, conf={c['confidence']}, regime={dynamic['risk_mode']})", "info")
                             else:
                                 skipped.append({"symbol": c["symbol"], "reason": result.get("error")})
                     else:
@@ -571,6 +662,8 @@ class AutoTradeScheduler:
                 "executed": len(executed),
                 "skipped": len(skipped),
                 "mode": self._deployment_mode.value,
+                "risk_mode": dynamic["risk_mode"],
+                "threshold_used": threshold,
                 "details": {"executed": executed, "skipped": skipped, "top_candidates": [
                     {"symbol": c["symbol"], "confidence": c["confidence"]} for c in candidates[:10]
                 ]}
@@ -619,9 +712,11 @@ class AutoTradeScheduler:
                 if self._consecutive_losses >= self._scheduler_settings["max_consecutive_losses"]:
                     cooldown_min = self._scheduler_settings["cooldown_minutes"]
                     self._cooldown_until = _now_utc() + timedelta(minutes=cooldown_min)
+                    self._post_cooldown_active = False  # Will activate when cooldown ends
                     await self._notify("auto_paused",
                         f"Cooldown activated: {self._consecutive_losses} consecutive losses. "
-                        f"Resuming in {cooldown_min} min", "warning")
+                        f"Resuming in {cooldown_min} min (thresholds will be raised by +{self._scheduler_settings.get('post_cooldown_threshold_boost', 5)} after)",
+                        "warning")
 
         except Exception as e:
             logger.error(f"Position monitor error: {e}")
@@ -645,7 +740,7 @@ class AutoTradeScheduler:
 
         # Closing session - no weak day trades
         if session == MarketSession.CLOSING and engine == "DAY_TRADE":
-            min_conf = self._scheduler_settings.get("min_confidence_day", 60) + 15
+            min_conf = self._scheduler_settings.get("min_confidence_day", 80) + 15
             reasons.append(f"Closing session: raised DT confidence to {min_conf}")
 
         # API failure check
@@ -653,17 +748,29 @@ class AutoTradeScheduler:
             reasons.append(f"API failures ({self._api_failure_count}) exceeded limit")
             return False, reasons
 
-        # Daily loss check
+        # Daily loss check with soft lock tracking
         try:
             account = await self.orchestrator.get_account()
             equity = float(account.get("equity", 0))
             daily_pnl = await self.orchestrator.risk_manager._get_daily_pnl()
             max_loss = equity * (self._scheduler_settings["max_daily_loss_pct"] / 100)
+
+            # Track how close we are to daily loss limit (for soft lock)
+            if max_loss > 0 and daily_pnl < 0:
+                self._daily_loss_pct_of_max = min(100, int(abs(daily_pnl) / max_loss * 100))
+            else:
+                self._daily_loss_pct_of_max = 0
+
             if daily_pnl < -max_loss:
                 reasons.append(f"Daily loss limit: ${daily_pnl:.0f} (max -${max_loss:.0f})")
                 await self._notify("daily_loss_limit",
                     f"Daily loss limit reached: ${daily_pnl:.0f}", "critical")
                 return False, reasons
+
+            # Soft lock at 80% of daily max
+            soft_lock_pct = self._scheduler_settings.get("soft_lock_daily_loss_pct", 80)
+            if self._daily_loss_pct_of_max >= soft_lock_pct:
+                reasons.append(f"Soft lock: {self._daily_loss_pct_of_max}% of daily loss used (positions reduced)")
 
             # Drawdown check
             peak = await self.orchestrator.risk_manager._get_peak_equity(equity)
@@ -675,7 +782,7 @@ class AutoTradeScheduler:
         except Exception as e:
             logger.warning(f"Safety check error: {e}")
 
-        return len(reasons) == 0, reasons
+        return len(reasons) == 0 or all("Soft lock" in r or "Closing session" in r for r in reasons), reasons
 
     async def _auto_pause(self, reason: str):
         self._status = SchedulerStatus.PAUSED

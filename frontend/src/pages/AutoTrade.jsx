@@ -12,7 +12,8 @@ import {
   Clock, Target, DollarSign, BarChart2, Settings, Timer,
   Play, Pause, Square, RefreshCw, Eye, ChevronDown, ChevronUp,
   ArrowUpRight, ArrowDownRight, Loader2, Brain, Lock, Bell,
-  CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert
+  CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert, Filter,
+  Search, Layers, TriangleAlert
 } from "lucide-react";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
@@ -57,11 +58,17 @@ const DeployBadge = ({ mode }) => {
     full_live: { label: "FULL LIVE", cls: "bg-red-500/20 border-red-500/40 text-red-400" },
   };
   const c = cfg[mode] || cfg.paper;
-  return (
-    <Badge variant="outline" className={`text-[10px] font-bold ${c.cls}`} data-testid="deploy-mode-badge">
-      {c.label}
-    </Badge>
-  );
+  return <Badge variant="outline" className={`text-[10px] font-bold ${c.cls}`} data-testid="deploy-mode-badge">{c.label}</Badge>;
+};
+
+const RiskModeBadge = ({ mode }) => {
+  const cfg = {
+    NORMAL: { cls: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
+    CAUTIOUS: { cls: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+    DEFENSIVE: { cls: "bg-red-500/20 text-red-400 border-red-500/30" },
+  };
+  const c = cfg[mode] || cfg.NORMAL;
+  return <Badge variant="outline" className={`text-[10px] font-bold ${c.cls}`} data-testid="risk-mode-badge">{mode || "NORMAL"}</Badge>;
 };
 
 const CountdownTimer = ({ seconds, label }) => {
@@ -88,6 +95,117 @@ const SessionBadge = ({ session }) => {
   return <Badge variant="outline" className={`text-[10px] ${c.cls}`}>{c.label}</Badge>;
 };
 
+const OpportunityBadge = ({ quality }) => {
+  const cfg = {
+    HIGH_OPPORTUNITY: { cls: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", label: "HIGH OPP." },
+    MEDIUM_OPPORTUNITY: { cls: "bg-amber-500/20 text-amber-400 border-amber-500/30", label: "MEDIUM OPP." },
+    LOW_OPPORTUNITY: { cls: "bg-red-500/20 text-red-400 border-red-500/30", label: "LOW OPP." },
+  };
+  const c = cfg[quality] || cfg.LOW_OPPORTUNITY;
+  return <Badge variant="outline" className={`text-[10px] ${c.cls}`}>{c.label}</Badge>;
+};
+
+// Pipeline Funnel visualization
+const PipelineFunnel = ({ funnel }) => {
+  if (!funnel?.funnel) return null;
+  const stages = [
+    { key: "universe_scanned", label: "Universe", icon: Layers },
+    { key: "liquidity_passed", label: "Liquidity", icon: Filter },
+    { key: "technical_passed", label: "Technical", icon: BarChart2 },
+    { key: "catalyst_passed", label: "Catalyst", icon: Zap },
+    { key: "confidence_passed", label: "Confidence", icon: Target },
+    { key: "risk_approved", label: "Risk OK", icon: Shield },
+    { key: "executed", label: "Executed", icon: Play },
+  ];
+  const maxVal = Math.max(1, ...Object.values(funnel.funnel));
+  return (
+    <Card className="terminal-card p-4" data-testid="pipeline-funnel">
+      <div className="flex items-center gap-2 mb-3">
+        <Filter className="w-4 h-4 text-blue-400" />
+        <span className="text-xs text-white font-medium">Trade Pipeline Funnel</span>
+        {funnel.bottleneck && (
+          <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">
+            Bottleneck: {funnel.bottleneck.replace("_", " ")}
+          </Badge>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {stages.map(({ key, label, icon: Icon }) => {
+          const count = funnel.funnel[key] || 0;
+          const width = Math.max(2, (count / maxVal) * 100);
+          return (
+            <div key={key} className="flex items-center gap-2">
+              <Icon className="w-3 h-3 text-slate-500 shrink-0" />
+              <span className="text-[10px] text-slate-500 w-16 shrink-0">{label}</span>
+              <div className="flex-1 h-4 bg-slate-900 rounded overflow-hidden">
+                <div className="h-full bg-blue-500/30 rounded transition-all duration-500"
+                  style={{ width: `${width}%` }} />
+              </div>
+              <span className="text-xs text-white font-mono w-10 text-right">{count}</span>
+            </div>
+          );
+        })}
+      </div>
+      {funnel.top_rejections && Object.keys(funnel.top_rejections).length > 0 && (
+        <div className="mt-3 pt-2 border-t border-slate-800">
+          <p className="text-[10px] text-slate-500 mb-1">Top Rejection Reasons</p>
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(funnel.top_rejections).slice(0, 6).map(([reason, count]) => (
+              <Badge key={reason} variant="outline" className="text-[10px] border-slate-700 text-slate-400">
+                {reason.replace(/_/g, " ")}: {count}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
+
+// No-Trade Reason Panel
+const NoTradePanel = ({ summary }) => {
+  if (!summary || summary.has_trades) return null;
+  return (
+    <Card className="p-4 border-amber-500/20 bg-amber-500/5" data-testid="no-trade-panel">
+      <div className="flex items-center gap-2 mb-2">
+        <TriangleAlert className="w-4 h-4 text-amber-400" />
+        <span className="text-xs text-amber-400 font-medium">No Trades Generated</span>
+        <OpportunityBadge quality={summary.opportunity_quality} />
+      </div>
+      {summary.top_reasons?.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-slate-500 mb-1">Reasons:</p>
+          <ul className="space-y-1">
+            {summary.top_reasons.map((r, i) => (
+              <li key={i} className="text-xs text-slate-300 flex items-start gap-1.5">
+                <span className="text-amber-500">-</span> {r}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {summary.near_misses?.length > 0 && (
+        <div>
+          <p className="text-[10px] text-slate-500 mb-1">Near-Miss Candidates (Almost Qualified):</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {summary.near_misses.slice(0, 8).map((nm, i) => (
+              <div key={i} className="p-2 rounded bg-slate-900/50 border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-white font-medium">{nm.symbol}</span>
+                  <span className={`text-[10px] font-mono ${nm.confidence >= 75 ? 'text-amber-400' : 'text-slate-500'}`}>
+                    {nm.confidence}/100
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 truncate">{nm.reject_reasons?.[0] || nm.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
+
 const ExplanationCard = ({ item, expanded, onToggle }) => {
   const exp = item.explanation || {};
   const isDay = item.classification === "DAY_TRADE";
@@ -109,6 +227,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
                 <Badge variant="outline" className={`text-[10px] ${
                   item.action === "BUY" ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' :
                   item.action === "WATCHLIST" ? 'border-amber-500/30 text-amber-400' :
+                  item.action === "NEAR_MISS" ? 'border-purple-500/30 text-purple-400' :
                   'border-red-500/30 text-red-400'
                 }`}>{item.action}</Badge>
               </div>
@@ -119,7 +238,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
             <div className="text-right">
               <p className="text-white font-mono">${(signal.price || signal.entry || 0).toFixed(2)}</p>
               <p className="text-xs text-slate-500">Conf: <span className={`font-bold ${
-                item.confidence >= 80 ? 'text-emerald-400' : item.confidence >= 60 ? 'text-amber-400' : 'text-red-400'
+                item.confidence >= 80 ? 'text-emerald-400' : item.confidence >= 65 ? 'text-amber-400' : 'text-red-400'
               }`}>{item.confidence}/100</span></p>
             </div>
             {expanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -157,26 +276,22 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
               <p className="text-[10px] text-slate-400 mb-2 font-medium">EXIT PLAN</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 {exp.exit_plan.entry && <div><p className="text-slate-500">Entry</p><p className="text-white font-mono">${exp.exit_plan.entry}</p></div>}
-                {exp.exit_plan.take_profit && <div><p className="text-slate-500">TP</p><p className="text-emerald-400 font-mono">${exp.exit_plan.take_profit} ({exp.exit_plan.take_profit_pct > 0 ? '+' : ''}{exp.exit_plan.take_profit_pct}%)</p></div>}
-                {exp.exit_plan.stop_loss && <div><p className="text-slate-500">SL</p><p className="text-red-400 font-mono">${exp.exit_plan.stop_loss} ({exp.exit_plan.stop_loss_pct}%)</p></div>}
+                {exp.exit_plan.take_profit && <div><p className="text-slate-500">TP</p><p className="text-emerald-400 font-mono">${exp.exit_plan.take_profit}</p></div>}
+                {exp.exit_plan.stop_loss && <div><p className="text-slate-500">SL</p><p className="text-red-400 font-mono">${exp.exit_plan.stop_loss}</p></div>}
                 {exp.exit_plan.time_exit && <div><p className="text-slate-500">Time</p><p className="text-slate-300">{exp.exit_plan.time_exit}</p></div>}
               </div>
             </div>
           )}
           {exp.key_indicators && (
             <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs">
-              {Object.entries(exp.key_indicators).filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k, v]) => (
+              {Object.entries(exp.key_indicators).filter(([k, v]) => v !== null && v !== undefined && v !== "" && k !== "diagnostic_tags").map(([k, v]) => (
                 <div key={k} className="text-center p-1.5 rounded bg-slate-800/50">
                   <p className="text-[10px] text-slate-500">{k.replace(/_/g, " ")}</p>
-                  <p className="text-white font-mono text-[11px]">{typeof v === "number" ? v.toFixed(1) : v}</p>
+                  <p className="text-white font-mono text-[11px]">{typeof v === "number" ? v.toFixed(1) : String(v)}</p>
                 </div>
               ))}
             </div>
           )}
-          <div className="flex gap-4 text-xs text-slate-500">
-            <span>DT Score: <span className="text-amber-400 font-mono">{item.dt_score}</span></span>
-            <span>LT Score: <span className="text-blue-400 font-mono">{item.lt_score}</span></span>
-          </div>
         </div>
       )}
     </Card>
@@ -189,7 +304,6 @@ const AutoTrade = () => {
   const [opportunities, setOpportunities] = useState(null);
   const [history, setHistory] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [execLog, setExecLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -243,20 +357,12 @@ const AutoTrade = () => {
     } catch (e) { console.error(e); }
   }, [token]);
 
-  const fetchExecLog = useCallback(async () => {
-    try {
-      const resp = await fetch(`${API}/scheduler/execution-log?limit=30`, { headers });
-      if (resp.ok) setExecLog(await resp.json());
-    } catch (e) { console.error(e); }
-  }, [token]);
-
   useEffect(() => {
     Promise.all([fetchStatus(), fetchScheduler(), fetchOpportunities(), fetchHistory()]).finally(() => setLoading(false));
     const interval = setInterval(() => { fetchScheduler(); fetchStatus(); }, 15000);
     return () => clearInterval(interval);
   }, [fetchStatus, fetchScheduler, fetchOpportunities, fetchHistory]);
 
-  // Countdown timer
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
@@ -269,87 +375,49 @@ const AutoTrade = () => {
   const startScheduler = async () => {
     try {
       const resp = await fetch(`${API}/scheduler/start`, { method: "POST", headers });
-      if (resp.ok) {
-        const d = await resp.json();
-        toast.success(`Scheduler started (${d.deployment_mode} mode)`);
-        fetchScheduler();
-      } else {
-        const d = await resp.json();
-        toast.error(d.message || "Failed to start");
-      }
+      if (resp.ok) { const d = await resp.json(); toast.success(`Scheduler started (${d.deployment_mode} mode)`); fetchScheduler(); }
+      else { const d = await resp.json(); toast.error(d.message || "Failed to start"); }
     } catch (e) { toast.error("Start failed"); }
   };
-
   const stopScheduler = async () => {
-    try {
-      const resp = await fetch(`${API}/scheduler/stop`, { method: "POST", headers });
-      if (resp.ok) { toast.success("Scheduler stopped"); fetchScheduler(); }
-    } catch (e) { toast.error("Stop failed"); }
+    try { const resp = await fetch(`${API}/scheduler/stop`, { method: "POST", headers }); if (resp.ok) { toast.success("Stopped"); fetchScheduler(); } } catch (e) { toast.error("Stop failed"); }
   };
-
   const emergencyStop = async () => {
-    try {
-      const resp = await fetch(`${API}/scheduler/emergency-stop`, { method: "POST", headers });
-      if (resp.ok) { toast.error("EMERGENCY STOP ACTIVATED"); fetchScheduler(); fetchStatus(); }
-    } catch (e) { toast.error("Emergency stop failed"); }
+    try { const resp = await fetch(`${API}/scheduler/emergency-stop`, { method: "POST", headers }); if (resp.ok) { toast.error("EMERGENCY STOP"); fetchScheduler(); fetchStatus(); } } catch (e) { toast.error("Failed"); }
   };
-
   const clearEmergency = async () => {
-    try {
-      const resp = await fetch(`${API}/scheduler/clear-emergency`, { method: "POST", headers });
-      if (resp.ok) { toast.success("Emergency cleared"); fetchScheduler(); fetchStatus(); }
-    } catch (e) { toast.error("Clear failed"); }
+    try { const resp = await fetch(`${API}/scheduler/clear-emergency`, { method: "POST", headers }); if (resp.ok) { toast.success("Cleared"); fetchScheduler(); } } catch (e) { toast.error("Failed"); }
   };
-
   const setDeployMode = async (mode) => {
     try {
       const resp = await fetch(`${API}/scheduler/deploy-mode?mode=${mode}`, { method: "POST", headers });
       const d = await resp.json();
       if (d.error) { toast.error(d.error); } else { toast.success(`Mode: ${d.deployment_mode}`); fetchScheduler(); }
-    } catch (e) { toast.error("Mode change failed"); }
+    } catch (e) { toast.error("Failed"); }
   };
-
   const executeCycle = async () => {
     setExecuting(true);
-    try {
-      const resp = await fetch(`${API}/auto-trade/execute-cycle`, { method: "POST", headers });
-      if (resp.ok) {
-        toast.success("Cycle executing...");
-        setTimeout(() => { fetchStatus(); fetchHistory(); fetchExecLog(); }, 5000);
-      }
-    } catch (e) { toast.error("Execution failed"); }
+    try { await fetch(`${API}/auto-trade/execute-cycle`, { method: "POST", headers }); toast.success("Cycle executing..."); setTimeout(() => { fetchStatus(); fetchHistory(); }, 5000); } catch (e) { toast.error("Failed"); }
     setExecuting(false);
   };
-
   const updateSetting = async (key, value) => {
-    try {
-      await fetch(`${API}/auto-trade/settings`, {
-        method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ [key]: value })
-      });
-      fetchStatus();
-    } catch (e) { console.error(e); }
+    try { await fetch(`${API}/auto-trade/settings`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ [key]: value }) }); fetchStatus(); } catch (e) {}
   };
-
   const updateSchedulerSetting = async (key, value) => {
-    try {
-      await fetch(`${API}/scheduler/settings`, {
-        method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ [key]: value })
-      });
-      fetchScheduler();
-    } catch (e) { console.error(e); }
+    try { await fetch(`${API}/scheduler/settings`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ [key]: value }) }); fetchScheduler(); } catch (e) {}
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>;
-  }
+  if (loading) return <div className="flex items-center justify-center h-96"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>;
 
   const s = status?.settings || {};
   const regime = status?.market_regime || {};
   const today = status?.today || {};
   const sch = scheduler || {};
   const schSettings = sch.settings || {};
+  const dynThresh = opportunities?.dynamic_thresholds || {};
+  const riskMode = opportunities?.risk_mode || dynThresh?.risk_mode || "NORMAL";
+  const pipelineFunnel = opportunities?.pipeline_funnel;
+  const noTradeSummary = opportunities?.no_trade_summary;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto" data-testid="auto-trade-page">
@@ -360,9 +428,10 @@ const AutoTrade = () => {
             <Brain className="w-6 h-6 text-blue-400" />
             <h1 className="font-display text-2xl font-bold text-white">AI Auto-Trade</h1>
             <DeployBadge mode={sch.deployment_mode} />
+            <RiskModeBadge mode={riskMode} />
             <RegimeBadge regime={regime} />
           </div>
-          <p className="text-sm text-slate-500">Safety-first autonomous trading with dual engines</p>
+          <p className="text-sm text-slate-500">Safety-first, high-discipline autonomous trading</p>
         </div>
         <div className="flex items-center gap-2">
           <StatusIndicator status={sch.status} />
@@ -388,7 +457,7 @@ const AutoTrade = () => {
         </div>
       </div>
 
-      {/* Pause Reason Banner */}
+      {/* Pause Banner */}
       {sch.pause_reason && (
         <Card className="p-3 border-amber-500/30 bg-amber-500/5" data-testid="pause-banner">
           <div className="flex items-center gap-2">
@@ -398,21 +467,30 @@ const AutoTrade = () => {
         </Card>
       )}
 
-      {/* Scheduler Dashboard Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card className="terminal-card p-3 text-center">
-          <CountdownTimer seconds={dtCountdown} label="Next DT Scan" />
+      {/* Market Condition Adjustment Active */}
+      {(riskMode === "DEFENSIVE" || riskMode === "CAUTIOUS" || sch.post_cooldown_active || sch.daily_loss_pct_of_max >= 60) && (
+        <Card className="p-3 border-blue-500/30 bg-blue-500/5" data-testid="market-adjustment-banner">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Shield className="w-4 h-4 text-blue-400" />
+            <span className="text-xs text-blue-400 font-medium">Market Condition Adjustment Active:</span>
+            {riskMode !== "NORMAL" && <Badge variant="outline" className="text-[10px] border-blue-500/30 text-blue-300">Risk Mode: {riskMode}</Badge>}
+            {sch.post_cooldown_active && <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-400">Post-Cooldown: Thresholds +5</Badge>}
+            {sch.daily_loss_pct_of_max >= 60 && <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">Soft Lock: {sch.daily_loss_pct_of_max}% loss used</Badge>}
+          </div>
         </Card>
-        <Card className="terminal-card p-3 text-center">
-          <CountdownTimer seconds={ltCountdown} label="Next LT Scan" />
-        </Card>
+      )}
+
+      {/* Dashboard Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+        <Card className="terminal-card p-3 text-center"><CountdownTimer seconds={dtCountdown} label="Next DT Scan" /></Card>
+        <Card className="terminal-card p-3 text-center"><CountdownTimer seconds={ltCountdown} label="Next LT Scan" /></Card>
         <Card className="terminal-card p-3 text-center">
           <SessionBadge session={sch.market_session} />
           <p className="text-[10px] text-slate-500 mt-1">Risk: {sch.risk_multiplier ? `${(sch.risk_multiplier * 100).toFixed(0)}%` : '--'}</p>
         </Card>
         <Card className="terminal-card p-3 text-center">
           <p className="text-xl font-mono text-white">{sch.cycle_count || 0}</p>
-          <p className="text-[10px] text-slate-500">Cycles Run</p>
+          <p className="text-[10px] text-slate-500">Cycles</p>
         </Card>
         <Card className="terminal-card p-3 text-center">
           <p className={`text-xl font-mono ${today.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -422,7 +500,12 @@ const AutoTrade = () => {
         </Card>
         <Card className="terminal-card p-3 text-center">
           <p className="text-xl font-mono text-white">{status?.positions || 0}</p>
-          <p className="text-[10px] text-slate-500">Open Positions</p>
+          <p className="text-[10px] text-slate-500">Positions</p>
+        </Card>
+        <Card className="terminal-card p-3 text-center">
+          <p className="text-xs text-amber-400 font-mono">DT:{dynThresh.dt_threshold || '--'}</p>
+          <p className="text-xs text-blue-400 font-mono">LT:{dynThresh.lt_threshold || '--'}</p>
+          <p className="text-[10px] text-slate-500">Dynamic Thresholds</p>
         </Card>
       </div>
 
@@ -436,19 +519,15 @@ const AutoTrade = () => {
               Cooldown: {Math.floor(sch.cooldown_remaining_seconds / 60)}m {sch.cooldown_remaining_seconds % 60}s
             </Badge>
           )}
-          {sch.api_failure_count > 0 && (
-            <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">
-              API Fails: {sch.api_failure_count}
-            </Badge>
-          )}
         </div>
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-xs">
-          <div><p className="text-slate-500">Max Daily Loss</p><p className="text-red-400 font-mono">-{schSettings.max_daily_loss_pct || 3}%</p></div>
-          <div><p className="text-slate-500">Max Drawdown</p><p className="text-red-400 font-mono">-{schSettings.max_portfolio_drawdown_pct || 10}%</p></div>
-          <div><p className="text-slate-500">DT Confidence</p><p className="text-amber-400 font-mono">{schSettings.min_confidence_day || 60}</p></div>
-          <div><p className="text-slate-500">LT Confidence</p><p className="text-blue-400 font-mono">{schSettings.min_confidence_long || 55}</p></div>
-          <div><p className="text-slate-500">Loss Cooldown</p><p className="text-slate-300 font-mono">{schSettings.max_consecutive_losses || 3} losses / {schSettings.cooldown_minutes || 30}m</p></div>
-          <div><p className="text-slate-500">Consec Losses</p><p className={`font-mono ${sch.consecutive_losses >= 2 ? 'text-red-400' : 'text-slate-300'}`}>{sch.consecutive_losses || 0}</p></div>
+        <div className="grid grid-cols-3 md:grid-cols-7 gap-3 text-xs">
+          <div><p className="text-slate-500">Daily Loss</p><p className="text-red-400 font-mono">-{schSettings.max_daily_loss_pct || 3}%</p></div>
+          <div><p className="text-slate-500">Drawdown</p><p className="text-red-400 font-mono">-{schSettings.max_portfolio_drawdown_pct || 10}%</p></div>
+          <div><p className="text-slate-500">DT Conf</p><p className="text-amber-400 font-mono">{dynThresh.dt_threshold || schSettings.min_confidence_day || 80}</p></div>
+          <div><p className="text-slate-500">LT Conf</p><p className="text-blue-400 font-mono">{dynThresh.lt_threshold || schSettings.min_confidence_long || 75}</p></div>
+          <div><p className="text-slate-500">Cooldown</p><p className="text-slate-300 font-mono">{schSettings.max_consecutive_losses || 2} losses/{schSettings.cooldown_minutes || 30}m</p></div>
+          <div><p className="text-slate-500">Losses</p><p className={`font-mono ${sch.consecutive_losses >= 2 ? 'text-red-400' : 'text-slate-300'}`}>{sch.consecutive_losses || 0}</p></div>
+          <div><p className="text-slate-500">Loss Used</p><p className={`font-mono ${(sch.daily_loss_pct_of_max || 0) >= 60 ? 'text-red-400' : 'text-slate-300'}`}>{sch.daily_loss_pct_of_max || 0}%</p></div>
         </div>
       </Card>
 
@@ -458,195 +537,149 @@ const AutoTrade = () => {
           <div className="flex items-center gap-2 mb-2">
             <MonitorCheck className="w-4 h-4 text-blue-400" />
             <span className="text-xs text-slate-400">Last Execution</span>
-            <Badge variant="outline" className={`text-[10px] ${
-              sch.last_cycle_result.engine === 'day_trade' ? 'border-amber-500/30 text-amber-400' : 'border-blue-500/30 text-blue-400'
-            }`}>{sch.last_cycle_result.engine === 'day_trade' ? 'Day Trade' : 'Long Term'}</Badge>
+            <Badge variant="outline" className={`text-[10px] ${sch.last_cycle_result.engine === 'day_trade' ? 'border-amber-500/30 text-amber-400' : 'border-blue-500/30 text-blue-400'}`}>
+              {sch.last_cycle_result.engine === 'day_trade' ? 'Day Trade' : 'Long Term'}
+            </Badge>
+            {sch.last_cycle_result.risk_mode && <RiskModeBadge mode={sch.last_cycle_result.risk_mode} />}
+            {sch.last_cycle_result.opportunity_quality && <OpportunityBadge quality={sch.last_cycle_result.opportunity_quality} />}
           </div>
-          <div className="grid grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-5 gap-3 text-xs">
             <div><p className="text-slate-500">Candidates</p><p className="text-white font-mono">{sch.last_cycle_result.candidates}</p></div>
             <div><p className="text-slate-500">Executed</p><p className="text-emerald-400 font-mono">{sch.last_cycle_result.executed}</p></div>
             <div><p className="text-slate-500">Skipped</p><p className="text-slate-400 font-mono">{sch.last_cycle_result.skipped}</p></div>
             <div><p className="text-slate-500">Session</p><p className="text-white capitalize">{sch.last_cycle_result.session?.replace("_", " ")}</p></div>
+            <div><p className="text-slate-500">Threshold</p><p className="text-white font-mono">{sch.last_cycle_result.threshold_used}</p></div>
           </div>
         </Card>
       )}
 
-      {/* Main Tabs */}
+      {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(v) => {
         setActiveTab(v);
         if (v === "notifications") fetchNotifications();
-        if (v === "exec-log") fetchExecLog();
         if (v === "history") fetchHistory();
       }}>
         <TabsList className="w-full justify-start bg-slate-900 border border-slate-800 p-1 h-auto flex-wrap">
-          <TabsTrigger value="scheduler" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
-            <Timer className="w-4 h-4 mr-1" /> Scheduler
-          </TabsTrigger>
-          <TabsTrigger value="overview" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400">
-            <Eye className="w-4 h-4 mr-1" /> Candidates
-          </TabsTrigger>
-          <TabsTrigger value="day-trades" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
-            <Zap className="w-4 h-4 mr-1" /> Day ({opportunities?.day_trades?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="long-term" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400">
-            <TrendingUp className="w-4 h-4 mr-1" /> Long ({opportunities?.long_term?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400">
-            <Bell className="w-4 h-4 mr-1" /> Alerts
-          </TabsTrigger>
-          <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400">
-            <Activity className="w-4 h-4 mr-1" /> History
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-white">
-            <Settings className="w-4 h-4 mr-1" /> Config
-          </TabsTrigger>
+          <TabsTrigger value="scheduler" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400"><Timer className="w-4 h-4 mr-1" /> Scheduler</TabsTrigger>
+          <TabsTrigger value="diagnostics" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Filter className="w-4 h-4 mr-1" /> Diagnostics</TabsTrigger>
+          <TabsTrigger value="candidates" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><Eye className="w-4 h-4 mr-1" /> Candidates</TabsTrigger>
+          <TabsTrigger value="day-trades" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Zap className="w-4 h-4 mr-1" /> Day ({opportunities?.day_trades?.length || 0})</TabsTrigger>
+          <TabsTrigger value="long-term" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><TrendingUp className="w-4 h-4 mr-1" /> Long ({opportunities?.long_term?.length || 0})</TabsTrigger>
+          <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Bell className="w-4 h-4 mr-1" /> Alerts</TabsTrigger>
+          <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Activity className="w-4 h-4 mr-1" /> History</TabsTrigger>
+          <TabsTrigger value="settings" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-white"><Settings className="w-4 h-4 mr-1" /> Config</TabsTrigger>
         </TabsList>
 
         {/* SCHEDULER TAB */}
         <TabsContent value="scheduler" className="space-y-4">
-          {/* Deployment Mode */}
+          {/* Deploy Stages */}
           <Card className="terminal-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="text-sm text-white font-medium flex items-center gap-2">
-                  <Gauge className="w-4 h-4 text-blue-400" /> Deployment Stage
-                </h3>
-                <p className="text-xs text-slate-500">Progress through stages before going live</p>
-              </div>
-            </div>
+            <h3 className="text-sm text-white font-medium flex items-center gap-2 mb-3"><Gauge className="w-4 h-4 text-blue-400" /> Deployment Stage</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
-                { mode: "paper", label: "Paper Trading", desc: "Simulated orders", icon: MonitorCheck, color: "blue" },
-                { mode: "shadow", label: "Shadow Mode", desc: "Recommend only", icon: Eye, color: "purple" },
-                { mode: "limited_live", label: "Limited Live", desc: "Small positions", icon: Shield, color: "amber" },
-                { mode: "full_live", label: "Full Live", desc: "Full execution", icon: Zap, color: "red" },
-              ].map((stage) => {
-                const active = sch.deployment_mode === stage.mode;
-                const Icon = stage.icon;
+                { mode: "paper", label: "Paper Trading", desc: "Simulated orders", icon: MonitorCheck },
+                { mode: "shadow", label: "Shadow Mode", desc: "Recommend only", icon: Eye },
+                { mode: "limited_live", label: "Limited Live", desc: "Small positions", icon: Shield },
+                { mode: "full_live", label: "Full Live", desc: "Full execution", icon: Zap },
+              ].map(({ mode, label, desc, icon: Icon }) => {
+                const active = sch.deployment_mode === mode;
                 return (
-                  <button key={stage.mode} onClick={() => setDeployMode(stage.mode)}
-                    data-testid={`deploy-${stage.mode}`}
-                    className={`p-3 rounded-lg border text-left transition-all ${
-                      active
-                        ? `bg-${stage.color}-500/10 border-${stage.color}-500/40`
-                        : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
-                    }`}>
+                  <button key={mode} onClick={() => setDeployMode(mode)} data-testid={`deploy-${mode}`}
+                    className={`p-3 rounded-lg border text-left transition-all ${active ? 'bg-blue-500/10 border-blue-500/40' : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'}`}>
                     <div className="flex items-center gap-2 mb-1">
-                      <Icon className={`w-4 h-4 ${active ? `text-${stage.color}-400` : 'text-slate-500'}`} />
-                      <span className={`text-xs font-medium ${active ? 'text-white' : 'text-slate-400'}`}>{stage.label}</span>
+                      <Icon className={`w-4 h-4 ${active ? 'text-blue-400' : 'text-slate-500'}`} />
+                      <span className={`text-xs font-medium ${active ? 'text-white' : 'text-slate-400'}`}>{label}</span>
                     </div>
-                    <p className="text-[10px] text-slate-500">{stage.desc}</p>
-                    {active && <div className={`w-full h-0.5 bg-${stage.color}-500 rounded mt-2`} />}
+                    <p className="text-[10px] text-slate-500">{desc}</p>
+                    {active && <div className="w-full h-0.5 bg-blue-500 rounded mt-2" />}
                   </button>
                 );
               })}
             </div>
           </Card>
-
-          {/* Scheduler Settings */}
+          {/* Intervals */}
           <Card className="terminal-card p-4">
-            <h3 className="text-sm text-white font-medium mb-3 flex items-center gap-2">
-              <Timer className="w-4 h-4 text-emerald-400" /> Scheduler Intervals
-            </h3>
+            <h3 className="text-sm text-white font-medium mb-3 flex items-center gap-2"><Timer className="w-4 h-4 text-emerald-400" /> Scan Intervals</h3>
             <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Day Trade Scan: every {Math.floor((schSettings.dt_interval_seconds || 300) / 60)} min</label>
-                <Slider value={[(schSettings.dt_interval_seconds || 300) / 60]} min={1} max={30} step={1}
-                  onValueChange={([v]) => updateSchedulerSetting("dt_interval_seconds", v * 60)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Long-Term Scan: every {Math.floor((schSettings.lt_interval_seconds || 1800) / 60)} min</label>
-                <Slider value={[(schSettings.lt_interval_seconds || 1800) / 60]} min={10} max={120} step={5}
-                  onValueChange={([v]) => updateSchedulerSetting("lt_interval_seconds", v * 60)} />
-              </div>
+              <div><label className="text-xs text-slate-500 block mb-1">DT: every {Math.floor((schSettings.dt_interval_seconds || 300) / 60)} min</label>
+                <Slider value={[(schSettings.dt_interval_seconds || 300) / 60]} min={1} max={30} step={1} onValueChange={([v]) => updateSchedulerSetting("dt_interval_seconds", v * 60)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">LT: every {Math.floor((schSettings.lt_interval_seconds || 1800) / 60)} min</label>
+                <Slider value={[(schSettings.lt_interval_seconds || 1800) / 60]} min={10} max={120} step={5} onValueChange={([v]) => updateSchedulerSetting("lt_interval_seconds", v * 60)} /></div>
             </div>
           </Card>
-
-          {/* Market Session Rules */}
+          {/* Session Rules */}
           <Card className="terminal-card p-4">
-            <h3 className="text-sm text-white font-medium mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400" /> Market Session Rules
-            </h3>
+            <h3 className="text-sm text-white font-medium mb-3 flex items-center gap-2"><Clock className="w-4 h-4 text-amber-400" /> Market Session Rules</h3>
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-slate-300">Pre-Market Execution</p>
-                  <p className="text-[10px] text-slate-500">Allow trades before 9:30 AM ET</p>
-                </div>
-                <Switch checked={schSettings.pre_market_execution || false}
-                  onCheckedChange={(v) => updateSchedulerSetting("pre_market_execution", v)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-slate-300">After-Hours Execution</p>
-                  <p className="text-[10px] text-slate-500">Allow trades after 4:00 PM ET</p>
-                </div>
-                <Switch checked={schSettings.after_hours_execution || false}
-                  onCheckedChange={(v) => updateSchedulerSetting("after_hours_execution", v)} />
-              </div>
+              <div className="flex items-center justify-between"><div><p className="text-xs text-slate-300">Pre-Market Execution</p><p className="text-[10px] text-slate-500">Disabled by default for safety</p></div>
+                <Switch checked={schSettings.pre_market_execution || false} onCheckedChange={(v) => updateSchedulerSetting("pre_market_execution", v)} /></div>
+              <div className="flex items-center justify-between"><div><p className="text-xs text-slate-300">After-Hours Execution</p><p className="text-[10px] text-slate-500">Disabled by default for safety</p></div>
+                <Switch checked={schSettings.after_hours_execution || false} onCheckedChange={(v) => updateSchedulerSetting("after_hours_execution", v)} /></div>
             </div>
           </Card>
-
           {/* Safety Controls */}
           <Card className="terminal-card p-4">
-            <h3 className="text-sm text-red-400 font-medium mb-3 flex items-center gap-2">
-              <Shield className="w-4 h-4" /> Safety Controls
-            </h3>
+            <h3 className="text-sm text-red-400 font-medium mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Safety Controls</h3>
             <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Daily Loss: {schSettings.max_daily_loss_pct || 3}%</label>
-                <Slider value={[schSettings.max_daily_loss_pct || 3]} min={1} max={10} step={0.5}
-                  onValueChange={([v]) => updateSchedulerSetting("max_daily_loss_pct", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Drawdown: {schSettings.max_portfolio_drawdown_pct || 10}%</label>
-                <Slider value={[schSettings.max_portfolio_drawdown_pct || 10]} min={3} max={25} step={1}
-                  onValueChange={([v]) => updateSchedulerSetting("max_portfolio_drawdown_pct", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Consecutive Loss Cooldown: {schSettings.max_consecutive_losses || 3} losses</label>
-                <Slider value={[schSettings.max_consecutive_losses || 3]} min={1} max={10} step={1}
-                  onValueChange={([v]) => updateSchedulerSetting("max_consecutive_losses", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Cooldown Duration: {schSettings.cooldown_minutes || 30} min</label>
-                <Slider value={[schSettings.cooldown_minutes || 30]} min={5} max={120} step={5}
-                  onValueChange={([v]) => updateSchedulerSetting("cooldown_minutes", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Live Position Size: {((schSettings.live_position_size_multiplier || 0.5) * 100).toFixed(0)}%</label>
-                <Slider value={[(schSettings.live_position_size_multiplier || 0.5) * 100]} min={10} max={100} step={10}
-                  onValueChange={([v]) => updateSchedulerSetting("live_position_size_multiplier", v / 100)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Live Confidence Boost: +{schSettings.live_confidence_boost || 10}</label>
-                <Slider value={[schSettings.live_confidence_boost || 10]} min={0} max={25} step={5}
-                  onValueChange={([v]) => updateSchedulerSetting("live_confidence_boost", v)} />
-              </div>
+              <div><label className="text-xs text-slate-500 block mb-1">Max Daily Loss: {schSettings.max_daily_loss_pct || 3}%</label>
+                <Slider value={[schSettings.max_daily_loss_pct || 3]} min={1} max={10} step={0.5} onValueChange={([v]) => updateSchedulerSetting("max_daily_loss_pct", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Max Drawdown: {schSettings.max_portfolio_drawdown_pct || 10}%</label>
+                <Slider value={[schSettings.max_portfolio_drawdown_pct || 10]} min={3} max={25} step={1} onValueChange={([v]) => updateSchedulerSetting("max_portfolio_drawdown_pct", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Loss Cooldown Trigger: {schSettings.max_consecutive_losses || 2} losses</label>
+                <Slider value={[schSettings.max_consecutive_losses || 2]} min={1} max={10} step={1} onValueChange={([v]) => updateSchedulerSetting("max_consecutive_losses", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Cooldown: {schSettings.cooldown_minutes || 30} min</label>
+                <Slider value={[schSettings.cooldown_minutes || 30]} min={5} max={120} step={5} onValueChange={([v]) => updateSchedulerSetting("cooldown_minutes", v)} /></div>
             </div>
           </Card>
-
-          {/* Manual Actions */}
           <Card className="terminal-card p-4">
             <h3 className="text-sm text-white font-medium mb-3">Manual Actions</h3>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700">
-                <RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Scan Now
-              </Button>
-              <Button size="sm" onClick={executeCycle} disabled={executing} className="bg-emerald-600 hover:bg-emerald-500">
-                <Play className={`w-3 h-3 mr-1 ${executing ? 'animate-spin' : ''}`} /> Execute Cycle
-              </Button>
+              <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Scan Now</Button>
+              <Button size="sm" onClick={executeCycle} disabled={executing} className="bg-emerald-600 hover:bg-emerald-500"><Play className={`w-3 h-3 mr-1 ${executing ? 'animate-spin' : ''}`} /> Execute Cycle</Button>
             </div>
           </Card>
         </TabsContent>
 
-        {/* CANDIDATES/OVERVIEW TAB */}
-        <TabsContent value="overview" className="space-y-4">
+        {/* DIAGNOSTICS TAB */}
+        <TabsContent value="diagnostics" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm text-purple-400 flex items-center gap-2"><Filter className="w-4 h-4" /> Trade Pipeline Diagnostics</h2>
+            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Scan</Button>
+          </div>
+          {/* Pipeline Funnel */}
+          <PipelineFunnel funnel={pipelineFunnel} />
+          {/* No Trade Panel */}
+          <NoTradePanel summary={noTradeSummary} />
+          {/* Dynamic Thresholds */}
+          {dynThresh.dt_threshold && (
+            <Card className="terminal-card p-4">
+              <h3 className="text-xs text-slate-400 mb-2">Dynamic Threshold Adjustments</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div><p className="text-slate-500">DT Threshold</p><p className="text-amber-400 font-mono text-lg">{dynThresh.dt_threshold}</p></div>
+                <div><p className="text-slate-500">LT Threshold</p><p className="text-blue-400 font-mono text-lg">{dynThresh.lt_threshold}</p></div>
+                <div><p className="text-slate-500">Risk Mode</p><RiskModeBadge mode={dynThresh.risk_mode} /></div>
+                <div><p className="text-slate-500">Regime Adj.</p><p className="text-white capitalize">{dynThresh.regime_adjustment?.replace("_", " ")}</p></div>
+                <div><p className="text-slate-500">Post-Cooldown</p><p className={dynThresh.post_cooldown_active ? 'text-amber-400' : 'text-slate-500'}>{dynThresh.post_cooldown_active ? 'ACTIVE (+5)' : 'No'}</p></div>
+              </div>
+            </Card>
+          )}
+          {/* Opportunity Quality */}
+          {noTradeSummary && (
+            <Card className="terminal-card p-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Opportunity Quality:</span>
+                <OpportunityBadge quality={noTradeSummary.opportunity_quality} />
+                <span className="text-xs text-slate-500">({noTradeSummary.dt_candidates} DT, {noTradeSummary.lt_candidates} LT candidates)</span>
+              </div>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* CANDIDATES TAB */}
+        <TabsContent value="candidates" className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm text-slate-400">AI Classification Summary</h2>
-            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700">
-              <RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Scan
-            </Button>
+            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Scan</Button>
           </div>
           {opportunities?.stats && (
             <Card className="terminal-card p-4">
@@ -659,23 +692,12 @@ const AutoTrade = () => {
               </div>
             </Card>
           )}
-          <Card className="terminal-card p-4">
-            <p className="text-xs text-slate-400 mb-3">Market Regime</p>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-              <div><p className="text-slate-500">Regime</p><p className="text-white capitalize">{regime.regime?.replace("_", " ")}</p></div>
-              <div><p className="text-slate-500">Volatility</p><p className="text-white font-mono">{regime.volatility_pct}%</p></div>
-              <div><p className="text-slate-500">Trend</p><p className="text-white capitalize">{regime.trend?.replace("_", " ")}</p></div>
-              <div><p className="text-slate-500">Momentum</p><p className={`font-mono ${regime.momentum_20d >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{regime.momentum_20d >= 0 ? '+' : ''}{regime.momentum_20d}%</p></div>
-              <div><p className="text-slate-500">Score</p><p className="text-white font-mono">{regime.score}/100</p></div>
-            </div>
-          </Card>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <h3 className="text-xs text-amber-400 mb-2 flex items-center gap-1"><Zap className="w-3 h-3" /> Top Day Trades</h3>
               <div className="space-y-2">
                 {(opportunities?.day_trades || []).slice(0, 5).map((item) => (
-                  <ExplanationCard key={item.symbol} item={item}
-                    expanded={expandedCard === `dt-${item.symbol}`}
+                  <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `dt-${item.symbol}`}
                     onToggle={() => setExpandedCard(expandedCard === `dt-${item.symbol}` ? null : `dt-${item.symbol}`)} />
                 ))}
                 {!opportunities?.day_trades?.length && <p className="text-xs text-slate-500 py-4 text-center">No day trade candidates</p>}
@@ -685,8 +707,7 @@ const AutoTrade = () => {
               <h3 className="text-xs text-blue-400 mb-2 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Top Long-Term</h3>
               <div className="space-y-2">
                 {(opportunities?.long_term || []).slice(0, 5).map((item) => (
-                  <ExplanationCard key={item.symbol} item={item}
-                    expanded={expandedCard === `lt-${item.symbol}`}
+                  <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `lt-${item.symbol}`}
                     onToggle={() => setExpandedCard(expandedCard === `lt-${item.symbol}` ? null : `lt-${item.symbol}`)} />
                 ))}
                 {!opportunities?.long_term?.length && <p className="text-xs text-slate-500 py-4 text-center">No long-term candidates</p>}
@@ -699,13 +720,10 @@ const AutoTrade = () => {
         <TabsContent value="day-trades" className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm text-amber-400 flex items-center gap-1"><Zap className="w-4 h-4" /> Day Trading ({opportunities?.day_trades?.length || 0})</h2>
-            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700">
-              <RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh
-            </Button>
+            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh</Button>
           </div>
           {(opportunities?.day_trades || []).map((item) => (
-            <ExplanationCard key={item.symbol} item={item}
-              expanded={expandedCard === `dtf-${item.symbol}`}
+            <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `dtf-${item.symbol}`}
               onToggle={() => setExpandedCard(expandedCard === `dtf-${item.symbol}` ? null : `dtf-${item.symbol}`)} />
           ))}
           {!opportunities?.day_trades?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates</Card>}
@@ -715,13 +733,10 @@ const AutoTrade = () => {
         <TabsContent value="long-term" className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm text-blue-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Long-Term ({opportunities?.long_term?.length || 0})</h2>
-            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700">
-              <RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh
-            </Button>
+            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh</Button>
           </div>
           {(opportunities?.long_term || []).map((item) => (
-            <ExplanationCard key={item.symbol} item={item}
-              expanded={expandedCard === `ltf-${item.symbol}`}
+            <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `ltf-${item.symbol}`}
               onToggle={() => setExpandedCard(expandedCard === `ltf-${item.symbol}` ? null : `ltf-${item.symbol}`)} />
           ))}
           {!opportunities?.long_term?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates</Card>}
@@ -731,36 +746,21 @@ const AutoTrade = () => {
         <TabsContent value="notifications" className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm text-amber-400 flex items-center gap-1"><Bell className="w-4 h-4" /> Trade Notifications</h2>
-            <Button variant="outline" size="sm" onClick={fetchNotifications} className="border-slate-700">
-              <RefreshCw className="w-3 h-3 mr-1" /> Refresh
-            </Button>
+            <Button variant="outline" size="sm" onClick={fetchNotifications} className="border-slate-700"><RefreshCw className="w-3 h-3 mr-1" /> Refresh</Button>
           </div>
           {notifications.length > 0 ? notifications.map((n, i) => {
-            const sevColors = {
-              critical: "border-red-500/30 bg-red-500/5",
-              warning: "border-amber-500/30 bg-amber-500/5",
-              info: "border-slate-700 bg-slate-900/50",
-            };
-            const sevIcon = {
-              critical: <CircleStop className="w-4 h-4 text-red-400" />,
-              warning: <AlertTriangle className="w-4 h-4 text-amber-400" />,
-              info: <Bell className="w-4 h-4 text-blue-400" />,
-            };
+            const cls = { critical: "border-red-500/30 bg-red-500/5", warning: "border-amber-500/30 bg-amber-500/5", info: "border-slate-700 bg-slate-900/50" };
+            const ico = { critical: <CircleStop className="w-4 h-4 text-red-400" />, warning: <AlertTriangle className="w-4 h-4 text-amber-400" />, info: <Bell className="w-4 h-4 text-blue-400" /> };
             return (
-              <Card key={i} className={`p-3 border ${sevColors[n.severity] || sevColors.info}`}>
+              <Card key={i} className={`p-3 border ${cls[n.severity] || cls.info}`}>
                 <div className="flex items-start gap-2">
-                  {sevIcon[n.severity] || sevIcon.info}
-                  <div className="flex-1">
-                    <p className="text-xs text-white">{n.message}</p>
-                    <p className="text-[10px] text-slate-500">{new Date(n.timestamp).toLocaleString()}</p>
-                  </div>
+                  {ico[n.severity] || ico.info}
+                  <div className="flex-1"><p className="text-xs text-white">{n.message}</p><p className="text-[10px] text-slate-500">{new Date(n.timestamp).toLocaleString()}</p></div>
                   <Badge variant="outline" className="text-[10px] border-slate-700 text-slate-500">{n.event}</Badge>
                 </div>
               </Card>
             );
-          }) : (
-            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No notifications yet. Start the scheduler to see activity.</Card>
-          )}
+          }) : <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No notifications yet</Card>}
         </TabsContent>
 
         {/* HISTORY TAB */}
@@ -770,119 +770,41 @@ const AutoTrade = () => {
             <Card key={i} className="terminal-card p-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Badge variant="outline" className={`text-[10px] ${
-                    trade.action === "BUY" ? 'border-emerald-500/30 text-emerald-400' : 'border-red-500/30 text-red-400'
-                  }`}>{trade.action}</Badge>
+                  <Badge variant="outline" className={`text-[10px] ${trade.action === "BUY" ? 'border-emerald-500/30 text-emerald-400' : 'border-red-500/30 text-red-400'}`}>{trade.action}</Badge>
                   <span className="text-white font-medium">{trade.symbol}</span>
                   <span className="text-xs text-slate-500">{trade.shares} shares</span>
-                  <Badge variant="outline" className="text-[10px] border-slate-700 text-slate-400">{trade.classification}</Badge>
                 </div>
                 <div className="text-right">
                   {trade.pnl !== undefined && trade.pnl !== null && (
-                    <p className={`text-sm font-mono ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
-                    </p>
+                    <p className={`text-sm font-mono ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}</p>
                   )}
                   <p className="text-[10px] text-slate-600">{new Date(trade.timestamp).toLocaleString()}</p>
                 </div>
               </div>
             </Card>
-          )) : (
-            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No trade history yet</Card>
-          )}
+          )) : <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No trade history yet</Card>}
         </TabsContent>
 
         {/* SETTINGS TAB */}
         <TabsContent value="settings" className="space-y-4">
           <h2 className="text-sm text-slate-300">Engine Configuration</h2>
           <Card className="terminal-card p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm text-amber-400 flex items-center gap-1"><Zap className="w-4 h-4" /> Day Trading</h3>
-              <Switch checked={s.dt_enabled} onCheckedChange={(v) => updateSetting("dt_enabled", v)} />
-            </div>
+            <div className="flex items-center justify-between mb-4"><h3 className="text-sm text-amber-400 flex items-center gap-1"><Zap className="w-4 h-4" /> Day Trading</h3><Switch checked={s.dt_enabled} onCheckedChange={(v) => updateSetting("dt_enabled", v)} /></div>
             <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Confidence: {s.dt_confidence_threshold}</label>
-                <Slider value={[s.dt_confidence_threshold || 75]} min={50} max={95} step={5}
-                  onValueChange={([v]) => updateSetting("dt_confidence_threshold", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Risk/Trade: {((s.dt_risk_per_trade_pct || 0.04) * 100).toFixed(0)}%</label>
-                <Slider value={[(s.dt_risk_per_trade_pct || 0.04) * 100]} min={1} max={10} step={1}
-                  onValueChange={([v]) => updateSetting("dt_risk_per_trade_pct", v / 100)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Positions: {s.dt_max_positions}</label>
-                <Slider value={[s.dt_max_positions || 6]} min={1} max={15} step={1}
-                  onValueChange={([v]) => updateSetting("dt_max_positions", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">TP: {s.dt_take_profit_pct}%</label>
-                <Slider value={[s.dt_take_profit_pct || 2.5]} min={0.5} max={10} step={0.5}
-                  onValueChange={([v]) => updateSetting("dt_take_profit_pct", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">SL: {s.dt_stop_loss_pct}%</label>
-                <Slider value={[s.dt_stop_loss_pct || 0.8]} min={0.3} max={5} step={0.1}
-                  onValueChange={([v]) => updateSetting("dt_stop_loss_pct", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Time Exit: {s.dt_time_exit_days} day(s)</label>
-                <Slider value={[s.dt_time_exit_days || 2]} min={1} max={5} step={1}
-                  onValueChange={([v]) => updateSetting("dt_time_exit_days", v)} />
-              </div>
+              <div><label className="text-xs text-slate-500 block mb-1">Confidence: {s.dt_confidence_threshold}</label><Slider value={[s.dt_confidence_threshold || 80]} min={50} max={95} step={5} onValueChange={([v]) => updateSetting("dt_confidence_threshold", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Risk/Trade: {((s.dt_risk_per_trade_pct || 0.04) * 100).toFixed(0)}%</label><Slider value={[(s.dt_risk_per_trade_pct || 0.04) * 100]} min={1} max={10} step={1} onValueChange={([v]) => updateSetting("dt_risk_per_trade_pct", v / 100)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Max Positions: {s.dt_max_positions}</label><Slider value={[s.dt_max_positions || 6]} min={1} max={15} step={1} onValueChange={([v]) => updateSetting("dt_max_positions", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">TP: {s.dt_take_profit_pct}%</label><Slider value={[s.dt_take_profit_pct || 2.5]} min={0.5} max={10} step={0.5} onValueChange={([v]) => updateSetting("dt_take_profit_pct", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">SL: {s.dt_stop_loss_pct}%</label><Slider value={[s.dt_stop_loss_pct || 0.8]} min={0.3} max={5} step={0.1} onValueChange={([v]) => updateSetting("dt_stop_loss_pct", v)} /></div>
             </div>
           </Card>
           <Card className="terminal-card p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm text-blue-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Long-Term</h3>
-              <Switch checked={s.lt_enabled} onCheckedChange={(v) => updateSetting("lt_enabled", v)} />
-            </div>
+            <div className="flex items-center justify-between mb-4"><h3 className="text-sm text-blue-400 flex items-center gap-1"><TrendingUp className="w-4 h-4" /> Long-Term</h3><Switch checked={s.lt_enabled} onCheckedChange={(v) => updateSetting("lt_enabled", v)} /></div>
             <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Confidence: {s.lt_confidence_threshold}</label>
-                <Slider value={[s.lt_confidence_threshold || 70]} min={50} max={95} step={5}
-                  onValueChange={([v]) => updateSetting("lt_confidence_threshold", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Position: {((s.lt_max_position_pct || 0.15) * 100).toFixed(0)}%</label>
-                <Slider value={[(s.lt_max_position_pct || 0.15) * 100]} min={5} max={25} step={1}
-                  onValueChange={([v]) => updateSetting("lt_max_position_pct", v / 100)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Positions: {s.lt_max_positions}</label>
-                <Slider value={[s.lt_max_positions || 8]} min={1} max={20} step={1}
-                  onValueChange={([v]) => updateSetting("lt_max_positions", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Trailing Stop: {s.lt_trailing_stop_pct}%</label>
-                <Slider value={[s.lt_trailing_stop_pct || 15]} min={5} max={30} step={1}
-                  onValueChange={([v]) => updateSetting("lt_trailing_stop_pct", v)} />
-              </div>
-            </div>
-          </Card>
-          <Card className="terminal-card p-4">
-            <h3 className="text-sm text-red-400 flex items-center gap-1 mb-4"><Shield className="w-4 h-4" /> Risk Management</h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Daily Loss: {s.max_daily_loss_pct}%</label>
-                <Slider value={[s.max_daily_loss_pct || 3]} min={1} max={10} step={0.5}
-                  onValueChange={([v]) => updateSetting("max_daily_loss_pct", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Max Drawdown: {s.max_portfolio_drawdown_pct}%</label>
-                <Slider value={[s.max_portfolio_drawdown_pct || 10]} min={3} max={25} step={1}
-                  onValueChange={([v]) => updateSetting("max_portfolio_drawdown_pct", v)} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Sector Cap: {s.max_sector_concentration_pct}%</label>
-                <Slider value={[s.max_sector_concentration_pct || 30]} min={10} max={50} step={5}
-                  onValueChange={([v]) => updateSetting("max_sector_concentration_pct", v)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-slate-500">Alert-Only (no trades)</label>
-                <Switch checked={s.alert_only_mode} onCheckedChange={(v) => updateSetting("alert_only_mode", v)} />
-              </div>
+              <div><label className="text-xs text-slate-500 block mb-1">Confidence: {s.lt_confidence_threshold}</label><Slider value={[s.lt_confidence_threshold || 75]} min={50} max={95} step={5} onValueChange={([v]) => updateSetting("lt_confidence_threshold", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Max Position: {((s.lt_max_position_pct || 0.15) * 100).toFixed(0)}%</label><Slider value={[(s.lt_max_position_pct || 0.15) * 100]} min={5} max={25} step={1} onValueChange={([v]) => updateSetting("lt_max_position_pct", v / 100)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Max Positions: {s.lt_max_positions}</label><Slider value={[s.lt_max_positions || 8]} min={1} max={20} step={1} onValueChange={([v]) => updateSetting("lt_max_positions", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Trailing Stop: {s.lt_trailing_stop_pct}%</label><Slider value={[s.lt_trailing_stop_pct || 15]} min={5} max={30} step={1} onValueChange={([v]) => updateSetting("lt_trailing_stop_pct", v)} /></div>
             </div>
           </Card>
         </TabsContent>
