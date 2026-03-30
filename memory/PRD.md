@@ -379,6 +379,19 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
   - 1,222 out of 1,250 stocks with historical performance data
   - 562 stocks with 25-30 years of data
   - Newer IPOs traced back as far as available
+- [x] **AI Auto-Trade System** — Full autonomous dual-engine trading
+  - AUTO ON/OFF master toggle with Emergency Stop
+  - **Stock Classifier**: Classifies 1,250 stocks as DAY_TRADE / LONG_TERM / WATCHLIST / NO_TRADE
+  - **Day Trading Engine**: Momentum, volume, breakout, sentiment triggers with entry/stop/target
+  - **Long-Term Engine**: Valuation, fundamentals, growth, quality triggers with thesis-break exits
+  - **Confidence Scoring**: Weighted 0-100 score per classification type
+  - **Risk Manager**: Max positions, daily loss limit, drawdown protection, sector concentration, cooldown
+  - **Position Sizer**: Confidence-based sizing with risk-per-trade limits
+  - **Market Regime Detector**: SPY-based regime (bullish/bearish/volatile/neutral) with parameter adjustment
+  - **Explainability**: Every trade decision shows buy reasons, reject reasons, exit plan, key indicators
+  - **Settings Panel**: Configurable sliders for both engines + risk management
+  - Backend: `/api/auto-trade/status|scan|toggle|settings|execute-cycle|history|emergency-pause`
+  - New file: `/app/backend/ai_trading_system.py` (modular engine)
 
 ### P2 (Medium Priority)
 - [ ] Compare stocks side-by-side
@@ -391,8 +404,9 @@ Build "ObaidTradez" - a secure, dark-themed AI trading and investing platform wi
 - [ ] Multi-language support
 
 ## Test Status
-- Backend: 100% (All endpoints working - iteration_17)
-- Frontend: 100% (All features working - iteration_17)
+- Backend: 100% (All endpoints working - iteration_18)
+- Frontend: 100% (All features working - iteration_18)
+- AI Auto-Trade System: 100% (verified iteration_18)
 - Mobile Sidebar: 100% (verified iteration_17)
 - Backtesting 30yr: 100% (verified iteration_17)
 - Historical Performance: 100% (verified iteration_16 & 17)
