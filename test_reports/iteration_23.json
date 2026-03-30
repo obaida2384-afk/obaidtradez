@@ -1,0 +1,147 @@
+{
+  "summary": "Completed comprehensive testing of Multi-Timeframe Confirmation (MTF) and Momentum Mode Bypass P1 features. All 10 backend API tests passed. All frontend UI components verified working correctly.",
+  
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "passed_tests": [
+    "Backend: POST /api/auth/access returns valid token with code 'Bullishalmarkhan7.7' - SUCCESS",
+    "Backend: GET /api/auto-trade/scan returns stats with mtf_conflict_rejections, momentum_mode_candidates, momentum_bypass_active - SUCCESS",
+    "Backend: Day trade candidates have mtf_aligned, has_tf_conflict, momentum_mode, momentum_bypass_active fields - SUCCESS",
+    "Backend: explanation.key_indicators includes mtf_5m, mtf_15m, mtf_1m, mtf_score, mtf_aligned, has_tf_conflict, momentum_mode, momentum_bypass_active - SUCCESS",
+    "Backend: Pipeline funnel tracks MTF conflict rejections in top_rejections - SUCCESS",
+    "Backend: Rejected candidates show MTF CONFLICT rejection reasons (5m structure opposes direction) - SUCCESS",
+    "Backend: Stats grid has all 9 required fields for display - SUCCESS",
+    "Backend: Buy reasons include 'MTF aligned: 5m+15m confirm' text for aligned candidates - SUCCESS",
+    "Backend: Momentum mode candidates tracked in stats (0 found during test - market conditions) - SUCCESS",
+    "Backend: Settings endpoint returns dt_confidence_threshold=65 - SUCCESS",
+    "Frontend: Auto Trade page loads with PAPER deploy mode badge - SUCCESS",
+    "Frontend: Auto Trade page shows CAUTIOUS risk mode badge - SUCCESS",
+    "Frontend: Auto Trade page shows NEUTRAL BEARISH | Vol: 14.8% regime badge - SUCCESS",
+    "Frontend: Diagnostics tab shows Pipeline Funnel with MTF rejection reasons highlighted in red - SUCCESS",
+    "Frontend: Diagnostics tab shows 'Multi-Timeframe & Momentum Mode' stats card with MTF Conflicts=6, Momentum Eligible=0, Momentum Bypassed=0, Setups Found=22, Filters Passed=15 - SUCCESS",
+    "Frontend: Candidates tab shows 9-column stats grid: Scanned(1250), T1 Analyzed(75), T2 Deep(20), Setups(22), MTF Conflicts(6), Momentum(0), Day Trades(12), Watchlist(149), Rejected(307) - SUCCESS",
+    "Frontend: Day trade candidates show MTF OK badge when mtf_aligned is true (VECO, NFLX, HAL, UNFI, CLMT, RSI, HESM, DOW, WM, NE, OHI) - SUCCESS",
+    "Frontend: Rejected candidates show TF CONFLICT badge when has_tf_conflict is true (SM, NEE, MO, BRX, VZ, STM) - SUCCESS",
+    "Frontend: Expanding candidate card shows MULTI-TIMEFRAME CONFIRMATION panel with 15m Trend, 5m Structure, 1m Timing, MTF Score - SUCCESS",
+    "Frontend: Buy reasons include 'MTF aligned: 5m+15m confirm SHORT (3/5)' text for aligned candidates - SUCCESS",
+    "Frontend: Rejected / Near-Miss DT section shows candidates with TF CONFLICT badges - SUCCESS"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/tests/test_mtf_momentum_mode.py",
+    "/app/test_reports/pytest/pytest_mtf_momentum_mode.xml"
+  ],
+  
+  "action_items": [],
+  
+  "critical_code_review_comments": [
+    "MTF Confirmation correctly implements strict rules: 1min=entry timing, 5min=structure, 15min=trend",
+    "LONGs correctly require 5m bullish + 15m supportive/neutral (ranging acceptable)",
+    "SHORTs correctly require 5m bearish + 15m supportive/neutral (ranging acceptable)",
+    "1m conflicts correctly downgrade confidence only (not hard reject)",
+    "MTF scoring: aligned=+12 confidence, partial=+5, tf_conflict=-15, 1m_conflict=-5",
+    "Momentum Mode correctly requires: RelVol>2, breakout/breakdown setup, clear HH/HL or LH/LL, VWAP aligned, spread<=0.5%, NOT overextended, NOT fake breakout",
+    "Momentum Mode bypasses soft filters (RelVol minimum) but NOT risk rules, fake breakout, overextension, spread, or MTF conflicts",
+    "Pipeline funnel correctly tracks mtf_timeframe_conflict rejections with specific reasons (5m structure opposes direction)",
+    "Stats correctly include mtf_conflict_rejections, momentum_mode_candidates, momentum_bypass_active",
+    "Frontend correctly displays MTF OK badge (cyan) for aligned candidates and TF CONFLICT badge (red) for conflicting candidates",
+    "Frontend MTF panel correctly shows 15m Trend, 5m Structure, 1m Timing, MTF Score with color-coded values"
+  ],
+  
+  "updated_files": [
+    "/app/backend/tests/test_mtf_momentum_mode.py"
+  ],
+  
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (all UI components verified)"
+  },
+  
+  "test_credentials": {
+    "access_code": "Bullishalmarkhan7.7"
+  },
+  
+  "seed_data_creation": "None required - using live market data from Polygon API and cached TA signals in MongoDB",
+  
+  "retest_needed": false,
+  
+  "should_main_agent_self_test": false,
+  
+  "context_for_next_testing_agent": "MTF Confirmation and Momentum Mode Bypass P1 features fully tested. Key features verified: 1) Stats include mtf_conflict_rejections, momentum_mode_candidates, momentum_bypass_active. 2) Day trade candidates have mtf_aligned, has_tf_conflict, momentum_mode, momentum_bypass_active fields. 3) explanation.key_indicators includes mtf_5m, mtf_15m, mtf_1m, mtf_score. 4) Pipeline funnel tracks MTF rejections with specific reasons. 5) Frontend shows MTF OK badge (cyan) for aligned candidates, TF CONFLICT badge (red) for conflicting candidates. 6) Expanded candidate card shows MULTI-TIMEFRAME CONFIRMATION panel with 15m Trend, 5m Structure, 1m Timing, MTF Score. 7) Diagnostics tab shows 'Multi-Timeframe & Momentum Mode' stats card. 8) Candidates tab shows 9-column stats grid including MTF Conflicts and Momentum columns. 9) Buy reasons include 'MTF aligned: 5m+15m confirm' text. 10) Momentum Mode was 0 during testing (market conditions - no explosive movers meeting all criteria).",
+  
+  "verified_features": {
+    "mtf_confirmation": {
+      "rules": {
+        "1m": "entry timing only, conflicts downgrade confidence",
+        "5m": "structure - must be supportive (bullish for LONG, bearish for SHORT, ranging acceptable)",
+        "15m": "trend - must be supportive/neutral"
+      },
+      "scoring": {
+        "aligned": "+12 confidence",
+        "partial": "+5 confidence",
+        "tf_conflict": "-15 confidence",
+        "1m_conflict": "-5 confidence"
+      },
+      "badges": {
+        "mtf_ok": "cyan badge for aligned candidates",
+        "tf_conflict": "red badge for conflicting candidates"
+      }
+    },
+    "momentum_mode_bypass": {
+      "requirements": [
+        "RelVol >= 2.0",
+        "Breakout/breakdown setup (breakout_long, breakdown_short, liquidity_sweep_long, liquidity_sweep_short)",
+        "Clear structure (HH+HL for bullish, LH+LL for bearish)",
+        "VWAP aligned with direction",
+        "Spread <= 0.5%",
+        "NOT overextended",
+        "NOT fake breakout"
+      ],
+      "bypasses": ["RelVol minimum soft filter"],
+      "does_not_bypass": ["Risk rules", "Fake breakout", "Overextension", "Spread", "MTF conflicts"]
+    },
+    "stats_fields": [
+      "mtf_conflict_rejections",
+      "momentum_mode_candidates",
+      "momentum_bypass_active"
+    ],
+    "candidate_fields": [
+      "mtf_aligned",
+      "has_tf_conflict",
+      "momentum_mode",
+      "momentum_bypass_active"
+    ],
+    "key_indicators_fields": [
+      "mtf_5m",
+      "mtf_15m",
+      "mtf_1m",
+      "mtf_score",
+      "mtf_aligned",
+      "has_tf_conflict",
+      "momentum_mode",
+      "momentum_bypass_active"
+    ],
+    "frontend_components": {
+      "mtf_momentum_stats_card": "Shows MTF Conflicts, Momentum Eligible, Momentum Bypassed, Setups Found, Filters Passed",
+      "stats_grid_9_columns": "Scanned, T1 Analyzed, T2 Deep, Setups, MTF Conflicts, Momentum, Day Trades, Watchlist, Rejected",
+      "mtf_panel": "Shows 15m Trend, 5m Structure, 1m Timing, MTF Score in expanded candidate card",
+      "pipeline_funnel": "Shows MTF rejection reasons highlighted in red"
+    },
+    "observed_data": {
+      "mtf_conflicts": 6,
+      "momentum_eligible": 0,
+      "momentum_bypassed": 0,
+      "day_trades_with_mtf_ok": 11,
+      "rejected_with_tf_conflict": 6
+    }
+  }
+}

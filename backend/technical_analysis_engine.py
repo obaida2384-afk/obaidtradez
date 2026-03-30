@@ -638,55 +638,156 @@ class OverextensionFilter:
 # ===================== MULTI-TIMEFRAME CONFIRMER =====================
 
 class MultiTimeframeConfirmer:
-    """Confirm trade direction across 1m (entry), 5m (structure), 15m (trend)"""
+    """Strict Multi-Timeframe Confirmation:
+    - 1-min = entry timing ONLY (never the sole reason)
+    - 5-min = structure (bullish/bearish/ranging)
+    - 15-min = trend direction
+    Rules:
+    - LONG requires 5m bullish AND 15m supportive/neutral
+    - SHORT requires 5m bearish AND 15m supportive/neutral
+    - 1m conflict with 5m/15m → downgrade confidence
+    """
 
     @staticmethod
     def confirm(bars_1m: List[Dict], bars_5m: List[Dict],
                 bars_15m: List[Dict], direction: str) -> Dict:
         score = 0
         details = []
+        reject_reasons = []
 
-        # 15-min trend
+        struct_5m = "unknown"
+        struct_15m = "unknown"
+        timing_1m = "neutral"
+
+        # === 15-min TREND (the macro filter) ===
+        trend_15_supportive = False
+        trend_15_opposing = False
         if bars_15m and len(bars_15m) >= 5:
-            struct_15 = MarketStructureAnalyzer.analyze_structure(bars_15m)
-            if direction == "LONG" and struct_15["structure"] == "bullish":
-                score += 2
-                details.append("15m trend: bullish")
-            elif direction == "SHORT" and struct_15["structure"] == "bearish":
-                score += 2
-                details.append("15m trend: bearish")
-            elif struct_15["structure"] == "ranging":
-                score += 1
-                details.append("15m trend: ranging (neutral)")
-            else:
-                details.append(f"15m trend: {struct_15['structure']} (opposing)")
+            s15 = MarketStructureAnalyzer.analyze_structure(bars_15m)
+            struct_15m = s15["structure"]
+            if direction == "LONG":
+                if struct_15m == "bullish":
+                    score += 2
+                    trend_15_supportive = True
+                    details.append("15m trend: bullish (supportive)")
+                elif struct_15m == "ranging":
+                    score += 1
+                    trend_15_supportive = True
+                    details.append("15m trend: ranging (neutral, acceptable)")
+                else:
+                    trend_15_opposing = True
+                    details.append(f"15m trend: {struct_15m} (OPPOSING long)")
+                    reject_reasons.append(f"15m trend {struct_15m} opposes LONG direction")
+            elif direction == "SHORT":
+                if struct_15m == "bearish":
+                    score += 2
+                    trend_15_supportive = True
+                    details.append("15m trend: bearish (supportive)")
+                elif struct_15m == "ranging":
+                    score += 1
+                    trend_15_supportive = True
+                    details.append("15m trend: ranging (neutral, acceptable)")
+                else:
+                    trend_15_opposing = True
+                    details.append(f"15m trend: {struct_15m} (OPPOSING short)")
+                    reject_reasons.append(f"15m trend {struct_15m} opposes SHORT direction")
+        else:
+            details.append("15m: insufficient data")
 
-        # 5-min structure
+        # === 5-min STRUCTURE (the structural filter) ===
+        struct_5_supportive = False
+        struct_5_opposing = False
         if bars_5m and len(bars_5m) >= 5:
-            struct_5 = MarketStructureAnalyzer.analyze_structure(bars_5m)
-            if direction == "LONG" and struct_5["structure"] in ("bullish", "ranging"):
-                score += 1
-                details.append(f"5m structure: {struct_5['structure']}")
-            elif direction == "SHORT" and struct_5["structure"] in ("bearish", "ranging"):
-                score += 1
-                details.append(f"5m structure: {struct_5['structure']}")
-            else:
-                details.append(f"5m structure: {struct_5['structure']} (opposing)")
+            s5 = MarketStructureAnalyzer.analyze_structure(bars_5m)
+            struct_5m = s5["structure"]
+            if direction == "LONG":
+                if struct_5m == "bullish":
+                    score += 2
+                    struct_5_supportive = True
+                    details.append("5m structure: bullish (confirmed)")
+                elif struct_5m == "ranging":
+                    score += 1
+                    struct_5_supportive = True
+                    details.append("5m structure: ranging (acceptable)")
+                else:
+                    struct_5_opposing = True
+                    details.append(f"5m structure: {struct_5m} (OPPOSING long)")
+                    reject_reasons.append(f"5m structure {struct_5m} opposes LONG direction")
+            elif direction == "SHORT":
+                if struct_5m == "bearish":
+                    score += 2
+                    struct_5_supportive = True
+                    details.append("5m structure: bearish (confirmed)")
+                elif struct_5m == "ranging":
+                    score += 1
+                    struct_5_supportive = True
+                    details.append("5m structure: ranging (acceptable)")
+                else:
+                    struct_5_opposing = True
+                    details.append(f"5m structure: {struct_5m} (OPPOSING short)")
+                    reject_reasons.append(f"5m structure {struct_5m} opposes SHORT direction")
+        else:
+            details.append("5m: insufficient data")
 
-        # 1-min entry timing
+        # === 1-min ENTRY TIMING (timing only, never sole reason) ===
+        timing_1m_aligned = False
+        timing_1m_conflicting = False
         if bars_1m and len(bars_1m) >= 3:
             last_3 = bars_1m[-3:]
+            bullish_candles = sum(1 for b in last_3 if b["c"] > b["o"])
+            bearish_candles = sum(1 for b in last_3 if b["c"] < b["o"])
             if direction == "LONG":
-                if last_3[-1]["c"] > last_3[-1]["o"]:
+                if bullish_candles >= 2:
                     score += 1
-                    details.append("1m: bullish candle")
-            else:
-                if last_3[-1]["c"] < last_3[-1]["o"]:
+                    timing_1m_aligned = True
+                    timing_1m = "bullish"
+                    details.append(f"1m timing: bullish ({bullish_candles}/3 green candles)")
+                elif bearish_candles >= 2:
+                    timing_1m_conflicting = True
+                    timing_1m = "bearish"
+                    details.append(f"1m timing: bearish conflict ({bearish_candles}/3 red candles)")
+                else:
+                    timing_1m = "mixed"
+                    details.append("1m timing: mixed (no clear signal)")
+            elif direction == "SHORT":
+                if bearish_candles >= 2:
                     score += 1
-                    details.append("1m: bearish candle")
+                    timing_1m_aligned = True
+                    timing_1m = "bearish"
+                    details.append(f"1m timing: bearish ({bearish_candles}/3 red candles)")
+                elif bullish_candles >= 2:
+                    timing_1m_conflicting = True
+                    timing_1m = "bullish"
+                    details.append(f"1m timing: bullish conflict ({bullish_candles}/3 green candles)")
+                else:
+                    timing_1m = "mixed"
+                    details.append("1m timing: mixed (no clear signal)")
+        else:
+            details.append("1m: insufficient data")
 
-        aligned = score >= 3
-        return {"aligned": aligned, "score": score, "max": 4, "details": details}
+        # === ALIGNMENT DECISION ===
+        # Hard requirement: 5m structure + 15m trend must BOTH be supportive
+        mtf_aligned = struct_5_supportive and trend_15_supportive
+        # If 1m conflicts with higher timeframes, it's a confidence downgrade (not hard reject)
+        has_1m_conflict = timing_1m_conflicting and mtf_aligned
+        # Hard timeframe conflict: 5m or 15m opposing the trade direction
+        has_tf_conflict = struct_5_opposing or trend_15_opposing
+
+        return {
+            "aligned": mtf_aligned,
+            "score": score,
+            "max": 5,
+            "details": details,
+            "reject_reasons": reject_reasons,
+            "struct_5m": struct_5m,
+            "struct_15m": struct_15m,
+            "timing_1m": timing_1m,
+            "struct_5_supportive": struct_5_supportive,
+            "trend_15_supportive": trend_15_supportive,
+            "timing_1m_aligned": timing_1m_aligned,
+            "has_tf_conflict": has_tf_conflict,
+            "has_1m_conflict": has_1m_conflict,
+        }
 
 
 # ===================== FULL TECHNICAL SIGNAL GENERATOR =====================
@@ -744,17 +845,28 @@ class TechnicalSignalGenerator:
                     best_setup = best_short
                     direction = "SHORT"
 
-            # 7. Multi-timeframe confirmation
+            # 7. Multi-timeframe confirmation (strict rules)
             mtf = MultiTimeframeConfirmer.confirm(bars_1m, bars_5m, bars_15m, direction)
 
-            # 8. Compute base confidence
+            # 8. Compute base confidence with MTF integration
             base_confidence = 45
             if best_setup:
                 base_confidence += best_setup["confidence_boost"]
+
+            # MTF scoring: aligned = 5m+15m supportive
             if mtf["aligned"]:
-                base_confidence += 10
+                base_confidence += 12  # Full alignment: strong boost
+                if mtf.get("timing_1m_aligned"):
+                    base_confidence += 3  # All 3 timeframes aligned
             elif mtf["score"] >= 2:
-                base_confidence += 5
+                base_confidence += 5  # Partial alignment
+            # Hard penalty: timeframe conflict (5m or 15m opposing direction)
+            if mtf.get("has_tf_conflict"):
+                base_confidence -= 15
+            # Soft penalty: 1m conflicts with higher timeframes
+            if mtf.get("has_1m_conflict"):
+                base_confidence -= 5
+
             if indicators["rel_vol"] >= 2.0:
                 base_confidence += 8
             elif indicators["rel_vol"] >= 1.3:
@@ -786,11 +898,53 @@ class TechnicalSignalGenerator:
 
             base_confidence = max(0, min(100, base_confidence))
 
-            # Momentum mode: strong volume + breakout + structure → bypass soft filters
-            momentum_mode = (indicators["rel_vol"] >= 2.0
-                             and best_setup is not None
-                             and structure["structure"] in ("bullish", "bearish")
-                             and not fake and not overextended)
+            # Momentum Mode: strict disciplined bypass for explosive movers
+            # Requirements: RelVol>2, strong breakout/breakdown, clear structure,
+            # VWAP aligned, acceptable spread, NOT overextended, NOT fake breakout
+            is_breakout_setup = best_setup is not None and best_setup.get("type", "") in (
+                "breakout_long", "breakdown_short", "liquidity_sweep_long", "liquidity_sweep_short"
+            )
+            has_clear_structure = (
+                (structure.get("hh") and structure.get("hl"))  # HH+HL = bullish
+                or (structure.get("lh") and structure.get("ll"))  # LH+LL = bearish
+            )
+            vwap_aligned = (
+                (direction == "LONG" and indicators.get("above_vwap", False))
+                or (direction == "SHORT" and not indicators.get("above_vwap", True))
+            )
+            spread_ok = indicators.get("spread_pct", 1) <= 0.5
+
+            momentum_mode = (
+                indicators["rel_vol"] >= 2.0
+                and is_breakout_setup
+                and has_clear_structure
+                and vwap_aligned
+                and spread_ok
+                and not fake
+                and not overextended
+            )
+
+            # Momentum mode reasons for diagnostics
+            momentum_reasons = []
+            if momentum_mode:
+                momentum_reasons.append(f"RelVol {indicators['rel_vol']:.1f}x")
+                momentum_reasons.append(f"Setup: {best_setup['type']}")
+                momentum_reasons.append(f"Structure: HH/HL" if direction == "LONG" else f"Structure: LH/LL")
+                momentum_reasons.append(f"VWAP aligned ({direction})")
+            momentum_miss_reasons = []
+            if indicators["rel_vol"] >= 2.0 and not momentum_mode:
+                if not is_breakout_setup:
+                    momentum_miss_reasons.append("No breakout/breakdown setup")
+                if not has_clear_structure:
+                    momentum_miss_reasons.append("No clear HH/HL or LH/LL structure")
+                if not vwap_aligned:
+                    momentum_miss_reasons.append("VWAP not aligned with direction")
+                if not spread_ok:
+                    momentum_miss_reasons.append(f"Spread too wide: {indicators.get('spread_pct', 0):.2f}%")
+                if fake:
+                    momentum_miss_reasons.append("Fake breakout detected")
+                if overextended:
+                    momentum_miss_reasons.append("Overextended")
 
             # 9. Stop and target
             stop_loss = 0
@@ -820,6 +974,8 @@ class TechnicalSignalGenerator:
                 "direction": direction,
                 "confidence": base_confidence,
                 "momentum_mode": momentum_mode,
+                "momentum_reasons": momentum_reasons,
+                "momentum_miss_reasons": momentum_miss_reasons,
                 "best_setup": best_setup,
                 "all_setups": setups,
                 "structure": structure,
@@ -835,7 +991,8 @@ class TechnicalSignalGenerator:
                 "reject_reasons": (
                     ([fake["reason"]] if fake else []) +
                     ([ext_reason] if overextended else []) +
-                    ([f"Wide spread: {indicators['spread_pct']:.2f}%"] if indicators["spread_pct"] > 0.5 else [])
+                    ([f"Wide spread: {indicators['spread_pct']:.2f}%"] if indicators["spread_pct"] > 0.5 else []) +
+                    (mtf.get("reject_reasons", []))
                 ),
             }
             TACache.set(symbol, result)
@@ -943,7 +1100,18 @@ class TechnicalSignalGenerator:
                 base_confidence -= 2
             base_confidence = max(0, min(100, base_confidence))
 
-            momentum_mode = rel_vol >= 2.0 and structure.get("structure") in ("bullish", "bearish")
+            momentum_mode = (
+                rel_vol >= 2.0
+                and structure.get("structure") in ("bullish", "bearish")
+                and best_setup is not None
+                and best_setup.get("type", "") in (
+                    "breakout_long", "breakdown_short",
+                    "liquidity_sweep_long", "liquidity_sweep_short"
+                )
+                and not fake
+                and not overextended
+                and indicators.get("spread_pct", 1) <= 0.5
+            )
 
             # Stop/target from setup or ATR
             avg_range = indicators.get("avg_range", price * 0.01)

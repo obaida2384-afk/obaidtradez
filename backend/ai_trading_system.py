@@ -872,7 +872,12 @@ class DayTradingEngine:
                      market_regime: Dict, settings: AutoTradeSettings) -> TradeExplanation:
         """Evaluate day trade using Technical Analysis signal as PRIMARY driver.
         News is used ONLY as a confidence boost, never as a gate.
-        Technical structure drives the decision. No catalyst gate."""
+        Technical structure drives the decision. No catalyst gate.
+        Strict Multi-Timeframe Confirmation:
+        - LONG requires 5m bullish + 15m supportive/neutral
+        - SHORT requires 5m bearish + 15m supportive/neutral
+        - 1m conflict → confidence downgrade
+        Momentum Mode: disciplined bypass for explosive movers."""
         symbol = ta_signal.get("symbol", "")
         explanation = TradeExplanation(
             ticker=symbol,
@@ -914,23 +919,26 @@ class DayTradingEngine:
             explanation.key_indicators = {"direction": direction, "reject_stage": "no_setup"}
             return explanation
 
-        # 3. Spread filter (<= 0.5%)
+        # 3. Spread filter (<= 0.5%) — Momentum Mode does NOT bypass this
         spread = indicators.get("spread_pct", 0)
         if spread > 0.5:
             reject_reasons.append(f"Spread too wide: {spread:.2f}% (max 0.5%)")
 
-        # 4. RelVol filter (>= 1.3, momentum mode bypasses)
+        # 4. RelVol filter (>= 1.3, Momentum Mode bypasses to 1.0)
         rel_vol = indicators.get("rel_vol", 0)
-        if rel_vol < 1.3 and not momentum_mode:
+        if momentum_mode:
+            # Momentum mode: relaxed RelVol (already guaranteed >= 2.0)
+            entry_reasons.append(f"MOMENTUM MODE: RelVol {rel_vol:.1f}x (explosive volume)")
+        elif rel_vol < 1.3:
             reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (min 1.3x)")
-        elif rel_vol >= 2.0:
+        if rel_vol >= 2.0:
             entry_reasons.append(f"Strong volume surge: {rel_vol:.1f}x")
 
-        # 5. Overextension check
+        # 5. Overextension check — Momentum Mode does NOT bypass this
         if ta_signal.get("overextended"):
             reject_reasons.append(f"Overextended: {ta_signal.get('overextension_reason', 'price too far from VWAP')}")
 
-        # 6. Fake breakout penalty (not a hard reject, but heavy confidence penalty)
+        # 6. Fake breakout penalty — Momentum Mode does NOT bypass this
         fake = ta_signal.get("fake_breakout")
         if fake:
             reject_reasons.append(f"Fake breakout: {fake.get('reason', 'bull/bear trap detected')}")
@@ -951,9 +959,28 @@ class DayTradingEngine:
         elif struct_type == "ranging":
             entry_reasons.append("Ranging structure (breakout potential)")
 
-        # 9. MTF confirmation
-        if mtf.get("aligned"):
-            entry_reasons.append(f"Multi-timeframe aligned ({mtf.get('score', 0)}/4)")
+        # === MULTI-TIMEFRAME CONFIRMATION (STRICT GATE) ===
+        mtf_aligned = mtf.get("aligned", False)
+        has_tf_conflict = mtf.get("has_tf_conflict", False)
+        has_1m_conflict = mtf.get("has_1m_conflict", False)
+        mtf_reject_reasons = mtf.get("reject_reasons", [])
+
+        if mtf_aligned:
+            entry_reasons.append(f"MTF aligned: 5m+15m confirm {direction} ({mtf.get('score', 0)}/{mtf.get('max', 5)})")
+            if mtf.get("timing_1m_aligned"):
+                entry_reasons.append("1m timing confirms entry")
+        elif has_tf_conflict and not momentum_mode:
+            # HARD REJECT: 5m or 15m opposing direction (not bypassed by Momentum Mode)
+            for r in mtf_reject_reasons:
+                reject_reasons.append(f"MTF CONFLICT: {r}")
+        elif has_tf_conflict and momentum_mode:
+            # Momentum Mode does NOT bypass timeframe conflict
+            for r in mtf_reject_reasons:
+                reject_reasons.append(f"MTF CONFLICT: {r} (not bypassed by Momentum Mode)")
+
+        # 1m conflict: soft downgrade (not a hard reject)
+        if has_1m_conflict:
+            reject_reasons.append(f"1m timing conflicts with {direction} direction (soft downgrade)")
 
         # 10. RSI context
         rsi = indicators.get("rsi", 50)
@@ -987,18 +1014,44 @@ class DayTradingEngine:
 
         confidence = max(0, min(100, confidence))
 
+        # === MOMENTUM MODE BYPASS LOGIC ===
+        # Momentum mode can bypass: RelVol minimum (already handled), confidence threshold softening
+        # Momentum mode CANNOT bypass: spread, fake breakout, overextension, MTF conflict, risk rules
+        momentum_bypass_active = False
+        if momentum_mode:
+            # Check if all non-bypassable filters pass
+            hard_reject_keywords_momentum = ["spread too wide", "overextended", "fake breakout", "mtf conflict"]
+            has_hard_block = any(
+                any(kw in r.lower() for kw in hard_reject_keywords_momentum)
+                for r in reject_reasons
+            )
+            if not has_hard_block:
+                momentum_bypass_active = True
+                entry_reasons.append("Momentum Mode ACTIVE: bypassing conservative filters")
+                for r in list(ta_signal.get("momentum_reasons", [])):
+                    entry_reasons.append(f"  Momentum: {r}")
+
         # === DECISION ===
-        # Hard filter rejects: spread, RelVol, overextension
-        hard_reject_keywords = ["spread too wide", "relvol too low", "overextended"]
+        # Hard filter rejects (never bypassed, even by momentum mode)
+        hard_reject_keywords = ["spread too wide", "overextended", "mtf conflict"]
         hard_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in hard_reject_keywords)]
+
+        # Soft rejects (can be bypassed by momentum mode)
+        soft_reject_keywords = ["relvol too low", "poor r:r", "1m timing conflicts"]
+        soft_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in soft_reject_keywords)]
+
+        # Filter out soft rejects if momentum mode is active
+        effective_rejects = reject_reasons.copy()
+        if momentum_bypass_active:
+            effective_rejects = [r for r in reject_reasons if r not in soft_rejects]
 
         if hard_rejects:
             explanation.action = "REJECT"
             explanation.reject_reasons = reject_reasons
-        elif len(reject_reasons) >= 3:
+        elif len(effective_rejects) >= 3:
             explanation.action = "REJECT"
             explanation.reject_reasons = reject_reasons
-        elif len(entry_reasons) >= 2 and len(reject_reasons) <= 1:
+        elif len(entry_reasons) >= 2 and len(effective_rejects) <= 1:
             explanation.action = "BUY"
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
@@ -1038,9 +1091,14 @@ class DayTradingEngine:
             "macd_crossover": indicators.get("macd", {}).get("crossover", "none"),
             "vwap_distance_pct": indicators.get("vwap_distance_pct", 0),
             "above_vwap": indicators.get("above_vwap"),
-            "mtf_aligned": mtf.get("aligned", False),
-            "mtf_score": f"{mtf.get('score', 0)}/4",
+            "mtf_aligned": mtf_aligned,
+            "mtf_score": f"{mtf.get('score', 0)}/{mtf.get('max', 5)}",
+            "mtf_5m": mtf.get("struct_5m", "?"),
+            "mtf_15m": mtf.get("struct_15m", "?"),
+            "mtf_1m": mtf.get("timing_1m", "?"),
+            "has_tf_conflict": has_tf_conflict,
             "momentum_mode": momentum_mode,
+            "momentum_bypass_active": momentum_bypass_active,
             "news_boost": news_boost,
             "rr_ratio": rr,
             "overextended": ta_signal.get("overextended", False),
@@ -1484,6 +1542,9 @@ class AutoTradeOrchestrator:
 
         # === PHASE 3 (TIER 2): Deep multi-timeframe analysis on top candidates ===
         tier2_symbols = [r["symbol"] for r in tier2_candidates]
+        # Clear TACache for Tier 2 symbols so full analyze() runs fresh with all timeframes
+        for sym in tier2_symbols:
+            TACache._cache.pop(sym, None)
         tier2_start = _time.monotonic()
         tier2_results = await TechnicalSignalGenerator.batch_analyze(tier2_symbols, max_concurrent=8)
         tier2_duration = round(_time.monotonic() - tier2_start, 1)
@@ -1516,6 +1577,9 @@ class AutoTradeOrchestrator:
         rejected = []
         setup_count = 0
         filters_passed_count = 0
+        mtf_conflict_count = 0
+        momentum_mode_count = 0
+        momentum_bypass_count = 0
 
         for ta_sig in final_ta_results:
             symbol = ta_sig["symbol"]
@@ -1532,6 +1596,17 @@ class AutoTradeOrchestrator:
 
             if ta_sig.get("best_setup"):
                 setup_count += 1
+
+            # Track MTF conflicts and Momentum Mode
+            mtf_data = ta_sig.get("mtf_confirmation", {})
+            if mtf_data.get("has_tf_conflict"):
+                mtf_conflict_count += 1
+                funnel.reject("mtf_timeframe_conflict")
+            if ta_sig.get("momentum_mode"):
+                momentum_mode_count += 1
+            ki = explanation.key_indicators
+            if isinstance(ki, dict) and ki.get("momentum_bypass_active"):
+                momentum_bypass_count += 1
 
             indicators = ta_sig.get("indicators", {})
             spread_ok = indicators.get("spread_pct", 0) <= 0.5
@@ -1551,6 +1626,10 @@ class AutoTradeOrchestrator:
                 "best_setup": ta_sig.get("best_setup", {}).get("type", "none") if ta_sig.get("best_setup") else "none",
                 "tier1_score": ta_sig.get("tier1_score", 0),
                 "analysis_mode": ta_sig.get("analysis_mode", "fast"),
+                "momentum_mode": ta_sig.get("momentum_mode", False),
+                "momentum_bypass_active": ki.get("momentum_bypass_active", False) if isinstance(ki, dict) else False,
+                "mtf_aligned": mtf_data.get("aligned", False),
+                "has_tf_conflict": mtf_data.get("has_tf_conflict", False),
                 "dt_score": confidence,
                 "lt_score": 0,
             }
@@ -1637,6 +1716,9 @@ class AutoTradeOrchestrator:
                 diagnostics.add_reason("No stocks returned valid TA data from Polygon")
             elif setup_count == 0:
                 diagnostics.add_reason(f"TA analyzed {len(tier1_results)} stocks but no technical setups found")
+            elif mtf_conflict_count > 0:
+                diagnostics.add_reason(
+                    f"{mtf_conflict_count} stocks rejected due to multi-timeframe conflict (5m/15m opposing direction)")
             elif filters_passed_count == 0:
                 diagnostics.add_reason(f"{setup_count} setups found but all filtered by spread/RelVol/overextension")
             else:
@@ -1670,6 +1752,7 @@ class AutoTradeOrchestrator:
             f"Scan complete in {cycle_duration}s | T1: {len(tier1_results)}/{len(tier1_candidates)} in {tier1_duration}s | "
             f"T2: {len(tier2_results)}/{len(tier2_symbols)} in {tier2_duration}s | "
             f"DT: {len(day_trade_candidates)}, LT: {len(long_term_candidates)} | "
+            f"MTF conflicts: {mtf_conflict_count}, Momentum: {momentum_mode_count} (bypassed: {momentum_bypass_count}) | "
             f"Cache hit: {cache_stats.get('hit_rate', 0)}%"
         )
 
@@ -1693,6 +1776,9 @@ class AutoTradeOrchestrator:
                 "tier2_deep": len(tier2_results),
                 "setups_found": setup_count,
                 "filters_passed": filters_passed_count,
+                "mtf_conflict_rejections": mtf_conflict_count,
+                "momentum_mode_candidates": momentum_mode_count,
+                "momentum_bypass_active": momentum_bypass_count,
                 "day_trade_candidates": len(day_trade_candidates),
                 "long_term_candidates": len(long_term_candidates),
                 "watchlist": len(watchlist),

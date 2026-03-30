@@ -119,6 +119,12 @@ const PipelineFunnel = ({ funnel }) => {
     { key: "executed", label: "Executed", icon: Play },
   ];
   const maxVal = Math.max(1, ...Object.values(funnel.funnel));
+
+  // Separate MTF and Momentum rejections for special display
+  const mtfRejections = Object.entries(funnel.top_rejections || {}).filter(([k]) => k.toLowerCase().includes('mtf') || k.toLowerCase().includes('timeframe'));
+  const momentumRejections = Object.entries(funnel.top_rejections || {}).filter(([k]) => k.toLowerCase().includes('momentum'));
+  const otherRejections = Object.entries(funnel.top_rejections || {}).filter(([k]) => !k.toLowerCase().includes('mtf') && !k.toLowerCase().includes('timeframe') && !k.toLowerCase().includes('momentum'));
+
   return (
     <Card className="terminal-card p-4" data-testid="pipeline-funnel">
       <div className="flex items-center gap-2 mb-3">
@@ -147,11 +153,21 @@ const PipelineFunnel = ({ funnel }) => {
           );
         })}
       </div>
-      {funnel.top_rejections && Object.keys(funnel.top_rejections).length > 0 && (
+      {(mtfRejections.length > 0 || momentumRejections.length > 0 || otherRejections.length > 0) && (
         <div className="mt-3 pt-2 border-t border-slate-800">
           <p className="text-[10px] text-slate-500 mb-1">Top Rejection Reasons</p>
           <div className="flex flex-wrap gap-1">
-            {Object.entries(funnel.top_rejections).slice(0, 6).map(([reason, count]) => (
+            {mtfRejections.map(([reason, count]) => (
+              <Badge key={reason} variant="outline" className="text-[10px] border-red-500/30 text-red-400">
+                {reason.replace(/_/g, " ")}: {count}
+              </Badge>
+            ))}
+            {momentumRejections.map(([reason, count]) => (
+              <Badge key={reason} variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">
+                {reason.replace(/_/g, " ")}: {count}
+              </Badge>
+            ))}
+            {otherRejections.slice(0, 6).map(([reason, count]) => (
               <Badge key={reason} variant="outline" className="text-[10px] border-slate-700 text-slate-400">
                 {reason.replace(/_/g, " ")}: {count}
               </Badge>
@@ -211,6 +227,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
   const exp = item.explanation || {};
   const isDay = item.classification === "DAY_TRADE";
   const signal = item.signal || {};
+  const ki = exp.key_indicators || {};
   return (
     <Card className="terminal-card overflow-hidden" data-testid={`candidate-${item.symbol}`}>
       <div className="p-4 cursor-pointer" onClick={onToggle}>
@@ -220,7 +237,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
               {isDay ? <Zap className="w-5 h-5 text-amber-400" /> : <TrendingUp className="w-5 h-5 text-blue-400" />}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-white font-bold">{item.symbol}</span>
                 <Badge variant="outline" className={`text-[10px] ${isDay ? 'border-amber-500/30 text-amber-400' : 'border-blue-500/30 text-blue-400'}`}>
                   {isDay ? "DAY TRADE" : "LONG TERM"}
@@ -231,6 +248,26 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
                   item.action === "NEAR_MISS" ? 'border-purple-500/30 text-purple-400' :
                   'border-red-500/30 text-red-400'
                 }`}>{item.action}</Badge>
+                {item.momentum_mode && (
+                  <Badge variant="outline" className="text-[10px] border-orange-500/40 text-orange-400 bg-orange-500/10 animate-pulse">
+                    MOMENTUM
+                  </Badge>
+                )}
+                {item.momentum_bypass_active && (
+                  <Badge variant="outline" className="text-[10px] border-orange-500/40 text-orange-300 bg-orange-500/15">
+                    BYPASS ACTIVE
+                  </Badge>
+                )}
+                {item.mtf_aligned && (
+                  <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">
+                    MTF OK
+                  </Badge>
+                )}
+                {item.has_tf_conflict && (
+                  <Badge variant="outline" className="text-[10px] border-red-500/40 text-red-400 bg-red-500/10">
+                    TF CONFLICT
+                  </Badge>
+                )}
               </div>
               <p className="text-xs text-slate-500">{isDay ? `${item.direction || ''} ${item.best_setup ? `- ${item.best_setup}` : ''}`.trim() : (signal.name || signal.company_name || "")}</p>
             </div>
@@ -248,6 +285,44 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
       </div>
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-slate-800 pt-3">
+          {/* MTF Details */}
+          {isDay && (ki.mtf_5m || ki.mtf_15m || ki.mtf_1m) && (
+            <div className="p-3 rounded bg-cyan-500/5 border border-cyan-500/20">
+              <p className="text-[10px] text-cyan-400 mb-1 font-medium">MULTI-TIMEFRAME CONFIRMATION</p>
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                <div className="text-center p-1.5 rounded bg-slate-800/50">
+                  <p className="text-[10px] text-slate-500">15m Trend</p>
+                  <p className={`font-mono text-[11px] ${ki.mtf_15m === 'bullish' ? 'text-emerald-400' : ki.mtf_15m === 'bearish' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {ki.mtf_15m || '?'}
+                  </p>
+                </div>
+                <div className="text-center p-1.5 rounded bg-slate-800/50">
+                  <p className="text-[10px] text-slate-500">5m Structure</p>
+                  <p className={`font-mono text-[11px] ${ki.mtf_5m === 'bullish' ? 'text-emerald-400' : ki.mtf_5m === 'bearish' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {ki.mtf_5m || '?'}
+                  </p>
+                </div>
+                <div className="text-center p-1.5 rounded bg-slate-800/50">
+                  <p className="text-[10px] text-slate-500">1m Timing</p>
+                  <p className={`font-mono text-[11px] ${ki.mtf_1m === 'bullish' ? 'text-emerald-400' : ki.mtf_1m === 'bearish' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {ki.mtf_1m || '?'}
+                  </p>
+                </div>
+                <div className="text-center p-1.5 rounded bg-slate-800/50">
+                  <p className="text-[10px] text-slate-500">MTF Score</p>
+                  <p className={`font-mono text-[11px] ${ki.mtf_aligned ? 'text-emerald-400' : ki.has_tf_conflict ? 'text-red-400' : 'text-amber-400'}`}>
+                    {ki.mtf_score || '?'}
+                  </p>
+                </div>
+              </div>
+              {ki.has_tf_conflict && (
+                <p className="text-[10px] text-red-400 mt-1">Timeframe conflict: higher timeframes oppose trade direction</p>
+              )}
+              {ki.momentum_bypass_active && (
+                <p className="text-[10px] text-orange-400 mt-1">Momentum Mode active: bypassing soft conservative filters</p>
+              )}
+            </div>
+          )}
           {exp.entry_reasons?.length > 0 && (
             <div className="p-3 rounded bg-emerald-500/5 border border-emerald-500/20">
               <p className="text-[10px] text-emerald-400 mb-1 font-medium">BUY REASONS</p>
@@ -285,7 +360,7 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
           )}
           {exp.key_indicators && (
             <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs">
-              {Object.entries(exp.key_indicators).filter(([k, v]) => v !== null && v !== undefined && v !== "" && k !== "diagnostic_tags").map(([k, v]) => (
+              {Object.entries(exp.key_indicators).filter(([k, v]) => v !== null && v !== undefined && v !== "" && !["diagnostic_tags", "mtf_5m", "mtf_15m", "mtf_1m", "mtf_score", "mtf_aligned", "has_tf_conflict", "momentum_bypass_active"].includes(k)).map(([k, v]) => (
                 <div key={k} className="text-center p-1.5 rounded bg-slate-800/50">
                   <p className="text-[10px] text-slate-500">{k.replace(/_/g, " ")}</p>
                   <p className="text-white font-mono text-[11px]">{typeof v === "number" ? v.toFixed(1) : String(v)}</p>
@@ -680,6 +755,47 @@ const AutoTrade = () => {
               )}
             </Card>
           )}
+          {/* MTF & Momentum Mode Stats */}
+          {opportunities?.stats && (
+            <Card className="terminal-card p-4" data-testid="mtf-momentum-stats">
+              <h3 className="text-xs text-cyan-400 mb-3 flex items-center gap-2"><Layers className="w-4 h-4" /> Multi-Timeframe & Momentum Mode</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div>
+                  <p className="text-slate-500">MTF Conflicts</p>
+                  <p className={`font-mono text-lg ${(opportunities.stats.mtf_conflict_rejections || 0) > 0 ? 'text-red-400' : 'text-slate-500'}`}>
+                    {opportunities.stats.mtf_conflict_rejections || 0}
+                  </p>
+                  <p className="text-[10px] text-slate-600">5m/15m opposing</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Momentum Eligible</p>
+                  <p className="text-orange-400 font-mono text-lg">{opportunities.stats.momentum_mode_candidates || 0}</p>
+                  <p className="text-[10px] text-slate-600">RelVol&gt;2 + breakout</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Momentum Bypassed</p>
+                  <p className="text-orange-300 font-mono text-lg">{opportunities.stats.momentum_bypass_active || 0}</p>
+                  <p className="text-[10px] text-slate-600">Soft filters bypassed</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Setups Found</p>
+                  <p className="text-blue-400 font-mono text-lg">{opportunities.stats.setups_found || 0}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Filters Passed</p>
+                  <p className="text-emerald-400 font-mono text-lg">{opportunities.stats.filters_passed || 0}</p>
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-800">
+                <p className="text-[10px] text-slate-600">
+                  MTF Rule: LONG requires 5m bullish + 15m supportive | SHORT requires 5m bearish + 15m supportive | 1m = timing only
+                </p>
+                <p className="text-[10px] text-slate-600">
+                  Momentum Mode: RelVol&gt;2, breakout/breakdown, clear HH/HL or LH/LL, VWAP aligned, tight spread — bypasses soft filters only
+                </p>
+              </div>
+            </Card>
+          )}
           {/* No Trade Panel */}
           <NoTradePanel summary={noTradeSummary} />
           {/* Dynamic Thresholds */}
@@ -715,11 +831,13 @@ const AutoTrade = () => {
           </div>
           {opportunities?.stats && (
             <Card className="terminal-card p-4">
-              <div className="grid grid-cols-3 md:grid-cols-7 gap-3 text-center">
+              <div className="grid grid-cols-3 md:grid-cols-9 gap-3 text-center">
                 <div><p className="text-2xl font-mono text-white">{opportunities.stats.total_scanned}</p><p className="text-[10px] text-slate-500">Scanned</p></div>
                 <div><p className="text-2xl font-mono text-cyan-400">{opportunities.stats.ta_analyzed || 0}</p><p className="text-[10px] text-slate-500">T1 Analyzed</p></div>
                 <div><p className="text-2xl font-mono text-indigo-400">{opportunities.stats.tier2_deep || 0}</p><p className="text-[10px] text-slate-500">T2 Deep</p></div>
                 <div><p className="text-2xl font-mono text-blue-400">{opportunities.stats.setups_found || 0}</p><p className="text-[10px] text-slate-500">Setups</p></div>
+                <div><p className={`text-2xl font-mono ${(opportunities.stats.mtf_conflict_rejections || 0) > 0 ? 'text-red-400' : 'text-slate-500'}`}>{opportunities.stats.mtf_conflict_rejections || 0}</p><p className="text-[10px] text-slate-500">MTF Conflicts</p></div>
+                <div><p className="text-2xl font-mono text-orange-400">{opportunities.stats.momentum_mode_candidates || 0}</p><p className="text-[10px] text-slate-500">Momentum</p></div>
                 <div><p className="text-2xl font-mono text-amber-400">{opportunities.stats.day_trade_candidates}</p><p className="text-[10px] text-slate-500">Day Trades</p></div>
                 <div><p className="text-2xl font-mono text-slate-400">{opportunities.stats.watchlist}</p><p className="text-[10px] text-slate-500">Watchlist</p></div>
                 <div><p className="text-2xl font-mono text-red-400">{opportunities.stats.rejected}</p><p className="text-[10px] text-slate-500">Rejected</p></div>
