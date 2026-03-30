@@ -4331,6 +4331,19 @@ async def get_trade_log(limit: int = Query(default=50, ge=1, le=200), auth: bool
     return await auto_orchestrator.get_trade_log(limit)
 
 
+@api_router.get("/auto-trade/mtf-heatmap")
+async def get_mtf_heatmap(auth: bool = Depends(verify_access)):
+    """Get MTF heatmap data from the latest scan results.
+    Returns classified stocks with MTF alignment status, reusing cached scan data."""
+    scan = await auto_orchestrator.scan_opportunities()
+    return {
+        "heatmap": scan.get("mtf_heatmap", []),
+        "distribution": scan.get("mtf_heatmap_distribution", {}),
+        "stats": scan.get("stats", {}),
+        "market_session": scan.get("market_session", "unknown"),
+    }
+
+
 @api_router.post("/auto-trade/emergency-pause")
 async def emergency_pause(pause: bool = True, auth: bool = Depends(verify_access)):
     """Emergency pause/resume auto-trading"""

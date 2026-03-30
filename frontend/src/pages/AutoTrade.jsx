@@ -13,7 +13,8 @@ import {
   Play, Pause, Square, RefreshCw, Eye, ChevronDown, ChevronUp,
   ArrowUpRight, ArrowDownRight, Loader2, Brain, Lock, Bell,
   CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert, Filter,
-  Search, Layers, TriangleAlert, CheckCircle, Database
+  Search, Layers, TriangleAlert, CheckCircle, Database,
+  ArrowUp, ArrowDown, Grid3x3
 } from "lucide-react";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
@@ -375,6 +376,212 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
   );
 };
 
+// ===================== MTF HEATMAP COMPONENT =====================
+const CATEGORY_STYLES = {
+  BULLISH_ALIGNED: { bg: "bg-emerald-500/10", border: "border-emerald-500/25", text: "text-emerald-400", label: "Bullish Aligned" },
+  BEARISH_ALIGNED: { bg: "bg-red-500/10", border: "border-red-500/25", text: "text-red-400", label: "Bearish Aligned" },
+  MOMENTUM_CANDIDATE: { bg: "bg-purple-500/10", border: "border-purple-500/25", text: "text-purple-400", label: "Momentum" },
+  NEAR_MISS: { bg: "bg-amber-500/10", border: "border-amber-500/25", text: "text-amber-400", label: "Near Miss" },
+  MIXED: { bg: "bg-slate-500/10", border: "border-slate-600/25", text: "text-slate-400", label: "Mixed" },
+  CONFLICT: { bg: "bg-orange-500/10", border: "border-orange-500/25", text: "text-orange-400", label: "Conflict" },
+};
+
+const TF_CELL_COLORS = {
+  bullish: "bg-emerald-500/20 text-emerald-400",
+  bearish: "bg-red-500/20 text-red-400",
+  ranging: "bg-slate-500/15 text-slate-400",
+  neutral: "bg-slate-500/10 text-slate-500",
+  mixed: "bg-amber-500/15 text-amber-400",
+  unknown: "bg-slate-800 text-slate-600",
+  entry_ready: "bg-emerald-500/20 text-emerald-400",
+  early: "bg-amber-500/15 text-amber-400",
+  weak: "bg-red-500/15 text-red-400",
+};
+
+const MTFHeatmap = ({ heatmap, distribution }) => {
+  const [sortBy, setSortBy] = useState("confidence");
+  const [filterCat, setFilterCat] = useState("ALL");
+  const [filterDir, setFilterDir] = useState("ALL");
+  const [showCount, setShowCount] = useState(30);
+
+  if (!heatmap || heatmap.length === 0) {
+    return (
+      <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
+        No MTF heatmap data. Run a scan first.
+      </Card>
+    );
+  }
+
+  const sortFns = {
+    confidence: (a, b) => b.confidence - a.confidence,
+    rel_vol: (a, b) => b.rel_vol - a.rel_vol,
+    mtf_score: (a, b) => b.mtf_score - a.mtf_score,
+    category: (a, b) => a.category.localeCompare(b.category),
+  };
+
+  const filtered = heatmap
+    .filter(h => filterCat === "ALL" || h.category === filterCat)
+    .filter(h => filterDir === "ALL" || h.direction === filterDir)
+    .sort(sortFns[sortBy] || sortFns.confidence)
+    .slice(0, showCount);
+
+  const total = heatmap.length;
+
+  return (
+    <div className="space-y-3" data-testid="mtf-heatmap">
+      {/* Distribution Summary */}
+      {distribution && (
+        <Card className="terminal-card p-4">
+          <h3 className="text-xs text-cyan-400 mb-3 flex items-center gap-2"><Grid3x3 className="w-4 h-4" /> MTF Classification Distribution ({total} stocks)</h3>
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+            {Object.entries(distribution).map(([cat, count]) => {
+              const s = CATEGORY_STYLES[cat] || CATEGORY_STYLES.MIXED;
+              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+              return (
+                <button key={cat} onClick={() => setFilterCat(filterCat === cat ? "ALL" : cat)}
+                  className={`p-2 rounded border text-center transition-all ${s.bg} ${filterCat === cat ? s.border + ' ring-1 ring-offset-1 ring-offset-slate-950 ' + s.border : 'border-slate-800 hover:' + s.border}`}
+                  data-testid={`heatmap-filter-${cat}`}>
+                  <p className={`text-lg font-mono font-bold ${s.text}`}>{count}</p>
+                  <p className="text-[9px] text-slate-500">{s.label}</p>
+                  <p className="text-[9px] text-slate-600">{pct}%</p>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] text-slate-500">Sort:</span>
+        {["confidence", "rel_vol", "mtf_score", "category"].map(s => (
+          <button key={s} onClick={() => setSortBy(s)}
+            className={`px-2 py-1 text-[10px] rounded border ${sortBy === s ? 'border-cyan-500/40 text-cyan-400 bg-cyan-500/10' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`}>
+            {s.replace("_", " ")}
+          </button>
+        ))}
+        <span className="text-[10px] text-slate-600 mx-1">|</span>
+        <span className="text-[10px] text-slate-500">Dir:</span>
+        {["ALL", "LONG", "SHORT"].map(d => (
+          <button key={d} onClick={() => setFilterDir(d)}
+            className={`px-2 py-1 text-[10px] rounded border ${filterDir === d ? 'border-blue-500/40 text-blue-400 bg-blue-500/10' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`}>
+            {d}
+          </button>
+        ))}
+        <span className="text-[10px] text-slate-600 mx-1">|</span>
+        <button onClick={() => setFilterCat("ALL")} className="px-2 py-1 text-[10px] rounded border border-slate-700 text-slate-500 hover:text-white">
+          Clear Filters
+        </button>
+        <span className="text-[10px] text-slate-500 ml-auto">{filtered.length} shown</span>
+      </div>
+
+      {/* Heatmap Table */}
+      <Card className="terminal-card overflow-x-auto">
+        <table className="w-full text-xs" data-testid="heatmap-table">
+          <thead>
+            <tr className="border-b border-slate-800 text-[10px] text-slate-500">
+              <th className="p-2 text-left">Ticker</th>
+              <th className="p-2 text-center">15m Trend</th>
+              <th className="p-2 text-center">5m Structure</th>
+              <th className="p-2 text-center">1m Timing</th>
+              <th className="p-2 text-center">MTF Status</th>
+              <th className="p-2 text-center">Conf</th>
+              <th className="p-2 text-center">RelVol</th>
+              <th className="p-2 text-center">VWAP</th>
+              <th className="p-2 text-center">Setup</th>
+              <th className="p-2 text-left">Rejection / Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((h, i) => {
+              const cs = CATEGORY_STYLES[h.category] || CATEGORY_STYLES.MIXED;
+              return (
+                <tr key={h.symbol} className={`border-b border-slate-800/50 hover:bg-slate-800/30 ${i % 2 === 0 ? '' : 'bg-slate-900/30'}`}
+                  data-testid={`heatmap-row-${h.symbol}`}>
+                  <td className="p-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-white font-mono font-medium">{h.symbol}</span>
+                      <span className={`text-[9px] ${h.direction === "LONG" ? "text-emerald-400" : h.direction === "SHORT" ? "text-red-400" : "text-slate-500"}`}>
+                        {h.direction === "LONG" ? "L" : h.direction === "SHORT" ? "S" : "?"}
+                      </span>
+                    </div>
+                    <span className="text-[9px] text-slate-600 font-mono">${h.price?.toFixed(2)}</span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono ${TF_CELL_COLORS[h.trend_15m] || TF_CELL_COLORS.unknown}`}>
+                      {h.trend_15m}
+                    </span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono ${TF_CELL_COLORS[h.structure_5m] || TF_CELL_COLORS.unknown}`}>
+                      {h.structure_5m}
+                    </span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono ${TF_CELL_COLORS[h.timing_status] || TF_CELL_COLORS.unknown}`}>
+                      {h.timing_status}
+                    </span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium border ${cs.bg} ${cs.border} ${cs.text}`}>
+                      {cs.label}
+                    </span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className={`font-mono font-bold ${h.confidence >= 75 ? "text-emerald-400" : h.confidence >= 65 ? "text-amber-400" : h.confidence >= 50 ? "text-orange-400" : "text-red-400"}`}>
+                      {h.confidence}
+                    </span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className={`font-mono ${h.rel_vol >= 2.5 ? "text-purple-400 font-bold" : h.rel_vol >= 1.5 ? "text-blue-400" : h.rel_vol >= 1.0 ? "text-slate-300" : "text-slate-600"}`}>
+                      {h.rel_vol}x
+                    </span>
+                  </td>
+                  <td className="p-2 text-center">
+                    <div className="flex flex-col items-center">
+                      <span className={`text-[10px] font-mono ${h.above_vwap ? "text-emerald-400" : h.above_vwap === false ? "text-red-400" : "text-slate-500"}`}>
+                        {h.above_vwap ? "Above" : h.above_vwap === false ? "Below" : "—"}
+                      </span>
+                      <span className="text-[9px] text-slate-600">{h.vwap_distance_pct}%</span>
+                    </div>
+                  </td>
+                  <td className="p-2 text-center">
+                    <span className="text-[10px] text-slate-400 font-mono">{h.setup_type !== "none" ? h.setup_type.replace(/_/g, " ") : "—"}</span>
+                  </td>
+                  <td className="p-2">
+                    {h.reject_reasons?.length > 0 ? (
+                      <div className="max-w-[200px]">
+                        {h.reject_reasons.slice(0, 2).map((r, j) => (
+                          <p key={j} className="text-[9px] text-red-400/80 truncate">{r}</p>
+                        ))}
+                      </div>
+                    ) : h.action === "BUY" || h.action === "SELL" ? (
+                      <Badge variant="outline" className={`text-[9px] ${h.action === "BUY" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
+                        {h.action}
+                      </Badge>
+                    ) : (
+                      <span className="text-[9px] text-slate-600">{h.action}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* Show More */}
+      {filtered.length >= showCount && (
+        <div className="text-center">
+          <button onClick={() => setShowCount(prev => prev + 20)} className="text-[10px] text-cyan-400 hover:underline">
+            Show more...
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AutoTrade = () => {
   const [status, setStatus] = useState(null);
   const [scheduler, setScheduler] = useState(null);
@@ -663,6 +870,7 @@ const AutoTrade = () => {
           <TabsTrigger value="candidates" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><Eye className="w-4 h-4 mr-1" /> Candidates</TabsTrigger>
           <TabsTrigger value="day-trades" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Zap className="w-4 h-4 mr-1" /> Day ({opportunities?.day_trades?.length || 0})</TabsTrigger>
           <TabsTrigger value="long-term" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400"><TrendingUp className="w-4 h-4 mr-1" /> Long ({opportunities?.long_term?.length || 0})</TabsTrigger>
+          <TabsTrigger value="mtf-heatmap" className="data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400"><Grid3x3 className="w-4 h-4 mr-1" /> MTF Heatmap</TabsTrigger>
           <TabsTrigger value="trade-log" className="data-[state=active]:bg-teal-500/20 data-[state=active]:text-teal-400"><Database className="w-4 h-4 mr-1" /> Trade Log</TabsTrigger>
           <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Bell className="w-4 h-4 mr-1" /> Alerts</TabsTrigger>
           <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Activity className="w-4 h-4 mr-1" /> History</TabsTrigger>
@@ -970,6 +1178,15 @@ const AutoTrade = () => {
               onToggle={() => setExpandedCard(expandedCard === `ltf-${item.symbol}` ? null : `ltf-${item.symbol}`)} />
           ))}
           {!opportunities?.long_term?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates</Card>}
+        </TabsContent>
+
+        {/* MTF HEATMAP TAB */}
+        <TabsContent value="mtf-heatmap" className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm text-cyan-400 flex items-center gap-1"><Grid3x3 className="w-4 h-4" /> MTF Heatmap — Multi-Timeframe Structure Grid</h2>
+            <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh</Button>
+          </div>
+          <MTFHeatmap heatmap={opportunities?.mtf_heatmap} distribution={opportunities?.mtf_heatmap_distribution} />
         </TabsContent>
 
         {/* TRADE LOG TAB */}

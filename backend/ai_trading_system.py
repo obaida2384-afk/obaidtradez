@@ -1712,6 +1712,29 @@ class AutoTradeOrchestrator:
         day_trade_candidates.sort(key=lambda x: x["confidence"], reverse=True)
         long_term_candidates.sort(key=lambda x: x["confidence"], reverse=True)
 
+        # === BUILD MTF HEATMAP (zero cost — reuses cached TA results) ===
+        from technical_analysis_engine import MTFClassifier
+        heatmap_entries = []
+        heatmap_dist = {"BULLISH_ALIGNED": 0, "BEARISH_ALIGNED": 0, "MOMENTUM_CANDIDATE": 0,
+                        "NEAR_MISS": 0, "MIXED": 0, "CONFLICT": 0}
+        for ta_sig in final_ta_results:
+            cls = MTFClassifier.classify(ta_sig)
+            # Attach action from evaluation
+            symbol = ta_sig.get("symbol", "")
+            for lst in [day_trade_candidates, watchlist, rejected]:
+                match = next((e for e in lst if e.get("symbol") == symbol), None)
+                if match:
+                    cls["action"] = match.get("action", "REJECT")
+                    cls["confidence"] = match.get("confidence", cls["confidence"])
+                    break
+            else:
+                cls["action"] = "REJECT"
+            heatmap_entries.append(cls)
+            cat = cls["category"]
+            if cat in heatmap_dist:
+                heatmap_dist[cat] += 1
+        heatmap_entries.sort(key=lambda x: x["confidence"], reverse=True)
+
         # Zero-trade diagnosis
         if not day_trade_candidates:
             regime = market_regime.get("regime", "neutral")
@@ -1806,6 +1829,8 @@ class AutoTradeOrchestrator:
             "risk_mode": risk_mode,
             "pipeline_funnel": funnel.to_dict(),
             "no_trade_summary": no_trade_summary,
+            "mtf_heatmap": heatmap_entries,
+            "mtf_heatmap_distribution": heatmap_dist,
             "settings": settings.dict(),
         }
     

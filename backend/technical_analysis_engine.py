@@ -799,6 +799,94 @@ class MultiTimeframeConfirmer:
         }
 
 
+class MTFClassifier:
+    """Classify stocks into MTF categories using the same data as MultiTimeframeConfirmer.
+    Categories:
+    - BULLISH_ALIGNED: 15m bullish/neutral + 5m bullish + 1m supportive
+    - BEARISH_ALIGNED: 15m bearish/neutral + 5m bearish + 1m supportive
+    - MOMENTUM_CANDIDATE: aligned + RelVol>2.5 + breakout setup
+    - NEAR_MISS: partially aligned, close to qualifying
+    - MIXED: some timeframes disagree but not fully conflicting
+    - CONFLICT: 5m or 15m directly oppose the trade direction
+    """
+
+    @staticmethod
+    def classify(ta_signal: Dict) -> Dict:
+        """Classify a TA signal into MTF category. Reuses cached MTF data—zero extra cost."""
+        mtf = ta_signal.get("mtf_confirmation", {})
+        direction = ta_signal.get("direction", "NONE")
+        indicators = ta_signal.get("indicators", {})
+        structure = ta_signal.get("structure", {})
+        momentum = ta_signal.get("momentum_mode", False)
+        confidence = ta_signal.get("confidence", 0)
+        best_setup = ta_signal.get("best_setup")
+
+        s15 = mtf.get("struct_15m", "unknown")
+        s5 = mtf.get("struct_5m", "unknown")
+        t1 = mtf.get("timing_1m", "neutral")
+        aligned = mtf.get("aligned", False)
+        tf_conflict = mtf.get("has_tf_conflict", False)
+        has_1m_conflict = mtf.get("has_1m_conflict", False)
+
+        rel_vol = indicators.get("rel_vol", 0)
+        above_vwap = indicators.get("above_vwap")
+        vwap_dist = abs(indicators.get("vwap_distance_pct", 0))
+        spread_pct = indicators.get("spread_pct", 1)
+
+        # Determine 1m timing status
+        if mtf.get("timing_1m_aligned"):
+            timing_status = "entry_ready"
+        elif has_1m_conflict:
+            timing_status = "weak"
+        else:
+            timing_status = "early"
+
+        # Classify
+        if tf_conflict:
+            category = "CONFLICT"
+        elif aligned and momentum:
+            category = "MOMENTUM_CANDIDATE"
+        elif aligned and direction == "LONG" and s5 in ("bullish", "ranging") and s15 in ("bullish", "ranging"):
+            category = "BULLISH_ALIGNED"
+        elif aligned and direction == "SHORT" and s5 in ("bearish", "ranging") and s15 in ("bearish", "ranging"):
+            category = "BEARISH_ALIGNED"
+        elif not aligned and not tf_conflict:
+            # Partial alignment = near miss or mixed
+            mtf_score = mtf.get("score", 0)
+            if mtf_score >= 2 and confidence >= 55:
+                category = "NEAR_MISS"
+            else:
+                category = "MIXED"
+        else:
+            category = "MIXED"
+
+        return {
+            "symbol": ta_signal.get("symbol", ""),
+            "category": category,
+            "direction": direction,
+            "trend_15m": s15,
+            "structure_5m": s5,
+            "timing_1m": t1,
+            "timing_status": timing_status,
+            "mtf_score": mtf.get("score", 0),
+            "mtf_max": mtf.get("max", 5),
+            "mtf_aligned": aligned,
+            "has_tf_conflict": tf_conflict,
+            "confidence": confidence,
+            "rel_vol": round(rel_vol, 1),
+            "above_vwap": above_vwap,
+            "vwap_distance_pct": round(vwap_dist, 2),
+            "spread_pct": round(spread_pct, 3),
+            "setup_type": best_setup.get("type", "none") if best_setup else "none",
+            "structure": structure.get("structure", "unknown"),
+            "momentum_mode": momentum,
+            "overextended": ta_signal.get("overextended", False),
+            "fake_breakout": bool(ta_signal.get("fake_breakout")),
+            "price": ta_signal.get("price", 0),
+            "reject_reasons": ta_signal.get("reject_reasons", []),
+        }
+
+
 # ===================== FULL TECHNICAL SIGNAL GENERATOR =====================
 
 class TechnicalSignalGenerator:
