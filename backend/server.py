@@ -40,6 +40,7 @@ from news_sentiment_engine import EnhancedNewsSentimentEngine
 from auto_trade_scheduler import AutoTradeScheduler
 from live_price_engine import LivePriceEngine
 from live_reeval_engine import LiveReEvaluationEngine
+from price_integrity import PriceIntegrityService
 from starlette.responses import StreamingResponse
 
 # ===================== CONFIGURATION =====================
@@ -2149,8 +2150,10 @@ async def scan_investments(auth: bool = Depends(verify_access)):
     total = await db.investment_signals.count_documents({})
     
     if total > 50:
-        # Use cached data - get all available (up to 1500)
-        cursor = db.investment_signals.find({}, {"_id": 0}).sort("overall_score", -1).limit(1500)
+        # Use cached data - get all available (up to 1500), excluding dead tickers
+        cursor = db.investment_signals.find(
+            {"dead_ticker": {"$ne": True}}, {"_id": 0}
+        ).sort("overall_score", -1).limit(1500)
         all_signals = await cursor.to_list(length=1500)
         
         # Apply dynamic percentile-based categorization
@@ -4239,6 +4242,9 @@ auto_scheduler = AutoTradeScheduler(db, auto_orchestrator, enhanced_news_engine)
 live_price_engine = LivePriceEngine()
 auto_orchestrator.live_price_engine = live_price_engine
 
+# Price Integrity Service (single source of truth)
+price_integrity = PriceIntegrityService()
+
 # Live Re-Evaluation Engine
 live_reeval_engine = LiveReEvaluationEngine(db, auto_orchestrator)
 live_price_engine.set_reeval_callback(live_reeval_engine.on_price_change)
@@ -4298,7 +4304,7 @@ async def refresh_ta_signals(background_tasks: BackgroundTasks, auth: bool = Dep
         _ta_refresh_running = True
         try:
             trading_sigs = await db.trading_signals.find(
-                {}, {"_id": 0, "symbol": 1, "indicators.volume_ratio": 1}
+                {"dead_ticker": {"$ne": True}}, {"_id": 0, "symbol": 1, "indicators.volume_ratio": 1}
             ).to_list(2000)
             # Sort by volume, take top 80 (Starter plan supports high throughput)
             symbols = sorted(
@@ -4922,74 +4928,51 @@ async def get_single_price(symbol: str, auth: bool = Depends(verify_access)):
 
 @api_router.post("/prices/sync-signals")
 async def sync_signal_prices(auth: bool = Depends(verify_access)):
-    """Refresh cached signal prices in MongoDB with latest market data."""
-    updated = await _sync_signal_prices()
-    return {"updated": updated, "message": f"Updated {updated} signal prices"}
+    """Refresh cached signal prices using Price Integrity Service (validates freshness, rejects dead tickers)."""
+    result = await price_integrity.sync_signal_prices(db)
+    return result
 
-async def _sync_signal_prices() -> int:
-    """Bulk update trading_signals and investment_signals prices using fresh Alpaca data."""
-    try:
-        # Collect all unique symbols from both collections
+# ===================== PRICE INTEGRITY / DIAGNOSTICS =====================
+
+@api_router.get("/debug/price_integrity")
+async def debug_price_integrity(symbols: str = None, auth: bool = Depends(verify_access)):
+    """
+    Diagnostics endpoint: returns validated price data for each symbol.
+    If no symbols specified, audits the full universe.
+    """
+    if symbols:
+        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        # Get all symbols from DB
         ts_cursor = db.trading_signals.find({}, {"_id": 0, "symbol": 1})
         is_cursor = db.investment_signals.find({}, {"_id": 0, "symbol": 1})
         ts_docs = await ts_cursor.to_list(length=2000)
         is_docs = await is_cursor.to_list(length=2000)
-        all_symbols = list(set(
+        sym_list = list(set(
             [d["symbol"] for d in ts_docs if d.get("symbol")] +
             [d["symbol"] for d in is_docs if d.get("symbol")]
         ))
 
-        if not all_symbols:
-            return 0
+    audit = await price_integrity.audit_universe(sym_list)
+    return audit
 
-        # Use Alpaca snapshots for fast bulk fetch (50 at a time)
-        headers = {
-            "APCA-API-KEY-ID": os.environ.get("ALPACA_API_KEY", ""),
-            "APCA-API-SECRET-KEY": os.environ.get("ALPACA_SECRET_KEY", ""),
-        }
-        fresh_prices = {}
-        batch_size = 50
-        async with httpx.AsyncClient(timeout=15) as client:
-            for i in range(0, len(all_symbols), batch_size):
-                batch = all_symbols[i:i + batch_size]
-                try:
-                    resp = await client.get(
-                        "https://data.alpaca.markets/v2/stocks/snapshots",
-                        params={"symbols": ",".join(batch)},
-                        headers=headers,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        for sym, snap in data.items():
-                            trade = snap.get("latestTrade", {})
-                            price = trade.get("p", 0)
-                            if price > 0:
-                                fresh_prices[sym] = price
-                except Exception as e:
-                    logger.warning(f"Price sync snapshot error: {e}")
-                if i + batch_size < len(all_symbols):
-                    await asyncio.sleep(0.2)
+@api_router.get("/debug/price_integrity/{symbol}")
+async def debug_single_price_integrity(symbol: str, auth: bool = Depends(verify_access)):
+    """Detailed price integrity check for a single symbol."""
+    sym = symbol.upper()
+    rec = await price_integrity.get_validated_price(sym)
 
-        # Update MongoDB
-        updated_count = 0
-        now_iso = datetime.now(timezone.utc).isoformat()
-        for sym, price in fresh_prices.items():
-            result = await db.trading_signals.update_one(
-                {"symbol": sym},
-                {"$set": {"price": price, "price_synced_at": now_iso}}
-            )
-            if result.modified_count:
-                updated_count += 1
-            await db.investment_signals.update_one(
-                {"symbol": sym},
-                {"$set": {"price": price, "current_price": price, "price_synced_at": now_iso}}
-            )
+    # Also check what's in DB
+    ts = await db.trading_signals.find_one({"symbol": sym}, {"_id": 0, "symbol": 1, "price": 1, "price_synced_at": 1, "price_source": 1, "dead_ticker": 1, "price_status": 1})
+    inv = await db.investment_signals.find_one({"symbol": sym}, {"_id": 0, "symbol": 1, "price": 1, "current_price": 1, "price_synced_at": 1, "price_source": 1, "dead_ticker": 1, "price_status": 1})
 
-        logger.info(f"Price sync complete: {updated_count} trading signals, {len(fresh_prices)} total symbols refreshed")
-        return updated_count
-    except Exception as e:
-        logger.error(f"Price sync error: {e}")
-        return 0
+    return {
+        "validated": rec.to_dict(),
+        "cached_trading_signal": ts,
+        "cached_investment_signal": inv,
+        "mismatch": ts and abs(rec.price - (ts.get("price") or 0)) > 0.01 if rec.price > 0 else False,
+        "integrity_stats": price_integrity.get_stats(),
+    }
 
 # Health check (no auth required)
 @api_router.get("/")
@@ -5051,10 +5034,10 @@ async def startup_event():
             except Exception as lpe:
                 logger.warning(f"Live price engine start failed (non-fatal): {lpe}")
         
-        # Sync cached signal prices with latest market data on startup
+        # Sync cached signal prices with validated freshness checks
         try:
-            updated = await _sync_signal_prices()
-            logger.info(f"Startup price sync: updated {updated} signals")
+            result = await price_integrity.sync_signal_prices(db)
+            logger.info(f"Startup price sync: {result}")
         except Exception as e:
             logger.warning(f"Startup price sync failed (non-fatal): {e}")
 
@@ -5076,9 +5059,9 @@ async def _periodic_price_sync():
             await asyncio.sleep(300)  # 5 minutes
             session = MarketSessionManager.get_session()
             if session in (MarketSession.PRE_MARKET, MarketSession.REGULAR, MarketSession.CLOSING):
-                updated = await _sync_signal_prices()
-                if updated > 0:
-                    logger.info(f"Periodic price sync: updated {updated} signals")
+                result = await price_integrity.sync_signal_prices(db)
+                if result.get("updated", 0) > 0:
+                    logger.info(f"Periodic price sync: {result}")
         except asyncio.CancelledError:
             break
         except Exception as e:

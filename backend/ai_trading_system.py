@@ -1508,9 +1508,13 @@ class AutoTradeOrchestrator:
         funnel = TradePipelineFunnel()
         diagnostics = ZeroTradeDiagnostics()
 
-        # Get cached signals from DB
-        trading_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
-        investment_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
+        # Get cached signals from DB (exclude dead tickers)
+        trading_signals = await self.db.trading_signals.find(
+            {"dead_ticker": {"$ne": True}}, {"_id": 0}
+        ).to_list(2000)
+        investment_signals = await self.db.investment_signals.find(
+            {"dead_ticker": {"$ne": True}}, {"_id": 0}
+        ).to_list(2000)
 
         inv_lookup = {s["symbol"]: s for s in investment_signals if s.get("symbol")}
         trade_lookup = {s["symbol"]: s for s in trading_signals if s.get("symbol")}

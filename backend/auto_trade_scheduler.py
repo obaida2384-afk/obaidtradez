@@ -417,7 +417,9 @@ class AutoTradeScheduler:
                 await self._log_execution("day_trade_freq_limited", {"reason": freq_reason})
                 return
 
-            trading_signals = await self.db.trading_signals.find({}, {"_id": 0}).to_list(2000)
+            trading_signals = await self.db.trading_signals.find(
+                {"dead_ticker": {"$ne": True}}, {"_id": 0}
+            ).to_list(2000)
             if not trading_signals:
                 return
 
@@ -427,7 +429,9 @@ class AutoTradeScheduler:
             positions = await self.orchestrator.get_positions()
             equity = float(account.get("equity", 0))
 
-            inv_signals = await self.db.investment_signals.find({}, {"_id": 0}).to_list(2000)
+            inv_signals = await self.db.investment_signals.find(
+                {"dead_ticker": {"$ne": True}}, {"_id": 0}
+            ).to_list(2000)
             inv_lookup = {s["symbol"]: s for s in inv_signals if s.get("symbol")}
 
             # Dynamic max positions
