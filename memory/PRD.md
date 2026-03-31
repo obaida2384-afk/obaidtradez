@@ -53,6 +53,7 @@ The platform runs autonomous paper trading with live Alpaca WebSocket price stre
 - [x] Re-eval throttling: max 1 eval per symbol per 30s
 - [x] Re-eval logging: MongoDB persistence + in-memory ring buffer
 - [x] Re-eval UI: stats grid + event cards in Live Prices tab
+- [x] **Price Sync Engine**: Bulk-updates all cached signal prices from Alpaca snapshots (startup + every 5 min during market hours + manual trigger). Fixes stale prices like MRVL showing $94.88 instead of actual $87.84
 
 ## Previously Completed Features
 - [x] Tiered TA Pipeline (Tier 1 fast scan -> Tier 2 deep analysis)

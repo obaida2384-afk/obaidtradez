@@ -4920,6 +4920,77 @@ async def get_single_price(symbol: str, auth: bool = Depends(verify_access)):
         return quote
     return {"symbol": symbol.upper(), "price": 0, "change": 0, "change_pct": 0}
 
+@api_router.post("/prices/sync-signals")
+async def sync_signal_prices(auth: bool = Depends(verify_access)):
+    """Refresh cached signal prices in MongoDB with latest market data."""
+    updated = await _sync_signal_prices()
+    return {"updated": updated, "message": f"Updated {updated} signal prices"}
+
+async def _sync_signal_prices() -> int:
+    """Bulk update trading_signals and investment_signals prices using fresh Alpaca data."""
+    try:
+        # Collect all unique symbols from both collections
+        ts_cursor = db.trading_signals.find({}, {"_id": 0, "symbol": 1})
+        is_cursor = db.investment_signals.find({}, {"_id": 0, "symbol": 1})
+        ts_docs = await ts_cursor.to_list(length=2000)
+        is_docs = await is_cursor.to_list(length=2000)
+        all_symbols = list(set(
+            [d["symbol"] for d in ts_docs if d.get("symbol")] +
+            [d["symbol"] for d in is_docs if d.get("symbol")]
+        ))
+
+        if not all_symbols:
+            return 0
+
+        # Use Alpaca snapshots for fast bulk fetch (50 at a time)
+        headers = {
+            "APCA-API-KEY-ID": os.environ.get("ALPACA_API_KEY", ""),
+            "APCA-API-SECRET-KEY": os.environ.get("ALPACA_SECRET_KEY", ""),
+        }
+        fresh_prices = {}
+        batch_size = 50
+        async with httpx.AsyncClient(timeout=15) as client:
+            for i in range(0, len(all_symbols), batch_size):
+                batch = all_symbols[i:i + batch_size]
+                try:
+                    resp = await client.get(
+                        "https://data.alpaca.markets/v2/stocks/snapshots",
+                        params={"symbols": ",".join(batch)},
+                        headers=headers,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for sym, snap in data.items():
+                            trade = snap.get("latestTrade", {})
+                            price = trade.get("p", 0)
+                            if price > 0:
+                                fresh_prices[sym] = price
+                except Exception as e:
+                    logger.warning(f"Price sync snapshot error: {e}")
+                if i + batch_size < len(all_symbols):
+                    await asyncio.sleep(0.2)
+
+        # Update MongoDB
+        updated_count = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for sym, price in fresh_prices.items():
+            result = await db.trading_signals.update_one(
+                {"symbol": sym},
+                {"$set": {"price": price, "price_synced_at": now_iso}}
+            )
+            if result.modified_count:
+                updated_count += 1
+            await db.investment_signals.update_one(
+                {"symbol": sym},
+                {"$set": {"price": price, "current_price": price, "price_synced_at": now_iso}}
+            )
+
+        logger.info(f"Price sync complete: {updated_count} trading signals, {len(fresh_prices)} total symbols refreshed")
+        return updated_count
+    except Exception as e:
+        logger.error(f"Price sync error: {e}")
+        return 0
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
@@ -4980,9 +5051,36 @@ async def startup_event():
             except Exception as lpe:
                 logger.warning(f"Live price engine start failed (non-fatal): {lpe}")
         
+        # Sync cached signal prices with latest market data on startup
+        try:
+            updated = await _sync_signal_prices()
+            logger.info(f"Startup price sync: updated {updated} signals")
+        except Exception as e:
+            logger.warning(f"Startup price sync failed (non-fatal): {e}")
+
+        # Start periodic price sync background task
+        asyncio.create_task(_periodic_price_sync())
+        
     except Exception as e:
         logger.error(f"Startup error: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+async def _periodic_price_sync():
+    """Background task: sync signal prices every 5 minutes during market hours."""
+    from auto_trade_scheduler import MarketSessionManager, MarketSession
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5 minutes
+            session = MarketSessionManager.get_session()
+            if session in (MarketSession.PRE_MARKET, MarketSession.REGULAR, MarketSession.CLOSING):
+                updated = await _sync_signal_prices()
+                if updated > 0:
+                    logger.info(f"Periodic price sync: updated {updated} signals")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Periodic price sync error: {e}")
+            await asyncio.sleep(60)
