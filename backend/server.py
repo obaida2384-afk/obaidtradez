@@ -4412,8 +4412,12 @@ async def get_live_price_status(auth: bool = Depends(verify_access)):
     return live_price_engine.get_status()
 
 @api_router.get("/live-prices/stream")
-async def live_price_stream(auth: bool = Depends(verify_access)):
-    """Server-Sent Events stream for real-time price updates to the frontend."""
+async def live_price_stream(token: str = None, auth: bool = None):
+    """Server-Sent Events stream for real-time price updates to the frontend.
+    Accepts auth via query param ?token=xxx since EventSource doesn't support headers."""
+    # Validate token from query param
+    if not token or not validate_token(token):
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
     async def event_generator():
         last_data = {}
         while True:

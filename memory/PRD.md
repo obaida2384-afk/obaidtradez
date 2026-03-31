@@ -1,79 +1,73 @@
 # ObaidTradez - AI Trading & Investing Platform
 
 ## Original Problem Statement
-Secure, dark-themed AI day trading and long-term investing platform protected by access code (`Bullishalmarkhan7.7`). Dual modes: Trading (short-term TA pipeline) and Investments (long-term fundamentals). Tiered Technical Analysis via Polygon OHLCV data with MTF confirmation, Momentum Mode bypass, and strict risk controls.
+Secure, dark-themed AI day trading and long-term investing platform protected by access code (`Bullishalmarkhan7.7`). Dual modes: Trading (short-term TA pipeline) and Investments (long-term fundamentals). Tiered Technical Analysis via Polygon OHLCV data with MTF confirmation, Momentum Mode bypass, and strict risk controls. Autonomous paper trading with live price streaming and dynamic re-evaluation.
 
-## Current Phase: Validation & Autonomous Paper Trading
-The platform is in a **validation phase** — no new trading strategies. Focus on trustworthy tests, execution data, and analytics. Autonomous paper trading is ACTIVE.
+## Current Phase: Live Price Integration & Dynamic Re-Evaluation
+The platform runs autonomous paper trading with live Alpaca WebSocket price streaming. Dynamic re-evaluation triggers TA checks on meaningful price changes without waiting for the 5-minute scheduler scan.
 
 ## Architecture
 ```
 /app/
 ├── backend/
-│   ├── ai_trading_system.py (Orchestrator, Risk Manager, Trade Logging, LT Engine, Momentum Diagnostics)
+│   ├── ai_trading_system.py (Orchestrator, Risk Manager, Trade Logging, DT/LT Engines)
 │   ├── technical_analysis_engine.py (TA math, MTF, Confidence Scoring)
-│   ├── auto_trade_scheduler.py
-│   ├── tests/conftest.py (URL config for all tests)
-│   ├── tests/ (22 test files, 345 tests, 100% pass rate)
+│   ├── auto_trade_scheduler.py (Background loop, state auto-recovery from MongoDB)
+│   ├── live_price_engine.py (Alpaca WebSocket + REST fallback, stale detection)
+│   ├── live_reeval_engine.py (Dynamic re-evaluation on price changes)
+│   ├── tests/conftest.py, test_live_prices_reeval.py
 │   └── server.py (FastAPI routes)
 ├── frontend/
-│   ├── src/pages/AutoTrade.jsx (Scheduler, Diagnostics, Candidates, MTF Heatmap, Trade Log, Analytics, LT Pipeline, Momentum, Guide)
+│   ├── src/hooks/useLivePrices.js (SSE + polling, LiveIndicator, watchlist/positions hooks)
+│   ├── src/pages/AutoTrade.jsx (Scheduler, Diagnostics, Live Prices, Re-Eval UI)
 ```
 
 ## Key DB Collections
-- `trade_log`: Full lifecycle trade records (executed + skipped, slippage, timing, P&L)
+- `trade_log`: Full lifecycle trade records
 - `auto_trade_log`: Basic execution log
 - `auto_trade_settings`: Dynamic thresholds + auto_enabled
-- `paper_execution_settings`: auto_execution, manual_approval, kill_switch, block_extended_hours
-- `trading_signals`, `paper_trades`, `watchlist`, `investment_signals`
+- `paper_execution_settings`: auto_execution, manual_approval, kill_switch
+- `scheduler_state`: Persists deployment_mode and status for auto-recovery
+- `reeval_events`: Dynamic re-evaluation event log
 
 ## Key API Endpoints
-- `/api/auto-trade/scan` — Tiered pipeline + lt_pipeline + momentum_diagnostics
-- `/api/auto-trade/analytics` — Full analytics dashboard (win rate, P&L, drawdown, slippage, etc.)
-- `/api/auto-trade/trade-log` — Full lifecycle trade log (executed + skipped)
-- `/api/auto-trade/mtf-heatmap` — MTF distribution
+- `/api/auto-trade/scan` — Tiered pipeline
+- `/api/auto-trade/analytics` — Full analytics dashboard
 - `/api/scheduler/start` — Start autonomous scheduler
-- `/api/scheduler/status` — Check scheduler state
-- `/api/paper/settings` — Paper execution settings (auto_execution, manual_approval, etc.)
+- `/api/live-prices/start` — Start live price engine
+- `/api/live-prices/all` — All tracked prices + engine status
+- `/api/live-prices/stream` — SSE stream (token via query param)
+- `/api/live-prices/status/engine` — Engine status with mode
+- `/api/reeval/stats` — Re-evaluation engine statistics
+- `/api/reeval/events` — Recent re-eval events
+- `/api/reeval/history` — Persisted re-eval events from MongoDB
 
-## Current Autonomous Trading Configuration (March 30, 2026)
-- Scheduler: RUNNING (paper mode)
-- Auto Execution: ON
-- Manual Approval: OFF (fully autonomous)
-- Kill Switch: OFF
-- Pre-market/After-hours: BLOCKED
-- Execution window: 9:30 AM - 4:00 PM ET, Mon-Fri
-- DT scan interval: 5 min, LT scan interval: 30 min
-- Alpaca Paper Account: $100K equity, ACTIVE
-- Max daily loss: 3.0%, Max consecutive losses: 2 (then 30 min cooldown)
-
-## Completed Features (Validation Phase - March 2026)
-- [x] Backend Test Gap: 345/345 tests passing (100%)
-- [x] Execution Validation Logging: signal/exec timestamps, slippage, skip reasons, actual exit reason
-- [x] Trade Log Analytics Dashboard: total trades, win rate, avg win/loss, R multiple, P&L, drawdown, long vs short, by setup type, by confidence band, by session, P&L curve, skip/rejection reasons, slippage stats, execution timing
-- [x] LT Pipeline Transparency: funnel visualization, confidence distribution, rejection reasons, top 10 missed opportunities
-- [x] Momentum Mode Diagnostics: near-miss candidates, blocked conditions, filter status STRICT
-- [x] Autonomous Paper Trading: Verified Alpaca connection, order submission, trade logging, scheduler started
+## Completed Features (March 31, 2026)
+- [x] Fixed React hook ordering bug in AutoTrade.jsx (token before useLivePrices)
+- [x] Fixed Alpaca WebSocket infinite reconnect (graceful fallback to REST after 3 failures)
+- [x] Fixed FastAPI route ordering (static routes before {symbol} wildcard)
+- [x] Fixed SSE auth (token via query param for EventSource compatibility)
+- [x] Added missing exports: LiveIndicator, useWatchlistPrices, usePositionsPrices
+- [x] Live Prices UI: Mode indicator (WebSocket/REST/Offline), engine stats, price table
+- [x] Dynamic Re-Evaluation Engine: triggers on VWAP crossings, S/R touches, breakout/breakdown, stop-loss/take-profit, spread changes, overextension
+- [x] Re-eval throttling: max 1 eval per symbol per 30s
+- [x] Re-eval logging: MongoDB persistence + in-memory ring buffer
+- [x] Re-eval UI: stats grid + event cards in Live Prices tab
 
 ## Previously Completed Features
 - [x] Tiered TA Pipeline (Tier 1 fast scan -> Tier 2 deep analysis)
 - [x] Multi-Timeframe Confirmation (15m trend, 5m structure, 1m timing)
 - [x] Momentum Mode Bypass for explosive stocks
-- [x] Pre-Market Safety gate (no execution before 9:30 AM ET)
-- [x] MTF Heatmap UI
-- [x] Algorithm Explanation User Guide tab
-- [x] Strict trade quality filters (volume, timing, trend, spread)
-- [x] MongoDB trade logging system
-- [x] 1,097+ company universe with background batch processing
-- [x] Risky stocks blocklist (83+ meme/crypto/leveraged)
+- [x] Autonomous Paper Trading with MongoDB auto-recovery
+- [x] Backend Test Suite: 345+ tests passing
+- [x] Execution Validation Logging (slippage, timing, skip reasons)
+- [x] Trade Analytics Dashboard
+- [x] LT Pipeline Transparency + Momentum Diagnostics
 
 ## Upcoming / Backlog
-- [ ] Review first autonomous trading session results (P0 - next morning)
-- [ ] Persistent auto-start on server boot (P1 - after validation)
-- [ ] Daily Summary Generator (P2)
-- [ ] Scheduler Performance Tracker (P3)
+- [ ] Verify re-evaluation during live market hours (P0 - next market open)
 - [ ] Compare stocks side-by-side (P3)
-- [ ] server.py modularization refactor (P3)
+- [ ] Modularize server.py and AutoTrade.jsx (P3)
 
 ## Access
 - Access Code: `Bullishalmarkhan7.7`
@@ -81,5 +75,5 @@ The platform is in a **validation phase** — no new trading strategies. Focus o
 ## 3rd Party Integrations
 - OpenAI GPT-5.2 (Emergent LLM Key)
 - Polygon.io (User API Key, Starter Plan)
-- Alpaca (User API Key, Paper Trading - VERIFIED WORKING)
+- Alpaca (User API Key, Paper Trading + WebSocket Market Data)
 - FMP / Finnhub (User API Keys)

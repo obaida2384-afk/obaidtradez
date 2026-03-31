@@ -31,7 +31,7 @@ export function useLivePrices(token) {
     try {
       await fetch(`${API}/api/live-prices/start`, { method: "POST", headers });
 
-      const es = new EventSource(`${API}/api/live-prices/stream`);
+      const es = new EventSource(`${API}/api/live-prices/stream?token=${encodeURIComponent(token || localStorage.getItem("obaidtradez_token") || "")}`);
       es.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
