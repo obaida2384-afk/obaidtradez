@@ -226,7 +226,7 @@ const NoTradePanel = ({ summary }) => {
   );
 };
 
-const ExplanationCard = ({ item, expanded, onToggle }) => {
+const ExplanationCard = ({ item, expanded, onToggle, livePrices = {} }) => {
   const exp = item.explanation || {};
   const isDay = item.classification === "DAY_TRADE";
   const signal = item.signal || {};
@@ -1218,7 +1218,7 @@ const AutoTrade = () => {
               <h3 className="text-xs text-amber-400 mb-2 flex items-center gap-1"><Zap className="w-3 h-3" /> Top Day Trades</h3>
               <div className="space-y-2">
                 {(opportunities?.day_trades || []).slice(0, 5).map((item) => (
-                  <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `dt-${item.symbol}`}
+                  <ExplanationCard key={item.symbol} item={item} livePrices={livePrices} expanded={expandedCard === `dt-${item.symbol}`}
                     onToggle={() => setExpandedCard(expandedCard === `dt-${item.symbol}` ? null : `dt-${item.symbol}`)} />
                 ))}
                 {!opportunities?.day_trades?.length && <p className="text-xs text-slate-500 py-4 text-center">No day trade candidates</p>}
@@ -1228,7 +1228,7 @@ const AutoTrade = () => {
               <h3 className="text-xs text-blue-400 mb-2 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Top Long-Term</h3>
               <div className="space-y-2">
                 {(opportunities?.long_term || []).slice(0, 5).map((item) => (
-                  <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `lt-${item.symbol}`}
+                  <ExplanationCard key={item.symbol} item={item} livePrices={livePrices} expanded={expandedCard === `lt-${item.symbol}`}
                     onToggle={() => setExpandedCard(expandedCard === `lt-${item.symbol}` ? null : `lt-${item.symbol}`)} />
                 ))}
                 {!opportunities?.long_term?.length && <p className="text-xs text-slate-500 py-4 text-center">No long-term candidates</p>}
@@ -1244,7 +1244,7 @@ const AutoTrade = () => {
             <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh</Button>
           </div>
           {(opportunities?.day_trades || []).map((item) => (
-            <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `dtf-${item.symbol}`}
+            <ExplanationCard key={item.symbol} item={item} livePrices={livePrices} expanded={expandedCard === `dtf-${item.symbol}`}
               onToggle={() => setExpandedCard(expandedCard === `dtf-${item.symbol}` ? null : `dtf-${item.symbol}`)} />
           ))}
           {!opportunities?.day_trades?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates — click "Refresh TA Data" first, then "Scan Now"</Card>}
@@ -1257,7 +1257,7 @@ const AutoTrade = () => {
                 <h3 className="text-xs text-red-400/70 mb-2 flex items-center gap-1"><TriangleAlert className="w-3 h-3" /> Rejected / Near-Miss DT ({dtRejected.length})</h3>
                 <div className="space-y-2">
                   {dtRejected.slice(0, 10).map((item) => (
-                    <ExplanationCard key={`rej-${item.symbol}`} item={item} expanded={expandedCard === `rejdt-${item.symbol}`}
+                    <ExplanationCard key={`rej-${item.symbol}`} item={item} livePrices={livePrices} expanded={expandedCard === `rejdt-${item.symbol}`}
                       onToggle={() => setExpandedCard(expandedCard === `rejdt-${item.symbol}` ? null : `rejdt-${item.symbol}`)} />
                   ))}
                 </div>
@@ -1273,7 +1273,7 @@ const AutoTrade = () => {
             <Button variant="outline" size="sm" onClick={fetchOpportunities} disabled={scanning} className="border-slate-700"><RefreshCw className={`w-3 h-3 mr-1 ${scanning ? 'animate-spin' : ''}`} /> Refresh</Button>
           </div>
           {(opportunities?.long_term || []).map((item) => (
-            <ExplanationCard key={item.symbol} item={item} expanded={expandedCard === `ltf-${item.symbol}`}
+            <ExplanationCard key={item.symbol} item={item} livePrices={livePrices} expanded={expandedCard === `ltf-${item.symbol}`}
               onToggle={() => setExpandedCard(expandedCard === `ltf-${item.symbol}` ? null : `ltf-${item.symbol}`)} />
           ))}
           {!opportunities?.long_term?.length && <Card className="terminal-card p-8 text-center text-slate-500 text-sm">No candidates</Card>}
