@@ -24,6 +24,7 @@ Secure, dark-themed AI day trading and long-term investing platform. Dual modes:
 - [x] Entry status: TRADE_NOW/WATCHLIST/MISSED/STALE_SETUP/BLOWN_STOP
 - [x] Debug: price_audit in scan, /api/debug/price_integrity, /api/debug/ticker_mappings
 - [x] Market-open auto-verifier: captures re-eval events for 30 min, health checks, persists to MongoDB
+- [x] Bug Fix: ExplanationCard livePrices prop — Day/Long tabs in AutoTrade no longer crash (March 31)
 
 ## Key Verification Endpoints
 - `GET /api/reeval/verify` — Live verification report with health checks
