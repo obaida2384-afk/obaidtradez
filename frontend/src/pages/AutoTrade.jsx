@@ -604,6 +604,8 @@ const MTFHeatmap = ({ heatmap, distribution }) => {
 };
 
 const AutoTrade = () => {
+  const { token } = useAuth();
+  const headers = { Authorization: `Bearer ${token}` };
   const [status, setStatus] = useState(null);
   const [scheduler, setScheduler] = useState(null);
   const [opportunities, setOpportunities] = useState(null);
@@ -616,11 +618,9 @@ const AutoTrade = () => {
   const [executing, setExecuting] = useState(false);
   const [expandedCard, setExpandedCard] = useState(null);
   const [activeTab, setActiveTab] = useState("scheduler");
-  const { prices: livePrices, engine: priceEngine, startStream, stopStream, connected: wsConnected } = useLivePrices(token);
   const [dtCountdown, setDtCountdown] = useState(null);
   const [ltCountdown, setLtCountdown] = useState(null);
-  const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const { prices: livePrices, engine: priceEngine, reeval: reevalData, startStream, stopStream, connected: wsConnected } = useLivePrices(token);
   const timerRef = useRef(null);
 
   const fetchStatus = useCallback(async () => {
@@ -1752,12 +1752,14 @@ const AutoTrade = () => {
         {/* LIVE PRICES TAB */}
         <TabsContent value="live-prices" className="space-y-4" data-testid="live-prices-content">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm text-green-400 flex items-center gap-1">
+            <h2 className="text-sm text-green-400 flex items-center gap-1" data-testid="live-prices-header">
               <Signal className="w-4 h-4" /> Live Market Prices
               {wsConnected ? (
-                <Badge variant="outline" className="text-[9px] border-green-500/30 text-green-400 ml-2"><Wifi className="w-3 h-3 mr-0.5" />LIVE</Badge>
+                <Badge variant="outline" className="text-[9px] border-green-500/30 text-green-400 ml-2" data-testid="ws-status-live"><Wifi className="w-3 h-3 mr-0.5" />LIVE WS</Badge>
+              ) : priceEngine?.mode === "rest_fallback" ? (
+                <Badge variant="outline" className="text-[9px] border-blue-500/30 text-blue-400 ml-2" data-testid="ws-status-rest"><Database className="w-3 h-3 mr-0.5" />REST FALLBACK</Badge>
               ) : (
-                <Badge variant="outline" className="text-[9px] border-slate-600 text-slate-400 ml-2"><WifiOff className="w-3 h-3 mr-0.5" />OFFLINE</Badge>
+                <Badge variant="outline" className="text-[9px] border-slate-600 text-slate-400 ml-2" data-testid="ws-status-offline"><WifiOff className="w-3 h-3 mr-0.5" />OFFLINE</Badge>
               )}
             </h2>
             <div className="flex gap-2">
@@ -1775,11 +1777,11 @@ const AutoTrade = () => {
 
           {/* Engine Status */}
           {priceEngine && (
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
-                <p className="text-[9px] text-slate-500 uppercase">WS Status</p>
-                <p className={`text-xs font-bold ${priceEngine.ws_connected ? "text-green-400" : "text-red-400"}`}>
-                  {priceEngine.ws_connected ? "Connected" : "Disconnected"}
+            <div className="grid grid-cols-3 md:grid-cols-7 gap-2">
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center" data-testid="engine-mode">
+                <p className="text-[9px] text-slate-500 uppercase">Mode</p>
+                <p className={`text-xs font-bold ${priceEngine.mode === "websocket" && priceEngine.ws_connected ? "text-green-400" : priceEngine.mode === "rest_fallback" ? "text-blue-400" : "text-red-400"}`}>
+                  {priceEngine.mode === "websocket" ? (priceEngine.ws_connected ? "WebSocket" : "WS Connecting") : priceEngine.mode === "rest_fallback" ? "REST Poll" : "Stopped"}
                 </p>
               </div>
               <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
@@ -1791,6 +1793,10 @@ const AutoTrade = () => {
                 <p className="text-xs font-bold text-green-400">{priceEngine.live_count}</p>
               </div>
               <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">Snapshot</p>
+                <p className="text-xs font-bold text-blue-400">{priceEngine.snapshot_count || 0}</p>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
                 <p className="text-[9px] text-slate-500 uppercase">Stale</p>
                 <p className={`text-xs font-bold ${priceEngine.stale_count > 0 ? "text-red-400" : "text-slate-400"}`}>{priceEngine.stale_count}</p>
               </div>
@@ -1799,8 +1805,8 @@ const AutoTrade = () => {
                 <p className="text-xs font-bold text-blue-400 font-mono">{priceEngine.stats?.trades_received || 0}</p>
               </div>
               <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
-                <p className="text-[9px] text-slate-500 uppercase">Reconnects</p>
-                <p className="text-xs font-bold text-amber-400 font-mono">{priceEngine.stats?.reconnects || 0}</p>
+                <p className="text-[9px] text-slate-500 uppercase">REST Polls</p>
+                <p className="text-xs font-bold text-amber-400 font-mono">{priceEngine.stats?.rest_polls || 0}</p>
               </div>
             </div>
           )}
@@ -1867,6 +1873,111 @@ const AutoTrade = () => {
               Click "Start Live Feed" to begin streaming real-time prices via Alpaca WebSocket.
               <p className="text-[10px] text-slate-600 mt-2">Data source: Alpaca IEX (real-time trades + quotes). Polygon REST for historical bars.</p>
             </Card>
+          )}
+
+          {/* Dynamic Re-Evaluation Section */}
+          {priceEngine?.running && (
+            <div className="space-y-3 mt-4" data-testid="reeval-section">
+              <h3 className="text-sm text-cyan-400 flex items-center gap-1">
+                <Brain className="w-4 h-4" /> Dynamic Re-Evaluation
+                {reevalData?.stats?.total_triggers > 0 && (
+                  <Badge variant="outline" className="text-[9px] border-cyan-500/30 text-cyan-400 ml-2">
+                    {reevalData.stats.total_triggers} triggers
+                  </Badge>
+                )}
+              </h3>
+
+              {/* Re-eval Stats */}
+              {reevalData?.stats && (
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                    <p className="text-[9px] text-slate-500 uppercase">Triggers</p>
+                    <p className="text-xs font-bold text-cyan-400 font-mono">{reevalData.stats.total_triggers}</p>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                    <p className="text-[9px] text-slate-500 uppercase">Throttled</p>
+                    <p className="text-xs font-bold text-slate-400 font-mono">{reevalData.stats.throttled}</p>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                    <p className="text-[9px] text-slate-500 uppercase">Pos Checks</p>
+                    <p className="text-xs font-bold text-blue-400 font-mono">{reevalData.stats.position_checks}</p>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                    <p className="text-[9px] text-slate-500 uppercase">Stop/TP Hit</p>
+                    <p className={`text-xs font-bold font-mono ${(reevalData.stats.stop_loss_triggered + reevalData.stats.take_profit_triggered) > 0 ? "text-red-400" : "text-slate-400"}`}>
+                      {reevalData.stats.stop_loss_triggered + reevalData.stats.take_profit_triggered}
+                    </p>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                    <p className="text-[9px] text-slate-500 uppercase">Setup Changes</p>
+                    <p className={`text-xs font-bold font-mono ${reevalData.stats.setup_changes > 0 ? "text-amber-400" : "text-slate-400"}`}>
+                      {reevalData.stats.setup_changes}
+                    </p>
+                  </div>
+                  <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                    <p className="text-[9px] text-slate-500 uppercase">Stale Blocked</p>
+                    <p className={`text-xs font-bold font-mono ${reevalData.stats.stale_blocked > 0 ? "text-red-400" : "text-slate-400"}`}>
+                      {reevalData.stats.stale_blocked}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Re-eval Events */}
+              {reevalData?.recent?.length > 0 ? (
+                <div className="space-y-2" data-testid="reeval-events">
+                  {reevalData.recent.map((evt, i) => (
+                    <Card key={i} className={`p-3 border ${
+                      evt.position_action?.includes("STOP") ? "border-red-500/30 bg-red-500/5" :
+                      evt.position_action?.includes("PROFIT") ? "border-emerald-500/30 bg-emerald-500/5" :
+                      evt.setup_changed ? "border-amber-500/30 bg-amber-500/5" :
+                      "border-slate-800 bg-slate-900/30"
+                    }`}>
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white font-bold text-xs">{evt.symbol}</span>
+                          {evt.position_action && (
+                            <Badge variant="outline" className={`text-[8px] ${
+                              evt.position_action.includes("STOP") ? "border-red-500/40 text-red-400" : "border-emerald-500/40 text-emerald-400"
+                            }`}>{evt.position_action}</Badge>
+                          )}
+                          {evt.setup_changed && <Badge variant="outline" className="text-[8px] border-amber-500/40 text-amber-400">SETUP CHANGED</Badge>}
+                          {evt.confidence_changed && <Badge variant="outline" className="text-[8px] border-blue-500/40 text-blue-400">CONF: {evt.old_confidence} → {evt.new_confidence}</Badge>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={`text-[8px] ${
+                            evt.data_source === "live" ? "border-green-500/30 text-green-400" : "border-blue-500/30 text-blue-400"
+                          }`}>{(evt.data_source || "").toUpperCase()}</Badge>
+                          <span className="text-[9px] text-slate-500">{evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : ""}</span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">{evt.trigger_reason}</p>
+                      <div className="flex gap-3 mt-1 text-[10px] font-mono">
+                        <span className="text-slate-500">${evt.old_price?.toFixed(2)} → <span className="text-white">${evt.new_price?.toFixed(2)}</span></span>
+                        {evt.position_pnl_pct !== 0 && (
+                          <span className={evt.position_pnl_pct > 0 ? "text-emerald-400" : "text-red-400"}>
+                            P&L: {evt.position_pnl_pct > 0 ? "+" : ""}{evt.position_pnl_pct}%
+                          </span>
+                        )}
+                      </div>
+                      {evt.details?.length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {evt.details.map((d, di) => (
+                            <p key={di} className="text-[9px] text-slate-500">{d}</p>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Card className="terminal-card p-4 text-center text-slate-500 text-xs" data-testid="reeval-empty">
+                  <Brain className="w-5 h-5 mx-auto mb-1 text-slate-600" />
+                  No re-evaluation events yet. Events trigger when live prices cross key levels (VWAP, S/R, stop-loss, take-profit).
+                  <p className="text-[9px] text-slate-600 mt-1">Throttle: 1 eval per symbol per 30s. Only meaningful price changes trigger re-eval.</p>
+                </Card>
+              )}
+            </div>
           )}
         </TabsContent>
 

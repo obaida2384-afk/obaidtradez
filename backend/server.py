@@ -39,6 +39,7 @@ from news_sentiment_engine import EnhancedNewsSentimentEngine
 # Import auto-trade scheduler
 from auto_trade_scheduler import AutoTradeScheduler
 from live_price_engine import LivePriceEngine
+from live_reeval_engine import LiveReEvaluationEngine
 from starlette.responses import StreamingResponse
 
 # ===================== CONFIGURATION =====================
@@ -4238,6 +4239,10 @@ auto_scheduler = AutoTradeScheduler(db, auto_orchestrator, enhanced_news_engine)
 live_price_engine = LivePriceEngine()
 auto_orchestrator.live_price_engine = live_price_engine
 
+# Live Re-Evaluation Engine
+live_reeval_engine = LiveReEvaluationEngine(db, auto_orchestrator)
+live_price_engine.set_reeval_callback(live_reeval_engine.on_price_change)
+
 
 # ===================== AUTO-TRADE AI ENDPOINTS =====================
 
@@ -4401,14 +4406,6 @@ async def get_all_live_prices(auth: bool = Depends(verify_access)):
     status = live_price_engine.get_status()
     return {"prices": prices, "engine": status}
 
-@api_router.get("/live-prices/{symbol}")
-async def get_live_price(symbol: str, auth: bool = Depends(verify_access)):
-    """Get live price data for a specific symbol."""
-    state = live_price_engine.get_price(symbol.upper())
-    if not state:
-        return {"symbol": symbol.upper(), "source": "none", "stale": True}
-    return state.to_dict()
-
 @api_router.get("/live-prices/status/engine")
 async def get_live_price_status(auth: bool = Depends(verify_access)):
     """Get live price engine status (connection, stats, stale counts)."""
@@ -4420,11 +4417,10 @@ async def live_price_stream(auth: bool = Depends(verify_access)):
     async def event_generator():
         last_data = {}
         while True:
-            await asyncio.sleep(2)  # Push every 2 seconds
+            await asyncio.sleep(2)
             prices = live_price_engine.get_all_prices()
             engine = live_price_engine.get_status()
             
-            # Only send changed prices
             changed = {}
             for sym, data in prices.items():
                 prev = last_data.get(sym, {})
@@ -4434,7 +4430,13 @@ async def live_price_stream(auth: bool = Depends(verify_access)):
                     changed[sym] = data
             
             if changed or not last_data:
-                payload = json.dumps({"prices": changed or prices, "engine": engine})
+                reeval_stats = live_reeval_engine.get_stats()
+                recent_reevals = live_reeval_engine.get_recent_events(5)
+                payload = json.dumps({
+                    "prices": changed or prices,
+                    "engine": engine,
+                    "reeval": {"stats": reeval_stats, "recent": recent_reevals},
+                })
                 yield f"data: {payload}\n\n"
                 last_data = prices
     
@@ -4443,6 +4445,33 @@ async def live_price_stream(auth: bool = Depends(verify_access)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+@api_router.get("/live-prices/{symbol}")
+async def get_live_price(symbol: str, auth: bool = Depends(verify_access)):
+    """Get live price data for a specific symbol."""
+    state = live_price_engine.get_price(symbol.upper())
+    if not state:
+        return {"symbol": symbol.upper(), "source": "none", "stale": True}
+    return state.to_dict()
+
+# ===================== LIVE RE-EVALUATION ENDPOINTS =====================
+
+@api_router.get("/reeval/events")
+async def get_reeval_events(limit: int = 50, auth: bool = Depends(verify_access)):
+    """Get recent re-evaluation events from in-memory buffer."""
+    return {"events": live_reeval_engine.get_recent_events(limit)}
+
+@api_router.get("/reeval/stats")
+async def get_reeval_stats(auth: bool = Depends(verify_access)):
+    """Get re-evaluation engine statistics."""
+    return live_reeval_engine.get_stats()
+
+@api_router.get("/reeval/history")
+async def get_reeval_history(limit: int = 50, auth: bool = Depends(verify_access)):
+    """Get persisted re-evaluation events from MongoDB."""
+    cursor = db.reeval_events.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit)
+    events = await cursor.to_list(length=limit)
+    return {"events": events, "count": len(events)}
 
 
 
