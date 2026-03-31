@@ -1682,7 +1682,50 @@ class AutoTradeOrchestrator:
                 "has_tf_conflict": mtf_data.get("has_tf_conflict", False),
                 "dt_score": confidence,
                 "lt_score": 0,
+                # Price integrity fields — single source of truth for UI + logic
+                "price_data": {
+                    "price": cached_sig.get("price", ta_sig.get("price", 0)),
+                    "source": cached_sig.get("price_source", "polygon_ta"),
+                    "synced_at": cached_sig.get("price_synced_at"),
+                    "trade_ts": cached_sig.get("price_trade_ts"),
+                    "status": cached_sig.get("price_status", "unknown"),
+                    "bid": cached_sig.get("live_bid", 0),
+                    "ask": cached_sig.get("live_ask", 0),
+                },
             }
+
+            # Entry readiness classification based on current price vs setup levels
+            setup_entry = explanation.exit_plan.get("entry", 0) if explanation.exit_plan else 0
+            setup_stop = explanation.exit_plan.get("stop_loss", 0) if explanation.exit_plan else 0
+            setup_target = explanation.exit_plan.get("take_profit", 0) if explanation.exit_plan else 0
+            current_price = cached_sig.get("price", ta_sig.get("price", 0))
+
+            if setup_entry > 0 and current_price > 0:
+                price_vs_entry_pct = ((current_price / setup_entry) - 1) * 100
+                if ta_sig.get("direction") == "LONG":
+                    if current_price <= setup_entry * 1.005:
+                        entry["entry_status"] = "TRADE_NOW"
+                    elif current_price <= setup_entry * 1.02:
+                        entry["entry_status"] = "WATCHLIST"
+                    elif setup_target > 0 and current_price >= setup_target:
+                        entry["entry_status"] = "MISSED"
+                    else:
+                        entry["entry_status"] = "WATCHLIST"
+                elif ta_sig.get("direction") == "SHORT":
+                    if current_price >= setup_entry * 0.995:
+                        entry["entry_status"] = "TRADE_NOW"
+                    elif current_price >= setup_entry * 0.98:
+                        entry["entry_status"] = "WATCHLIST"
+                    elif setup_target > 0 and current_price <= setup_target:
+                        entry["entry_status"] = "MISSED"
+                    else:
+                        entry["entry_status"] = "WATCHLIST"
+                else:
+                    entry["entry_status"] = "UNKNOWN"
+                entry["price_vs_entry_pct"] = round(price_vs_entry_pct, 2)
+            else:
+                entry["entry_status"] = "NO_LEVELS"
+                entry["price_vs_entry_pct"] = 0
 
             if explanation.action in ("BUY", "SELL") and confidence >= dt_threshold:
                 funnel.record("confidence_passed")
@@ -1786,6 +1829,17 @@ class AutoTradeOrchestrator:
                     "signal": i_sig,
                     "dt_score": cls_result["day_trading_score"],
                     "lt_score": cls_result["long_term_score"],
+                    # Price integrity fields
+                    "price_data": {
+                        "price": i_sig.get("price", 0),
+                        "source": i_sig.get("price_source", "fmp"),
+                        "synced_at": i_sig.get("price_synced_at"),
+                        "trade_ts": i_sig.get("price_trade_ts"),
+                        "status": i_sig.get("price_status", "unknown"),
+                        "bid": i_sig.get("live_bid", 0),
+                        "ask": i_sig.get("live_ask", 0),
+                    },
+                    "entry_status": "WATCHLIST",
                 }
 
                 if explanation.action == "BUY" and confidence >= lt_threshold:
@@ -1950,6 +2004,24 @@ class AutoTradeOrchestrator:
             f"Cache hit: {cache_stats.get('hit_rate', 0)}%"
         )
 
+        # Build per-symbol price audit log (#6 debug logging)
+        price_audit = []
+        all_entries = day_trade_candidates + long_term_candidates + watchlist
+        for entry in all_entries[:50]:  # Cap at 50 to keep payload manageable
+            sym = entry.get("symbol", "")
+            pd = entry.get("price_data", {})
+            price_audit.append({
+                "symbol": sym,
+                "price_used": pd.get("price", 0),
+                "source": pd.get("source", "unknown"),
+                "synced_at": pd.get("synced_at"),
+                "trade_ts": pd.get("trade_ts"),
+                "status": pd.get("status", "unknown"),
+                "stale": pd.get("status") == "stale" or pd.get("status") == "dead",
+                "entry_status": entry.get("entry_status", "UNKNOWN"),
+                "last_recompute": cycle_start,
+            })
+
         # Get market session info for pre-market awareness
         from auto_trade_scheduler import MarketSessionManager
         current_session = MarketSessionManager.get_session()
@@ -1999,6 +2071,7 @@ class AutoTradeOrchestrator:
             "mtf_heatmap_distribution": heatmap_dist,
             "lt_pipeline": lt_pipeline,
             "momentum_diagnostics": momentum_diagnostics,
+            "price_audit": price_audit,
             "settings": settings.dict(),
         }
     

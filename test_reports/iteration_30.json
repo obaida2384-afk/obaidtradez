@@ -1,0 +1,89 @@
+{
+  "iteration": 30,
+  "timestamp": "2026-03-31T04:45:00Z",
+  "summary": "Tested Price Integrity P2 features: ticker normalization, price_data in candidates, entry_status classification, price_audit debug logging, ticker_mappings endpoint. All 12 backend tests pass. Frontend access gate, Auto Trade, Live Prices, and Investments pages all working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend_tests": {
+      "ticker_mappings_known_renames": "PASS - 14 known renames (ZI→GTM, TWTR→X, FB→META, etc.)",
+      "ticker_mappings_dead_tickers": "PASS - 165 dead tickers flagged",
+      "price_integrity_zi_renamed": "PASS - ZI correctly shows is_renamed=true, ticker_canonical=GTM, price=$5.96",
+      "price_integrity_mrvl_healthy": "PASS - MRVL healthy with price ~$87, stale=false, source=alpaca",
+      "price_integrity_batch_healthy": "PASS - AAPL,TSLA both healthy (2/2)",
+      "auto_trade_scan_excludes_dead": "PASS - No dead tickers (ZI, TWTR, SIVB) in scan results",
+      "auto_trade_scan_has_price_audit": "PASS - price_audit array present with required fields",
+      "candidates_have_price_data": "PASS - All candidates have price_data object with price, source, synced_at, status",
+      "candidates_have_entry_status": "PASS - All candidates have entry_status (TRADE_NOW/WATCHLIST/MISSED/NO_LEVELS/UNKNOWN)",
+      "investments_excludes_dead": "PASS - SIVB, TWTR excluded (ZI allowed as it maps to live GTM)",
+      "renamed_tickers_allowed": "PASS - ZI (→GTM) allowed in investments since GTM is live",
+      "sync_signals_returns_counts": "PASS - Returns updated, dead_flagged, rejected, total"
+    },
+    "frontend_tests": {
+      "access_gate": "PASS - Login with code Bullishalmarkhan7.7 works",
+      "dashboard": "PASS - Shows Hot Trading Signals and Top Investment Ideas",
+      "auto_trade_page": "PASS - Shows scheduler RUNNING, market CLOSED, DT:65/LT:72 thresholds",
+      "live_prices_tab": "PASS - Tab clickable, shows Start Live Feed button (OFFLINE - market closed)",
+      "investments_page": "PASS - Shows 1250 stocks analyzed, Hot(166), Bullish(279), Undervalued(51)"
+    }
+  },
+  "api_verification": {
+    "/api/auth/access": "PASS - Returns token with valid code",
+    "/api/debug/ticker_mappings": "PASS - Returns 14 ticker_mappings, 165 dead_tickers, stats",
+    "/api/debug/price_integrity/ZI": "PASS - Returns is_renamed=true, ticker_canonical=GTM, price=$5.96",
+    "/api/debug/price_integrity/MRVL": "PASS - Returns stale=false, price ~$87, source=alpaca",
+    "/api/debug/price_integrity?symbols=AAPL,TSLA": "PASS - Both healthy",
+    "/api/debug/price_integrity/SIVB": "PASS - Returns dead_ticker=true, source=dead_ticker",
+    "/api/debug/price_integrity/TWTR": "PASS - Returns dead_ticker=true, is_renamed=true, ticker_canonical=X",
+    "/api/auto-trade/scan": "PASS - Contains price_audit array, candidates have price_data + entry_status",
+    "/api/investments/scan": "PASS - 1250 stocks, dead tickers excluded",
+    "/api/prices/sync-signals": "PASS - Returns updated + dead_flagged + rejected + total"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_price_integrity_p2.py",
+    "/app/test_reports/pytest/pytest_price_integrity_p2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Price Integrity Service correctly implements ticker normalization (14 KNOWN_RENAMES)",
+    "ZI→GTM mapping works correctly - ZI is NOT dead, it maps to live GTM ($5.96)",
+    "TWTR→X mapping works but TWTR is flagged dead (last trade 2025-06-17)",
+    "SIVB correctly flagged as dead_ticker=true (bankrupt 2023-03-10)",
+    "scan_opportunities adds price_data and entry_status to all candidates",
+    "price_audit array (50 entries) provides per-symbol debug logging",
+    "entry_status classification: TRADE_NOW, WATCHLIST, MISSED, NO_LEVELS, UNKNOWN"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_price_integrity_p2.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "access_code": "Bullishalmarkhan7.7"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Price Integrity P2 features verified. Key findings: (1) ZI is NOT dead - it's renamed to GTM which is actively trading at $5.96. (2) TWTR and SIVB are correctly flagged as dead. (3) 14 known renames in KNOWN_RENAMES dict. (4) 165 dead tickers flagged in MongoDB. (5) All candidates in scan have price_data object and entry_status field. (6) price_audit array provides debug logging for top 50 candidates.",
+  "features_verified": [
+    "GET /api/debug/ticker_mappings returns 14 known renames and 165+ dead tickers",
+    "GET /api/debug/price_integrity/ZI shows is_renamed=true, ticker_canonical=GTM (NOT dead)",
+    "GET /api/debug/price_integrity/MRVL shows stale=false, price ~$87, source=alpaca",
+    "GET /api/debug/price_integrity?symbols=AAPL,TSLA shows both healthy",
+    "GET /api/auto-trade/scan excludes dead tickers, has price_audit array",
+    "Each candidate has price_data object with price, source, synced_at, status",
+    "Each candidate has entry_status: TRADE_NOW, WATCHLIST, MISSED, NO_LEVELS, UNKNOWN",
+    "GET /api/investments/scan excludes dead tickers (SIVB, TWTR)",
+    "POST /api/prices/sync-signals returns {updated, dead_flagged, rejected, total}",
+    "Frontend access gate, Auto Trade, Live Prices, Investments all working"
+  ]
+}

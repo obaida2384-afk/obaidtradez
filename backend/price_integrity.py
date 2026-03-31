@@ -68,6 +68,24 @@ class PriceIntegrityService:
     All price consumers (UI, trading logic, sync) MUST use this service.
     """
 
+    # Known ticker renames/rebrandings
+    KNOWN_RENAMES = {
+        "ZI": "GTM",       # ZoomInfo → GTM (2024)
+        "TWTR": "X",        # Twitter → X Corp (delisted)
+        "FB": "META",       # Facebook → Meta
+        "DISCA": "WBD",     # Discovery → Warner Bros Discovery
+        "VIAC": "PARA",     # ViacomCBS → Paramount (then also renamed)
+        "FEYE": "MNDT",     # FireEye → Mandiant (acquired by Google)
+        "KSU": "CP",        # Kansas City Southern → Canadian Pacific
+        "ZNGA": "TTWO",     # Zynga → Take-Two (acquired)
+        "MIME": "MIME",     # Mimecast (delisted, acquired)
+        "HFC": "PSX",       # HollyFrontier → Phillips 66 (merged)
+        "ECHO": "CHRW",     # Echo Global → C.H. Robinson (acquired)
+        "PLAN": "ANPL",     # Anaplan (acquired by Thoma Bravo)
+        "SAFM": "TSN",      # Sanderson Farms → Tyson (acquired)
+        "ONEM": "AMZN",     # One Medical → Amazon (acquired)
+    }
+
     def __init__(self):
         self._api_key = os.environ.get("ALPACA_API_KEY", "")
         self._secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
@@ -84,11 +102,21 @@ class PriceIntegrityService:
             "stale_rejected": 0,
             "dead_rejected": 0,
             "fmp_fallbacks": 0,
+            "renames_resolved": 0,
         }
 
+        # Initialize known renames
+        for old, new in self.KNOWN_RENAMES.items():
+            self._ticker_map[old] = new
+            logger.info(f"Ticker mapping: {old} → {new}")
+
     def get_canonical_symbol(self, symbol: str) -> str:
-        """Resolve ticker renames/mappings."""
-        return self._ticker_map.get(symbol.upper(), symbol.upper())
+        """Resolve ticker renames/mappings. Logs when a rename is applied."""
+        canonical = self._ticker_map.get(symbol.upper(), symbol.upper())
+        if canonical != symbol.upper():
+            self._stats["renames_resolved"] += 1
+            logger.debug(f"Ticker rename resolved: {symbol} → {canonical}")
+        return canonical
 
     def is_dead_ticker(self, symbol: str) -> bool:
         return symbol.upper() in self._dead_tickers
@@ -456,3 +484,9 @@ class PriceIntegrityService:
             "cached_prices": len(self._cache),
             "ticker_mappings": len(self._ticker_map),
         }
+
+    def get_dead_ticker_list(self) -> List[str]:
+        return sorted(list(self._dead_tickers))
+
+    def get_ticker_mappings(self) -> Dict[str, str]:
+        return dict(self._ticker_map)

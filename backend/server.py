@@ -4971,7 +4971,18 @@ async def debug_single_price_integrity(symbol: str, auth: bool = Depends(verify_
         "cached_trading_signal": ts,
         "cached_investment_signal": inv,
         "mismatch": ts and abs(rec.price - (ts.get("price") or 0)) > 0.01 if rec.price > 0 else False,
+        "ticker_canonical": price_integrity.get_canonical_symbol(sym),
+        "is_renamed": price_integrity.get_canonical_symbol(sym) != sym,
         "integrity_stats": price_integrity.get_stats(),
+    }
+
+@api_router.get("/debug/ticker_mappings")
+async def get_ticker_mappings(auth: bool = Depends(verify_access)):
+    """Show all known ticker renames and dead tickers."""
+    return {
+        "ticker_mappings": price_integrity.get_ticker_mappings(),
+        "dead_tickers": price_integrity.get_dead_ticker_list(),
+        "stats": price_integrity.get_stats(),
     }
 
 # Health check (no auth required)

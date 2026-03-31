@@ -322,6 +322,38 @@ class LiveReEvaluationEngine:
             "action": new_action,
         }
 
+        # Entry readiness reclassification based on current price vs setup levels
+        entry_status = "UNKNOWN"
+        old_entry_status = prev_state.get("entry_status", "UNKNOWN")
+        exit_plan = explanation.exit_plan
+        if isinstance(exit_plan, dict):
+            setup_entry = exit_plan.get("entry", 0)
+            setup_stop = exit_plan.get("stop_loss", 0)
+            setup_target = exit_plan.get("take_profit", 0)
+            direction = updated_signal.get("direction", "NONE")
+
+            if setup_entry > 0 and new_price > 0:
+                if direction == "LONG":
+                    if new_price <= setup_entry * 1.005:
+                        entry_status = "TRADE_NOW"
+                    elif new_price <= setup_entry * 1.02:
+                        entry_status = "WATCHLIST"
+                    elif setup_target > 0 and new_price >= setup_target:
+                        entry_status = "MISSED"
+                    else:
+                        entry_status = "WATCHLIST"
+                elif direction == "SHORT":
+                    if new_price >= setup_entry * 0.995:
+                        entry_status = "TRADE_NOW"
+                    elif new_price >= setup_entry * 0.98:
+                        entry_status = "WATCHLIST"
+                    elif setup_target > 0 and new_price <= setup_target:
+                        entry_status = "MISSED"
+                    else:
+                        entry_status = "WATCHLIST"
+
+        self._last_candidate_state[symbol]["entry_status"] = entry_status
+
         # Detect changes
         result = ReEvalResult(symbol)
         result.old_price = old_price
@@ -338,6 +370,10 @@ class LiveReEvaluationEngine:
             result.entry_readiness_changed = True
             result.details.append(f"Action changed: {old_action} -> {new_action}")
             self._stats["setup_changes"] += 1
+
+        if entry_status != old_entry_status and old_entry_status != "UNKNOWN":
+            result.entry_readiness_changed = True
+            result.details.append(f"Entry status: {old_entry_status} -> {entry_status}")
 
         if abs(new_confidence - old_confidence) >= 3:
             result.confidence_changed = True
@@ -360,9 +396,15 @@ class LiveReEvaluationEngine:
 
         if has_change:
             result.details.extend(triggers)
+            result.details.append(f"Entry readiness: {entry_status}")
             self._log_result(result)
             await self._persist_reeval_log(result)
-            logger.info(f"REEVAL CANDIDATE {symbol}: {result.trigger_reason} | action={old_action}->{new_action} conf={old_confidence}->{new_confidence}")
+            logger.info(
+                f"REEVAL {symbol}: {result.trigger_reason} | "
+                f"price=${old_price:.2f}->${new_price:.2f} | source={source} | "
+                f"action={old_action}->{new_action} | conf={old_confidence}->{new_confidence} | "
+                f"entry_status={entry_status}"
+            )
 
     def _log_result(self, result: ReEvalResult):
         """Add to in-memory ring buffer."""
