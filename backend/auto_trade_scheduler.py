@@ -145,7 +145,7 @@ class AutoTradeScheduler:
             "max_portfolio_drawdown_pct": 10.0,
             "max_consecutive_losses": 2,  # Changed from 3 to 2
             "cooldown_minutes": 30,
-            "min_confidence_day": 80,  # Raised from 60
+            "min_confidence_day": 70,  # Set to 70 for paper validation run
             "min_confidence_long": 75,  # Raised from 55
             "stale_data_minutes": 15,
             "max_api_failures": 3,
@@ -442,6 +442,9 @@ class AutoTradeScheduler:
             funnel.record("universe_scanned", len(trading_signals))
 
             candidates = []
+            # Confidence distribution tracking
+            conf_distribution = {"above_65": 0, "above_70": 0, "above_80": 0, "blocked_by_threshold": []}
+
             for sig in trading_signals:
                 symbol = sig.get("symbol", "")
                 if not symbol:
@@ -452,7 +455,24 @@ class AutoTradeScheduler:
                     continue
 
                 confidence = ConfidenceScoringEngine.score_day_trade(sig, market_regime)
+
+                # Track distribution
+                if confidence >= 65:
+                    conf_distribution["above_65"] += 1
+                if confidence >= 70:
+                    conf_distribution["above_70"] += 1
+                if confidence >= 80:
+                    conf_distribution["above_80"] += 1
+
                 if confidence < threshold:
+                    # Track what was blocked ONLY by threshold
+                    if confidence >= 65:
+                        conf_distribution["blocked_by_threshold"].append({
+                            "symbol": symbol,
+                            "confidence": confidence,
+                            "threshold": threshold,
+                            "would_pass_at": 65 if confidence >= 65 else None,
+                        })
                     if confidence >= threshold - 12:
                         diagnostics.add_near_miss(symbol, "DAY_TRADE", confidence, "NEAR_MISS",
                             [f"Confidence {confidence} < {threshold}"])
@@ -537,13 +557,45 @@ class AutoTradeScheduler:
                 "near_misses": len(no_trade_summary.get("near_misses", [])),
                 "opportunity_quality": no_trade_summary.get("opportunity_quality", "LOW_OPPORTUNITY"),
                 "funnel": funnel.to_dict(),
+                "confidence_distribution": {
+                    "above_65": conf_distribution["above_65"],
+                    "above_70": conf_distribution["above_70"],
+                    "above_80": conf_distribution["above_80"],
+                    "blocked_only_by_threshold": len(conf_distribution["blocked_by_threshold"]),
+                    "blocked_details": conf_distribution["blocked_by_threshold"][:10],
+                },
                 "details": {"executed": executed, "skipped": skipped, "top_candidates": [
                     {"symbol": c["symbol"], "confidence": c["confidence"]} for c in candidates[:10]
                 ]}
             }
+
+            # Log confidence distribution
+            cd = conf_distribution
+            logger.info(
+                f"DT CONFIDENCE DIST | >=65: {cd['above_65']} | >=70: {cd['above_70']} | "
+                f">=80: {cd['above_80']} | threshold={threshold} | "
+                f"blocked_by_threshold: {len(cd['blocked_by_threshold'])} | "
+                f"candidates_passed: {len(candidates)} | executed: {len(executed)}"
+            )
             self._last_cycle_result = cycle_result
             self._cycle_count += 1
             await self._log_execution("day_trade_cycle", cycle_result)
+
+            # Persist confidence distribution for post-session analysis
+            await self.db.confidence_distribution.insert_one({
+                "date": _now_et().date().isoformat(),
+                "timestamp": _now_utc().isoformat(),
+                "session": session.value,
+                "threshold_used": threshold,
+                "above_65": conf_distribution["above_65"],
+                "above_70": conf_distribution["above_70"],
+                "above_80": conf_distribution["above_80"],
+                "blocked_only_by_threshold": len(conf_distribution["blocked_by_threshold"]),
+                "blocked_details": conf_distribution["blocked_by_threshold"][:20],
+                "candidates_passed": len(candidates),
+                "executed": len(executed),
+                "regime": market_regime,
+            })
 
             # Full-day zero-trade alert
             if len(candidates) == 0 and session == MarketSession.REGULAR:

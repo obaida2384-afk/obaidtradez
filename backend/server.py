@@ -4526,6 +4526,41 @@ async def stop_reeval_verification(auth: bool = Depends(verify_access)):
     return {"message": "Verifier stopped", "report": reeval_verifier.get_report()}
 
 
+@api_router.get("/auto-trade/confidence-distribution")
+async def get_confidence_distribution(date: str = None, auth: bool = Depends(verify_access)):
+    """Get confidence distribution data for threshold analysis."""
+    from auto_trade_scheduler import _now_et
+    query = {}
+    if date:
+        query["date"] = date
+    else:
+        query["date"] = _now_et().date().isoformat()
+    
+    cursor = db.confidence_distribution.find(query, {"_id": 0}).sort("timestamp", -1).limit(50)
+    records = await cursor.to_list(length=50)
+    
+    # Aggregate
+    total_above_65 = sum(r.get("above_65", 0) for r in records)
+    total_above_70 = sum(r.get("above_70", 0) for r in records)
+    total_above_80 = sum(r.get("above_80", 0) for r in records)
+    total_blocked = sum(r.get("blocked_only_by_threshold", 0) for r in records)
+    total_executed = sum(r.get("executed", 0) for r in records)
+    
+    return {
+        "date": query["date"],
+        "scan_cycles": len(records),
+        "aggregate": {
+            "total_above_65": total_above_65,
+            "total_above_70": total_above_70,
+            "total_above_80": total_above_80,
+            "total_blocked_by_threshold": total_blocked,
+            "total_executed": total_executed,
+        },
+        "latest_cycle": records[0] if records else None,
+        "cycles": records[:10],
+    }
+
+
 
 
 @api_router.post("/auto-trade/emergency-pause")
