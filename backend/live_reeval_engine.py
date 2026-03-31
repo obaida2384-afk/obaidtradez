@@ -79,9 +79,10 @@ class LiveReEvaluationEngine:
         self._cached_settings = None
         self._cached_regime = None
         self._cache_ts: float = 0
-        self._last_candidate_state: Dict[str, Dict] = {}  # symbol -> {confidence, action}
-        self._reeval_log: list = []  # Recent re-eval results (ring buffer)
+        self._last_candidate_state: Dict[str, Dict] = {}
+        self._reeval_log: list = []
         self._max_log_size = 200
+        self._verifier = None  # Set externally
         self._stats = {
             "total_triggers": 0,
             "throttled": 0,
@@ -93,6 +94,9 @@ class LiveReEvaluationEngine:
             "confidence_changes": 0,
             "stale_blocked": 0,
         }
+
+    def set_verifier(self, verifier):
+        self._verifier = verifier
 
     async def on_price_change(self, symbol: str, price_state):
         """Callback from LivePriceEngine when a significant price change occurs."""
@@ -416,10 +420,14 @@ class LiveReEvaluationEngine:
             )
 
     def _log_result(self, result: ReEvalResult):
-        """Add to in-memory ring buffer."""
-        self._reeval_log.append(result.to_dict())
+        """Add to in-memory ring buffer and verifier."""
+        event_dict = result.to_dict()
+        self._reeval_log.append(event_dict)
         if len(self._reeval_log) > self._max_log_size:
             self._reeval_log = self._reeval_log[-self._max_log_size:]
+        # Feed to verifier if active
+        if self._verifier and self._verifier.is_active:
+            self._verifier.record_event(event_dict)
 
     async def _persist_reeval_log(self, result: ReEvalResult):
         """Persist re-evaluation event to MongoDB."""

@@ -41,6 +41,7 @@ from auto_trade_scheduler import AutoTradeScheduler
 from live_price_engine import LivePriceEngine
 from live_reeval_engine import LiveReEvaluationEngine
 from price_integrity import PriceIntegrityService
+from reeval_verifier import ReEvalVerifier
 from starlette.responses import StreamingResponse
 
 # ===================== CONFIGURATION =====================
@@ -4265,6 +4266,10 @@ price_integrity = PriceIntegrityService()
 live_reeval_engine = LiveReEvaluationEngine(db, auto_orchestrator)
 live_price_engine.set_reeval_callback(live_reeval_engine.on_price_change)
 
+# Re-Evaluation Verifier (auto-starts at market open)
+reeval_verifier = ReEvalVerifier()
+live_reeval_engine.set_verifier(reeval_verifier)
+
 
 # ===================== AUTO-TRADE AI ENDPOINTS =====================
 
@@ -4498,6 +4503,28 @@ async def get_reeval_history(limit: int = 50, auth: bool = Depends(verify_access
     cursor = db.reeval_events.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit)
     events = await cursor.to_list(length=limit)
     return {"events": events, "count": len(events)}
+
+
+@api_router.get("/reeval/verify")
+async def get_reeval_verification(auth: bool = Depends(verify_access)):
+    """Get the live re-evaluation verification report. Auto-activates at market open."""
+    # Update engine status snapshot
+    reeval_verifier.update_engine_status(live_price_engine.get_status())
+    return reeval_verifier.get_report()
+
+@api_router.post("/reeval/verify/start")
+async def start_reeval_verification(auth: bool = Depends(verify_access)):
+    """Manually start the re-evaluation verifier."""
+    engine_status = live_price_engine.get_status()
+    reeval_verifier.start(engine_status)
+    return {"message": "Verifier started", "engine_status": engine_status}
+
+@api_router.post("/reeval/verify/stop")
+async def stop_reeval_verification(auth: bool = Depends(verify_access)):
+    """Manually stop the re-evaluation verifier."""
+    reeval_verifier.stop()
+    return {"message": "Verifier stopped", "report": reeval_verifier.get_report()}
+
 
 
 
@@ -5070,6 +5097,9 @@ async def startup_event():
 
         # Start periodic price sync background task
         asyncio.create_task(_periodic_price_sync())
+
+        # Start market-open verifier watcher
+        asyncio.create_task(_market_open_verifier_watcher())
         
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -5093,4 +5123,62 @@ async def _periodic_price_sync():
             break
         except Exception as e:
             logger.warning(f"Periodic price sync error: {e}")
+            await asyncio.sleep(60)
+
+
+async def _market_open_verifier_watcher():
+    """Background task: auto-starts the re-eval verifier at market open, stops after 30 min."""
+    from auto_trade_scheduler import MarketSessionManager, MarketSession
+    from reeval_verifier import VERIFICATION_WINDOW_SECONDS
+    started_today = False
+    last_date = None
+
+    while True:
+        try:
+            await asyncio.sleep(30)
+            now_et = MarketSessionManager._now_et()
+            session = MarketSessionManager.get_session()
+            today = now_et.date()
+
+            # Reset daily flag
+            if last_date != today:
+                started_today = False
+                last_date = today
+
+            # Auto-start at regular market open (first time today)
+            if session == MarketSession.REGULAR and not started_today and not reeval_verifier.is_active:
+                engine_status = live_price_engine.get_status()
+                reeval_verifier.start(engine_status)
+                started_today = True
+                logger.info("VERIFIER: Auto-started at market open")
+
+                # Schedule auto-stop after verification window
+                async def auto_stop():
+                    await asyncio.sleep(VERIFICATION_WINDOW_SECONDS)
+                    if reeval_verifier.is_active:
+                        reeval_verifier.stop()
+                        report = reeval_verifier.get_report()
+                        logger.info(
+                            f"VERIFIER: Auto-stopped after {VERIFICATION_WINDOW_SECONDS}s | "
+                            f"Events: {report['summary']['total_events']} | "
+                            f"Symbols: {report['summary']['unique_symbols']} | "
+                            f"Setup changes: {report['summary']['setup_changes']} | "
+                            f"Errors: {len(report.get('errors', []))}"
+                        )
+                        # Persist report to DB
+                        await db.reeval_verification.insert_one({
+                            "date": today.isoformat(),
+                            "report": report,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                asyncio.create_task(auto_stop())
+
+            # Feed engine status to verifier while active
+            if reeval_verifier.is_active:
+                reeval_verifier.update_engine_status(live_price_engine.get_status())
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Verifier watcher error: {e}")
             await asyncio.sleep(60)

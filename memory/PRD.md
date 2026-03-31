@@ -1,56 +1,37 @@
 # ObaidTradez - AI Trading & Investing Platform
 
 ## Original Problem Statement
-Secure, dark-themed AI day trading and long-term investing platform protected by access code (`Bullishalmarkhan7.7`). Dual modes: Trading (short-term TA pipeline) and Investments (long-term fundamentals). Tiered Technical Analysis via Polygon OHLCV data with MTF confirmation, Momentum Mode bypass, and strict risk controls. Autonomous paper trading with live price streaming, dynamic re-evaluation, validated price integrity, and overvaluation protection.
+Secure, dark-themed AI day trading and long-term investing platform. Dual modes: Trading (TA pipeline) and Investments (fundamentals). Autonomous paper trading with live price streaming, dynamic re-evaluation, validated price integrity, overvaluation protection, and automated market-open verification.
 
 ## Architecture
 ```
-/app/
-├── backend/
-│   ├── ai_trading_system.py (Orchestrator, Risk Manager, Trade Logging, DT/LT Engines, entry_status classification)
-│   ├── enhanced_investment_engine.py (Fundamental scoring with overvaluation penalty)
-│   ├── technical_analysis_engine.py (TA math, MTF, Confidence Scoring)
-│   ├── auto_trade_scheduler.py (Background loop, state auto-recovery from MongoDB)
-│   ├── live_price_engine.py (Alpaca WebSocket + REST fallback, stale detection)
-│   ├── live_reeval_engine.py (Dynamic re-evaluation, TRADE_NOW/WATCHLIST/MISSED/STALE_SETUP/BLOWN_STOP)
-│   ├── price_integrity.py (Single source of truth, freshness validation, ticker normalization, dead ticker detection)
-│   ├── tests/
-│   └── server.py (FastAPI routes)
-├── frontend/
-│   ├── src/hooks/useLivePrices.js (SSE + polling, LiveIndicator, watchlist/positions hooks)
-│   ├── src/pages/AutoTrade.jsx (Scheduler, Diagnostics, Live Prices, Re-Eval UI)
+/app/backend/
+├── ai_trading_system.py      (Orchestrator, entry_status: TRADE_NOW/WATCHLIST/MISSED/STALE_SETUP/BLOWN_STOP)
+├── enhanced_investment_engine.py (Scoring with overvaluation penalty)
+├── auto_trade_scheduler.py   (Background loop, MongoDB auto-recovery)
+├── live_price_engine.py      (Alpaca WS + REST fallback)
+├── live_reeval_engine.py     (Dynamic re-eval on price changes)
+├── price_integrity.py        (Single source of truth, dead ticker detection)
+├── reeval_verifier.py        (Market-open automated verification)
+└── server.py                 (FastAPI routes)
 ```
 
 ## Completed (March 31, 2026)
+- [x] Live Prices: WS + REST fallback, SSE stream, mode indicator UI
+- [x] Dynamic Re-Evaluation: VWAP/S-R/breakout triggers, 30s throttle
+- [x] Price Integrity: 167 dead tickers flagged, 14 ticker renames, freshness validation
+- [x] Overvaluation penalty: stocks with upside < -25% blocked from "Buy"
+- [x] Entry status: TRADE_NOW/WATCHLIST/MISSED/STALE_SETUP/BLOWN_STOP
+- [x] Debug: price_audit in scan, /api/debug/price_integrity, /api/debug/ticker_mappings
+- [x] Market-open auto-verifier: captures re-eval events for 30 min, health checks, persists to MongoDB
 
-### Phase 1: Live Price Fix
-- [x] Fixed React hook ordering, WS infinite reconnect, FastAPI route ordering, SSE auth
-- [x] Live Prices UI with mode indicator, engine stats, REST fallback
-- [x] Dynamic Re-Evaluation Engine with VWAP/S-R/breakout triggers
+## Key Verification Endpoints
+- `GET /api/reeval/verify` — Live verification report with health checks
+- `POST /api/reeval/verify/start` — Manual start
+- `POST /api/reeval/verify/stop` — Manual stop + final report
 
-### Phase 2: Price Integrity
-- [x] Price Integrity Service — validates trade freshness, 165+ dead tickers flagged
-- [x] 14 known ticker renames (ZI→GTM, TWTR→X, FB→META, etc.)
-- [x] price_data + entry_status in every candidate, price_audit debug logging
-- [x] Diagnostics: /api/debug/price_integrity, /api/debug/ticker_mappings
-
-### Phase 3: Scoring & Setup Validation Fix (P1 Bug)
-- [x] **Overvaluation penalty**: stocks with upside < -25% get score penalty, blocked from "Buy"
-- [x] **Entry status classification**: TRADE_NOW / WATCHLIST / MISSED / STALE_SETUP (>10% drift) / BLOWN_STOP (price at/below stop)
-- [x] **Investment scan override**: stocks with upside < -25% or "Overvalued" classification forced to "Overpriced/Hold"
-- [x] MRVL fixed: was "Hot/Buy" with -76% upside → now "Overpriced/Hold"
-- [x] 463 overvalued stocks correctly moved to Overpriced category
-
-## Key API Endpoints
-- `/api/debug/price_integrity` — Full universe audit
-- `/api/debug/price_integrity/{symbol}` — Single symbol with ticker_canonical, is_renamed
-- `/api/debug/ticker_mappings` — Known renames + dead tickers
-- `/api/prices/sync-signals` — Manual price sync
-- `/api/auto-trade/scan` — Returns price_data, entry_status, price_audit
-- `/api/investments/scan` — Categories: hot, bullish, undervalued, overpriced, bearish, watch
-
-## Upcoming / Backlog
-- [ ] Verify live re-evaluation during market hours (P0)
+## Upcoming
+- [ ] Check verification report after next market open (9:30 AM ET)
 - [ ] Compare stocks side-by-side (P3)
 - [ ] Modularize server.py and AutoTrade.jsx (P3)
 
