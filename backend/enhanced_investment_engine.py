@@ -778,7 +778,24 @@ class EnhancedInvestmentEngine:
                     elif best_cagr < 0:
                         overall_score = max(0, overall_score - 2)
                         bear_case.append(f"Negative long-term CAGR: {best_cagr:.1f}%")
-                        score_detractors.append("Poor historical price performance")
+
+            # ==================== OVERVALUATION PENALTY ====================
+            # If stock is significantly overvalued (price >> intrinsic value),
+            # penalize the overall score to prevent false "Buy" signals.
+            if intrinsic_value and intrinsic_value > 0 and price > 0:
+                upside = ((intrinsic_value / price) - 1) * 100
+                if upside < -50:
+                    # Extremely overvalued (price > 2x intrinsic) — heavy penalty
+                    penalty = min(25, abs(upside) * 0.2)
+                    overall_score = max(0, overall_score - penalty)
+                    bear_case.append(f"Extremely overvalued: price ${price:.2f} vs intrinsic ${intrinsic_value:.2f} ({upside:.0f}%)")
+                    score_detractors.append(f"Extreme overvaluation penalty (-{penalty:.0f})")
+                elif upside < -25:
+                    # Significantly overvalued — moderate penalty
+                    penalty = min(12, abs(upside) * 0.15)
+                    overall_score = max(0, overall_score - penalty)
+                    bear_case.append(f"Overvalued: price ${price:.2f} vs intrinsic ${intrinsic_value:.2f} ({upside:.0f}%)")
+                    score_detractors.append(f"Overvaluation penalty (-{penalty:.0f})")
                 
                 if hist_perf.max_drawdown_pct and hist_perf.max_drawdown_pct < -60:
                     risks.append(f"Severe max drawdown: {hist_perf.max_drawdown_pct:.1f}%")
@@ -862,9 +879,28 @@ class EnhancedInvestmentEngine:
         for signal in signals:
             score = signal.overall_score
             percentile = signal.percentile_rank
-            
-            # Categorize based on both absolute score AND percentile
-            if percentile >= 90 and score >= 60:
+
+            # Extract upside for valuation override
+            upside_str = signal.valuation_summary.upside_potential if signal.valuation_summary else None
+            upside_val = None
+            if upside_str:
+                try:
+                    upside_val = float(upside_str.replace("%", "").replace("+", ""))
+                except (ValueError, TypeError):
+                    pass
+
+            is_overvalued = signal.valuation_summary.classification in ("Overvalued", "Slightly Overvalued") if signal.valuation_summary else False
+            is_severely_overvalued = (upside_val is not None and upside_val < -25) or (signal.valuation_summary and signal.valuation_summary.classification == "Overvalued")
+
+            # OVERRIDE: Never assign "Buy" to severely overvalued stocks
+            if is_severely_overvalued:
+                if score >= watch_threshold:
+                    signal.category = "Overpriced"
+                    signal.signal = "Hold"
+                else:
+                    signal.category = "Overpriced"
+                    signal.signal = "Sell"
+            elif percentile >= 90 and score >= 60:
                 signal.category = "Hot"
                 signal.signal = "Buy"
             elif percentile >= 75 and score >= 55:
@@ -884,7 +920,7 @@ class EnhancedInvestmentEngine:
                 signal.signal = "Sell"
             else:
                 # Check if overvalued despite decent score
-                if signal.valuation_score < 45:
+                if signal.valuation_score < 45 or is_overvalued:
                     signal.category = "Overpriced"
                     signal.signal = "Hold"
                 else:

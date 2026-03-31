@@ -333,8 +333,15 @@ class LiveReEvaluationEngine:
             direction = updated_signal.get("direction", "NONE")
 
             if setup_entry > 0 and new_price > 0:
-                if direction == "LONG":
-                    if new_price <= setup_entry * 1.005:
+                # Check setup staleness via price drift
+                ta_price = ta_signal.get("price", 0)
+                drift_pct = abs((new_price - ta_price) / ta_price) * 100 if ta_price > 0 else 0
+                if drift_pct > 10:
+                    entry_status = "STALE_SETUP"
+                elif direction == "LONG":
+                    if new_price <= setup_stop and setup_stop > 0:
+                        entry_status = "BLOWN_STOP"
+                    elif new_price <= setup_entry * 1.005:
                         entry_status = "TRADE_NOW"
                     elif new_price <= setup_entry * 1.02:
                         entry_status = "WATCHLIST"
@@ -343,7 +350,9 @@ class LiveReEvaluationEngine:
                     else:
                         entry_status = "WATCHLIST"
                 elif direction == "SHORT":
-                    if new_price >= setup_entry * 0.995:
+                    if new_price >= setup_stop and setup_stop > 0:
+                        entry_status = "BLOWN_STOP"
+                    elif new_price >= setup_entry * 0.995:
                         entry_status = "TRADE_NOW"
                     elif new_price >= setup_entry * 0.98:
                         entry_status = "WATCHLIST"

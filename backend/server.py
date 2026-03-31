@@ -2156,13 +2156,29 @@ async def scan_investments(auth: bool = Depends(verify_access)):
         ).sort("overall_score", -1).limit(1500)
         all_signals = await cursor.to_list(length=1500)
         
-        # Apply dynamic percentile-based categorization
+        # Apply dynamic percentile-based categorization with valuation overrides
         for i, s in enumerate(all_signals):
             percentile = ((len(all_signals) - i) / len(all_signals)) * 100
             score = s.get("overall_score", 0)
             
-            # Dynamic categorization
-            if percentile >= 90 and score >= 60:
+            # Check valuation — extract upside
+            val_summary = s.get("valuation_summary", {}) or {}
+            upside_str = val_summary.get("upside_potential", "") or s.get("upside_potential", "")
+            upside_val = None
+            if upside_str:
+                try:
+                    upside_val = float(str(upside_str).replace("%", "").replace("+", ""))
+                except (ValueError, TypeError):
+                    pass
+            
+            val_class = val_summary.get("classification", "") or ""
+            is_severely_overvalued = (upside_val is not None and upside_val < -25) or val_class == "Overvalued"
+            
+            # OVERRIDE: Never assign "Buy" to severely overvalued stocks
+            if is_severely_overvalued:
+                s["category"] = "Overpriced"
+                s["signal"] = "Hold" if score >= 40 else "Sell"
+            elif percentile >= 90 and score >= 60:
                 s["category"] = "Hot"
                 s["signal"] = "Buy"
             elif percentile >= 75 and score >= 55:

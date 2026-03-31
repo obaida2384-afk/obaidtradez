@@ -1702,26 +1702,62 @@ class AutoTradeOrchestrator:
 
             if setup_entry > 0 and current_price > 0:
                 price_vs_entry_pct = ((current_price / setup_entry) - 1) * 100
-                if ta_sig.get("direction") == "LONG":
-                    if current_price <= setup_entry * 1.005:
-                        entry["entry_status"] = "TRADE_NOW"
-                    elif current_price <= setup_entry * 1.02:
-                        entry["entry_status"] = "WATCHLIST"
-                    elif setup_target > 0 and current_price >= setup_target:
-                        entry["entry_status"] = "MISSED"
+
+                # Setup staleness check: if the TA was generated at a very different price,
+                # the entry/stop/target levels are unreliable
+                ta_price = ta_sig.get("price", 0) or ta_sig.get("close", 0)
+                if ta_price > 0 and current_price > 0:
+                    drift_pct = abs((current_price - ta_price) / ta_price) * 100
+                    if drift_pct > 10:
+                        entry["entry_status"] = "STALE_SETUP"
+                        entry["setup_drift_pct"] = round(drift_pct, 1)
+                        entry["setup_drift_reason"] = f"TA ran at ${ta_price:.2f}, now ${current_price:.2f} ({drift_pct:.1f}% drift)"
+                    elif ta_sig.get("direction") == "LONG":
+                        if current_price <= setup_stop and setup_stop > 0:
+                            entry["entry_status"] = "BLOWN_STOP"
+                        elif current_price <= setup_entry * 1.005:
+                            entry["entry_status"] = "TRADE_NOW"
+                        elif current_price <= setup_entry * 1.02:
+                            entry["entry_status"] = "WATCHLIST"
+                        elif setup_target > 0 and current_price >= setup_target:
+                            entry["entry_status"] = "MISSED"
+                        else:
+                            entry["entry_status"] = "WATCHLIST"
+                    elif ta_sig.get("direction") == "SHORT":
+                        if current_price >= setup_stop and setup_stop > 0:
+                            entry["entry_status"] = "BLOWN_STOP"
+                        elif current_price >= setup_entry * 0.995:
+                            entry["entry_status"] = "TRADE_NOW"
+                        elif current_price >= setup_entry * 0.98:
+                            entry["entry_status"] = "WATCHLIST"
+                        elif setup_target > 0 and current_price <= setup_target:
+                            entry["entry_status"] = "MISSED"
+                        else:
+                            entry["entry_status"] = "WATCHLIST"
                     else:
-                        entry["entry_status"] = "WATCHLIST"
-                elif ta_sig.get("direction") == "SHORT":
-                    if current_price >= setup_entry * 0.995:
-                        entry["entry_status"] = "TRADE_NOW"
-                    elif current_price >= setup_entry * 0.98:
-                        entry["entry_status"] = "WATCHLIST"
-                    elif setup_target > 0 and current_price <= setup_target:
-                        entry["entry_status"] = "MISSED"
-                    else:
-                        entry["entry_status"] = "WATCHLIST"
+                        entry["entry_status"] = "UNKNOWN"
                 else:
-                    entry["entry_status"] = "UNKNOWN"
+                    if ta_sig.get("direction") == "LONG":
+                        if current_price <= setup_entry * 1.005:
+                            entry["entry_status"] = "TRADE_NOW"
+                        elif current_price <= setup_entry * 1.02:
+                            entry["entry_status"] = "WATCHLIST"
+                        elif setup_target > 0 and current_price >= setup_target:
+                            entry["entry_status"] = "MISSED"
+                        else:
+                            entry["entry_status"] = "WATCHLIST"
+                    elif ta_sig.get("direction") == "SHORT":
+                        if current_price >= setup_entry * 0.995:
+                            entry["entry_status"] = "TRADE_NOW"
+                        elif current_price >= setup_entry * 0.98:
+                            entry["entry_status"] = "WATCHLIST"
+                        elif setup_target > 0 and current_price <= setup_target:
+                            entry["entry_status"] = "MISSED"
+                        else:
+                            entry["entry_status"] = "WATCHLIST"
+                    else:
+                        entry["entry_status"] = "UNKNOWN"
+
                 entry["price_vs_entry_pct"] = round(price_vs_entry_pct, 2)
             else:
                 entry["entry_status"] = "NO_LEVELS"
