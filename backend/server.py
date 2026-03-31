@@ -38,6 +38,8 @@ from news_sentiment_engine import EnhancedNewsSentimentEngine
 
 # Import auto-trade scheduler
 from auto_trade_scheduler import AutoTradeScheduler
+from live_price_engine import LivePriceEngine
+from starlette.responses import StreamingResponse
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -4232,6 +4234,11 @@ auto_orchestrator = AutoTradeOrchestrator(db, api_client, paper_execution)
 # Auto-Trade Scheduler
 auto_scheduler = AutoTradeScheduler(db, auto_orchestrator, enhanced_news_engine)
 
+# Live Price Engine
+live_price_engine = LivePriceEngine()
+auto_orchestrator.live_price_engine = live_price_engine
+
+
 # ===================== AUTO-TRADE AI ENDPOINTS =====================
 
 @api_router.get("/auto-trade/status")
@@ -4351,6 +4358,92 @@ async def get_mtf_heatmap(auth: bool = Depends(verify_access)):
         "stats": scan.get("stats", {}),
         "market_session": scan.get("market_session", "unknown"),
     }
+
+
+# ===================== LIVE PRICE ENDPOINTS =====================
+
+@api_router.post("/live-prices/start")
+async def start_live_prices(auth: bool = Depends(verify_access)):
+    """Start live price streaming for currently tracked symbols."""
+    # Get symbols from latest scan watchlist + open positions
+    scan = await auto_orchestrator.scan_opportunities()
+    symbols = set()
+    for c in scan.get("watchlist", []):
+        symbols.add(c.get("symbol", ""))
+    for c in scan.get("long_term_candidates", []):
+        symbols.add(c.get("symbol", ""))
+    # Add open position symbols
+    try:
+        positions = await auto_orchestrator.alpaca._get_positions()
+        for p in positions:
+            symbols.add(p.get("symbol", ""))
+    except Exception:
+        pass
+    symbols.discard("")
+    
+    if not symbols:
+        # Default to top scanned universe
+        symbols = {"AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "AMD", "SPY", "QQQ"}
+    
+    await live_price_engine.start(list(symbols))
+    return {"status": "started", "symbols": len(symbols)}
+
+@api_router.post("/live-prices/stop")
+async def stop_live_prices(auth: bool = Depends(verify_access)):
+    """Stop live price streaming."""
+    await live_price_engine.stop()
+    return {"status": "stopped"}
+
+@api_router.get("/live-prices/all")
+async def get_all_live_prices(auth: bool = Depends(verify_access)):
+    """Get all tracked symbol prices with full bid/ask/spread data."""
+    prices = live_price_engine.get_all_prices()
+    status = live_price_engine.get_status()
+    return {"prices": prices, "engine": status}
+
+@api_router.get("/live-prices/{symbol}")
+async def get_live_price(symbol: str, auth: bool = Depends(verify_access)):
+    """Get live price data for a specific symbol."""
+    state = live_price_engine.get_price(symbol.upper())
+    if not state:
+        return {"symbol": symbol.upper(), "source": "none", "stale": True}
+    return state.to_dict()
+
+@api_router.get("/live-prices/status/engine")
+async def get_live_price_status(auth: bool = Depends(verify_access)):
+    """Get live price engine status (connection, stats, stale counts)."""
+    return live_price_engine.get_status()
+
+@api_router.get("/live-prices/stream")
+async def live_price_stream(auth: bool = Depends(verify_access)):
+    """Server-Sent Events stream for real-time price updates to the frontend."""
+    async def event_generator():
+        last_data = {}
+        while True:
+            await asyncio.sleep(2)  # Push every 2 seconds
+            prices = live_price_engine.get_all_prices()
+            engine = live_price_engine.get_status()
+            
+            # Only send changed prices
+            changed = {}
+            for sym, data in prices.items():
+                prev = last_data.get(sym, {})
+                if (data.get("display_price") != prev.get("display_price") or
+                    data.get("bid") != prev.get("bid") or
+                    data.get("source") != prev.get("source")):
+                    changed[sym] = data
+            
+            if changed or not last_data:
+                payload = json.dumps({"prices": changed or prices, "engine": engine})
+                yield f"data: {payload}\n\n"
+                last_data = prices
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
 
 
 @api_router.post("/auto-trade/emergency-pause")
@@ -4838,6 +4931,21 @@ async def startup_event():
                 upsert=True
             )
             logger.info(f"AUTO-RECOVERY: Scheduler restored: {result}")
+            
+            # Start live price engine with scanned symbols
+            try:
+                scan = await auto_orchestrator.scan_opportunities()
+                symbols = set()
+                for c in scan.get("watchlist", []):
+                    symbols.add(c.get("symbol", ""))
+                for c in scan.get("long_term_candidates", []):
+                    symbols.add(c.get("symbol", ""))
+                symbols.discard("")
+                if symbols:
+                    await live_price_engine.start(list(symbols))
+                    logger.info(f"AUTO-RECOVERY: Live prices started for {len(symbols)} symbols")
+            except Exception as lpe:
+                logger.warning(f"Live price engine start failed (non-fatal): {lpe}")
         
     except Exception as e:
         logger.error(f"Startup error: {e}")

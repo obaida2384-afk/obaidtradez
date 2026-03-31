@@ -15,8 +15,9 @@ import {
   CircleStop, Radio, MonitorCheck, Gauge, ShieldAlert, Filter,
   Search, Layers, TriangleAlert, CheckCircle, Database,
   ArrowUp, ArrowDown, Grid3x3, BookOpen, PieChart, TrendingDown,
-  SkipForward, Ban
+  SkipForward, Ban, Wifi, WifiOff, Signal
 } from "lucide-react";
+import { useLivePrices } from "../hooks/useLivePrices";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
 
@@ -277,7 +278,26 @@ const ExplanationCard = ({ item, expanded, onToggle }) => {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-white font-mono">${(signal.price || signal.entry || 0).toFixed(2)}</p>
+              {(() => {
+                const lp = livePrices[item.symbol];
+                const cachedPrice = (signal.price || signal.entry || 0);
+                const livePrice = lp?.display_price;
+                return (
+                  <>
+                    <p className="text-white font-mono">
+                      ${(livePrice || cachedPrice).toFixed(2)}
+                      {lp && !lp.stale && lp.source === "live" && <span className="text-[8px] text-green-400 ml-1">LIVE</span>}
+                      {lp?.stale && <span className="text-[8px] text-red-400 ml-1">STALE</span>}
+                      {!lp && <span className="text-[8px] text-slate-500 ml-1">CACHED</span>}
+                    </p>
+                    {lp && lp.bid > 0 && (
+                      <p className="text-[9px] text-slate-500 font-mono">
+                        {lp.bid.toFixed(2)} / {lp.ask.toFixed(2)} <span className={`${lp.spread_pct > 0.3 ? "text-red-400" : "text-emerald-400"}`}>({lp.spread_pct?.toFixed(2)}%)</span>
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
               <p className="text-xs text-slate-500">Conf: <span className={`font-bold ${
                 item.confidence >= 80 ? 'text-emerald-400' : item.confidence >= 65 ? 'text-amber-400' : 'text-red-400'
               }`}>{item.confidence}/100</span></p>
@@ -596,6 +616,7 @@ const AutoTrade = () => {
   const [executing, setExecuting] = useState(false);
   const [expandedCard, setExpandedCard] = useState(null);
   const [activeTab, setActiveTab] = useState("scheduler");
+  const { prices: livePrices, engine: priceEngine, startStream, stopStream, connected: wsConnected } = useLivePrices(token);
   const [dtCountdown, setDtCountdown] = useState(null);
   const [ltCountdown, setLtCountdown] = useState(null);
   const { token } = useAuth();
@@ -894,6 +915,7 @@ const AutoTrade = () => {
           <TabsTrigger value="analytics" data-testid="analytics-tab" className="data-[state=active]:bg-rose-500/20 data-[state=active]:text-rose-400"><PieChart className="w-4 h-4 mr-1" /> Analytics</TabsTrigger>
           <TabsTrigger value="lt-pipeline" data-testid="lt-pipeline-tab" className="data-[state=active]:bg-violet-500/20 data-[state=active]:text-violet-400"><Layers className="w-4 h-4 mr-1" /> LT Pipeline</TabsTrigger>
           <TabsTrigger value="momentum-diag" data-testid="momentum-diag-tab" className="data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400"><Gauge className="w-4 h-4 mr-1" /> Momentum</TabsTrigger>
+          <TabsTrigger value="live-prices" data-testid="live-prices-tab" className="data-[state=active]:bg-green-500/20 data-[state=active]:text-green-400"><Signal className="w-4 h-4 mr-1" /> Live Prices</TabsTrigger>
           <TabsTrigger value="notifications" className="data-[state=active]:bg-amber-500/20 data-[state=active]:text-amber-400"><Bell className="w-4 h-4 mr-1" /> Alerts</TabsTrigger>
           <TabsTrigger value="history" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400"><Activity className="w-4 h-4 mr-1" /> History</TabsTrigger>
           <TabsTrigger value="settings" className="data-[state=active]:bg-slate-500/20 data-[state=active]:text-white"><Settings className="w-4 h-4 mr-1" /> Config</TabsTrigger>
@@ -1722,6 +1744,128 @@ const AutoTrade = () => {
           })() : (
             <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
               Run a scan to view momentum diagnostics.
+            </Card>
+          )}
+        </TabsContent>
+
+
+        {/* LIVE PRICES TAB */}
+        <TabsContent value="live-prices" className="space-y-4" data-testid="live-prices-content">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm text-green-400 flex items-center gap-1">
+              <Signal className="w-4 h-4" /> Live Market Prices
+              {wsConnected ? (
+                <Badge variant="outline" className="text-[9px] border-green-500/30 text-green-400 ml-2"><Wifi className="w-3 h-3 mr-0.5" />LIVE</Badge>
+              ) : (
+                <Badge variant="outline" className="text-[9px] border-slate-600 text-slate-400 ml-2"><WifiOff className="w-3 h-3 mr-0.5" />OFFLINE</Badge>
+              )}
+            </h2>
+            <div className="flex gap-2">
+              {!priceEngine?.running ? (
+                <Button variant="outline" size="sm" onClick={startStream} className="border-green-700 text-green-400 hover:bg-green-500/10" data-testid="start-live-prices">
+                  <Play className="w-3 h-3 mr-1" /> Start Live Feed
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={stopStream} className="border-red-700 text-red-400 hover:bg-red-500/10" data-testid="stop-live-prices">
+                  <Square className="w-3 h-3 mr-1" /> Stop
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Engine Status */}
+          {priceEngine && (
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">WS Status</p>
+                <p className={`text-xs font-bold ${priceEngine.ws_connected ? "text-green-400" : "text-red-400"}`}>
+                  {priceEngine.ws_connected ? "Connected" : "Disconnected"}
+                </p>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">Tracking</p>
+                <p className="text-xs font-bold text-white">{priceEngine.tracked_symbols} symbols</p>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">Live</p>
+                <p className="text-xs font-bold text-green-400">{priceEngine.live_count}</p>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">Stale</p>
+                <p className={`text-xs font-bold ${priceEngine.stale_count > 0 ? "text-red-400" : "text-slate-400"}`}>{priceEngine.stale_count}</p>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">Trades Rx</p>
+                <p className="text-xs font-bold text-blue-400 font-mono">{priceEngine.stats?.trades_received || 0}</p>
+              </div>
+              <div className="bg-slate-900/50 rounded p-2 border border-slate-800 text-center">
+                <p className="text-[9px] text-slate-500 uppercase">Reconnects</p>
+                <p className="text-xs font-bold text-amber-400 font-mono">{priceEngine.stats?.reconnects || 0}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Price Table */}
+          {Object.keys(livePrices).length > 0 ? (
+            <Card className="terminal-card p-0 border border-slate-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-900/80 border-b border-slate-800">
+                      <th className="text-left px-3 py-2 text-slate-500 font-medium">Symbol</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Price</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Bid</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Ask</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Spread</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Spread %</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Mid</th>
+                      <th className="text-center px-3 py-2 text-slate-500 font-medium">Source</th>
+                      <th className="text-right px-3 py-2 text-slate-500 font-medium">Last Update</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(livePrices)
+                      .sort((a, b) => a[0].localeCompare(b[0]))
+                      .map(([sym, p]) => (
+                        <tr key={sym} className={`border-b border-slate-800/50 hover:bg-slate-800/30 ${p.stale ? "opacity-50" : ""}`}>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-white font-bold">{sym}</span>
+                              {p.stale && <Badge variant="outline" className="text-[8px] border-red-500/30 text-red-400">STALE</Badge>}
+                            </div>
+                          </td>
+                          <td className="text-right px-3 py-2 text-white font-mono font-bold">${p.display_price?.toFixed(2) || "—"}</td>
+                          <td className="text-right px-3 py-2 text-emerald-400 font-mono">${p.bid?.toFixed(2) || "—"}</td>
+                          <td className="text-right px-3 py-2 text-red-400 font-mono">${p.ask?.toFixed(2) || "—"}</td>
+                          <td className="text-right px-3 py-2 text-slate-400 font-mono">${p.spread?.toFixed(4) || "—"}</td>
+                          <td className={`text-right px-3 py-2 font-mono ${p.spread_pct > 0.3 ? "text-red-400" : p.spread_pct > 0.1 ? "text-amber-400" : "text-emerald-400"}`}>
+                            {p.spread_pct?.toFixed(3) || "—"}%
+                          </td>
+                          <td className="text-right px-3 py-2 text-slate-300 font-mono">${p.mid_price?.toFixed(2) || "—"}</td>
+                          <td className="text-center px-3 py-2">
+                            <Badge variant="outline" className={`text-[8px] ${
+                              p.source === "live" ? "border-green-500/30 text-green-400" :
+                              p.source === "snapshot" ? "border-blue-500/30 text-blue-400" :
+                              p.source === "stale" ? "border-red-500/30 text-red-400" :
+                              "border-slate-600 text-slate-400"
+                            }`}>
+                              {(p.source || "none").toUpperCase()}
+                            </Badge>
+                          </td>
+                          <td className="text-right px-3 py-2 text-slate-500 text-[10px] font-mono">
+                            {p.last_update ? new Date(p.last_update).toLocaleTimeString() : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : (
+            <Card className="terminal-card p-8 text-center text-slate-500 text-sm">
+              <Signal className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+              Click "Start Live Feed" to begin streaming real-time prices via Alpaca WebSocket.
+              <p className="text-[10px] text-slate-600 mt-2">Data source: Alpaca IEX (real-time trades + quotes). Polygon REST for historical bars.</p>
             </Card>
           )}
         </TabsContent>

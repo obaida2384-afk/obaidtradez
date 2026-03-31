@@ -1442,6 +1442,7 @@ class AutoTradeOrchestrator:
         self.execution_engine = execution_engine
         self.regime_detector = MarketRegimeDetector(api_client)
         self.risk_manager = RiskManager(db)
+        self.live_price_engine = None  # Set externally after initialization
     
     async def get_settings(self) -> AutoTradeSettings:
         doc = await self.db.auto_trade_settings.find_one({"_id": "config"})
@@ -2048,6 +2049,27 @@ class AutoTradeOrchestrator:
             # Determine Alpaca order side from direction
             order_side = "buy" if direction == "LONG" else "sell"
             
+            # STALE-DATA GUARD: Do not execute on stale symbols
+            price_data = {}
+            if self.live_price_engine:
+                price_data = self.live_price_engine.get_execution_price_data(symbol)
+                if price_data.get("stale"):
+                    skip_reason = f"Stale price data (source={price_data.get('source', 'none')})"
+                    skipped.append({"symbol": symbol, "reason": skip_reason})
+                    await self._log_skip(symbol, direction, action, signal, candidate,
+                                         skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                         classification="DAY_TRADE", price_data=price_data)
+                    continue
+                # Use live spread for real-time filter
+                live_spread = price_data.get("spread_pct", 0)
+                if live_spread > 0.5:
+                    skip_reason = f"Live spread too wide ({live_spread:.2f}% > 0.5%)"
+                    skipped.append({"symbol": symbol, "reason": skip_reason})
+                    await self._log_skip(symbol, direction, action, signal, candidate,
+                                         skip_reason=skip_reason, scan_timestamp=scan_timestamp,
+                                         classification="DAY_TRADE", price_data=price_data)
+                    continue
+            
             approved, checks = await self.risk_manager.check_all(
                 signal, confidence, "DAY_TRADE", settings, account, positions, market_regime
             )
@@ -2072,25 +2094,25 @@ class AutoTradeOrchestrator:
                         executed.append(result)
                         await self._log_trade(symbol, direction, action, signal, candidate, result,
                                               scan_timestamp=scan_timestamp, exec_timestamp=exec_end.isoformat(),
-                                              executed=True)
+                                              executed=True, price_data=price_data)
                     else:
                         skip_reason = result.get("error", "Order failed")
                         skipped.append({"symbol": symbol, "reason": skip_reason})
                         await self._log_skip(symbol, direction, action, signal, candidate,
                                              skip_reason=skip_reason, scan_timestamp=scan_timestamp,
-                                             classification="DAY_TRADE")
+                                             classification="DAY_TRADE", price_data=price_data)
                 else:
                     skip_reason = "Position size calculated to 0 shares"
                     skipped.append({"symbol": symbol, "reason": skip_reason})
                     await self._log_skip(symbol, direction, action, signal, candidate,
                                          skip_reason=skip_reason, scan_timestamp=scan_timestamp,
-                                         classification="DAY_TRADE")
+                                         classification="DAY_TRADE", price_data=price_data)
             else:
                 skip_reason = "; ".join(c for c in checks if "VIOLATION" in c) or "Risk check failed"
                 skipped.append({"symbol": symbol, "reason": skip_reason})
                 await self._log_skip(symbol, direction, action, signal, candidate,
                                      skip_reason=skip_reason, scan_timestamp=scan_timestamp,
-                                     classification="DAY_TRADE")
+                                     classification="DAY_TRADE", price_data=price_data)
         
         # Process long-term candidates (always BUY for long-term)
         for candidate in opportunities["long_term"][:3]:  # Top 3
@@ -2198,7 +2220,7 @@ class AutoTradeOrchestrator:
     async def _log_trade(self, symbol: str, direction: str, action: str,
                          signal: Dict, candidate: Dict, result: Dict,
                          scan_timestamp: str = "", exec_timestamp: str = "",
-                         executed: bool = True):
+                         executed: bool = True, price_data: Dict = None):
         """Comprehensive trade logging for every executed or simulated trade.
         Stores: ticker, direction, entry price, SL, TP, setup type, confidence,
         entry reasons, reject reasons, momentum mode, MTF status,
@@ -2263,15 +2285,18 @@ class AutoTradeOrchestrator:
             "opened_at": datetime.now(timezone.utc).isoformat(),
             "closed_at": None,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "price_data_at_decision": price_data or {},
         }
         await self.db.trade_log.insert_one(trade_record)
         logger.info(f"TRADE LOG: {action} {symbol} dir={direction} conf={trade_record['confidence_score']} "
                      f"setup={trade_record['setup_type']} mtf={trade_record['mtf_aligned']} "
-                     f"momentum={trade_record['momentum_mode']} slippage={slippage_pct}%")
+                     f"momentum={trade_record['momentum_mode']} slippage={slippage_pct}% "
+                     f"src={price_data.get('source', 'N/A') if price_data else 'N/A'}")
     
     async def _log_skip(self, symbol: str, direction: str, action: str,
                         signal: Dict, candidate: Dict, skip_reason: str,
-                        scan_timestamp: str = "", classification: str = "DAY_TRADE"):
+                        scan_timestamp: str = "", classification: str = "DAY_TRADE",
+                        price_data: Dict = None):
         """Log a skipped signal to the trade_log for diagnostics.
         Every signal that was considered but not executed gets recorded with its skip reason."""
         explanation = candidate.get("explanation", {})
@@ -2313,6 +2338,7 @@ class AutoTradeOrchestrator:
             "opened_at": None,
             "closed_at": None,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "price_data_at_decision": price_data or {},
         }
         await self.db.trade_log.insert_one(skip_record)
         logger.info(f"SKIP LOG: {symbol} dir={direction} conf={candidate.get('confidence', 0)} "
