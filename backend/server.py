@@ -43,6 +43,7 @@ from live_reeval_engine import LiveReEvaluationEngine
 from price_integrity import PriceIntegrityService
 from reeval_verifier import ReEvalVerifier
 from starlette.responses import StreamingResponse
+from top_movers_scanner import TopMoversScanner
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -4269,6 +4270,46 @@ live_price_engine.set_reeval_callback(live_reeval_engine.on_price_change)
 # Re-Evaluation Verifier (auto-starts at market open)
 reeval_verifier = ReEvalVerifier()
 live_reeval_engine.set_verifier(reeval_verifier)
+
+# Top Movers Scanner
+top_movers_scanner = TopMoversScanner(db, config.FMP_API_KEY)
+auto_orchestrator.top_movers_scanner = top_movers_scanner
+
+
+# ===================== TOP MOVERS SCANNER ENDPOINTS =====================
+
+@api_router.get("/top-movers/scan")
+async def scan_top_movers(force: bool = False, auth: bool = Depends(verify_access)):
+    """Scan for top gainers/losers/actives from FMP."""
+    result = await top_movers_scanner.scan(force=force)
+    return {k: v for k, v in result.items() if k != "_id"}
+
+@api_router.get("/top-movers/status")
+async def get_top_movers_status(auth: bool = Depends(verify_access)):
+    """Get current top movers state and scan history."""
+    return {
+        "has_data": bool(top_movers_scanner._cache),
+        "last_refresh": top_movers_scanner._last_refresh.isoformat() if top_movers_scanner._last_refresh else None,
+        "needs_refresh": top_movers_scanner.should_refresh(),
+        "accepted_count": len(top_movers_scanner.get_accepted_symbols()),
+        "accepted_symbols": top_movers_scanner.get_accepted_symbols(),
+        "config": {
+            "max_gainers": top_movers_scanner.MAX_GAINERS,
+            "max_losers": top_movers_scanner.MAX_LOSERS,
+            "max_actives": top_movers_scanner.MAX_ACTIVES,
+            "refresh_interval_minutes": top_movers_scanner.REFRESH_INTERVAL_MINUTES,
+            "price_range": f"${top_movers_scanner.MIN_PRICE}-${top_movers_scanner.MAX_PRICE}",
+            "min_volume": f"{top_movers_scanner.MIN_VOLUME:,}",
+            "min_market_cap": f"${top_movers_scanner.MIN_MARKET_CAP/1e6:.0f}M",
+        },
+        "scan_history": top_movers_scanner.get_scan_history(5),
+    }
+
+@api_router.get("/top-movers/performance")
+async def get_top_movers_performance(auth: bool = Depends(verify_access)):
+    """Get today's top movers scanning performance summary."""
+    return await top_movers_scanner.get_performance_summary()
+
 
 
 # ===================== AUTO-TRADE AI ENDPOINTS =====================

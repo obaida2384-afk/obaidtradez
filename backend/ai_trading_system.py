@@ -1534,7 +1534,24 @@ class AutoTradeOrchestrator:
         inv_lookup = {s["symbol"]: s for s in investment_signals if s.get("symbol")}
         trade_lookup = {s["symbol"]: s for s in trading_signals if s.get("symbol")}
 
-        all_symbols = set(list(trade_lookup.keys()) + list(inv_lookup.keys()))
+        # === TOP MOVERS INJECTION ===
+        # Pre-populate trading universe with top gainers/losers from FMP
+        top_movers_data = {}
+        top_mover_symbols = set()
+        if hasattr(self, 'top_movers_scanner') and self.top_movers_scanner:
+            scanner = self.top_movers_scanner
+            if scanner.should_refresh():
+                try:
+                    await scanner.scan()
+                except Exception as e:
+                    logger.warning(f"Top movers scan failed: {e}")
+            top_mover_symbols = set(scanner.get_accepted_symbols())
+            for item in (scanner._cache or {}).get("accepted", []):
+                top_movers_data[item["symbol"]] = item
+            logger.info(f"Top Movers: {len(top_mover_symbols)} symbols injected into universe")
+        
+        # Merge top movers into all_symbols
+        all_symbols = set(list(trade_lookup.keys()) + list(inv_lookup.keys())) | top_mover_symbols
         funnel.record("universe_scanned", len(all_symbols))
 
         dt_max_pos = DynamicThresholdManager.get_max_positions("DAY_TRADE", settings, market_regime)
@@ -1545,7 +1562,9 @@ class AutoTradeOrchestrator:
 
         # === PHASE 1: Pre-filter for MOMENTUM candidates ===
         # Aggressive filters: price $5-$50, volume >= 500K, RelVol >= 1.5x, ATR > 2%
+        # Top movers get priority — they already passed quality checks
         dt_prefilter_symbols = []
+        prefilter_sources = {}  # symbol -> source tag
         if settings.dt_enabled:
             min_price = getattr(settings, 'dt_min_price', 5.0)
             max_price = getattr(settings, 'dt_max_price', 50.0)
@@ -1555,8 +1574,24 @@ class AutoTradeOrchestrator:
             
             for symbol in all_symbols:
                 t_sig = trade_lookup.get(symbol)
+                is_top_mover = symbol in top_mover_symbols
+                mover_data = top_movers_data.get(symbol, {})
+                
+                # For top movers without existing signal data, use mover data for basic checks
+                if not t_sig and is_top_mover:
+                    mover_price = mover_data.get("price", 0)
+                    mover_vol = mover_data.get("volume", 0)
+                    if min_price <= mover_price <= max_price and mover_vol >= min_volume:
+                        dt_prefilter_symbols.append(symbol)
+                        prefilter_sources[symbol] = mover_data.get("source", "top_mover")
+                        funnel.record("top_mover_accepted", 1)
+                    else:
+                        funnel.reject("top_mover_failed_price_vol")
+                    continue
+                
                 if not t_sig:
                     continue
+                
                 indicators = t_sig.get("indicators", {})
                 price = t_sig.get("price", 0)
                 vol_ratio = indicators.get("volume_ratio", 0)
@@ -1564,6 +1599,17 @@ class AutoTradeOrchestrator:
                 atr_pct = indicators.get("atr_pct", 0)
                 volume = indicators.get("volume", 0)
                 
+                # Top movers get relaxed prefilter (they already passed FMP quality checks)
+                if is_top_mover:
+                    # Only require price in range + basic volume
+                    if price < min_price or price > max_price:
+                        funnel.reject("top_mover_price_outside_range")
+                        continue
+                    dt_prefilter_symbols.append(symbol)
+                    prefilter_sources[symbol] = mover_data.get("source", "top_mover")
+                    continue
+                
+                # Standard prefilter for non-top-movers
                 # Price filter: $5-$50
                 if price < min_price or price > max_price:
                     funnel.reject("price_outside_5_50")
@@ -1582,6 +1628,7 @@ class AutoTradeOrchestrator:
                     continue
                 
                 dt_prefilter_symbols.append(symbol)
+                prefilter_sources[symbol] = "universe"
 
         funnel.record("prefilter_passed", len(dt_prefilter_symbols))
 
@@ -1724,6 +1771,10 @@ class AutoTradeOrchestrator:
                 "has_tf_conflict": mtf_data.get("has_tf_conflict", False),
                 "dt_score": confidence,
                 "lt_score": 0,
+                # Source tag for Top Movers Scanner
+                "source": prefilter_sources.get(symbol, "universe"),
+                "is_top_mover": symbol in top_mover_symbols,
+                "mover_data": top_movers_data.get(symbol),
                 # Price integrity fields — single source of truth for UI + logic
                 "price_data": {
                     "price": cached_sig.get("price", ta_sig.get("price", 0)),
@@ -2137,6 +2188,8 @@ class AutoTradeOrchestrator:
             "stats": {
                 "total_scanned": len(all_symbols),
                 "prefilter_passed": len(dt_prefilter_symbols),
+                "top_movers_injected": len(top_mover_symbols),
+                "top_movers_in_prefilter": len([s for s in dt_prefilter_symbols if s in top_mover_symbols]),
                 "ta_analyzed": len(tier1_results),
                 "tier1_passed": len(tier1_passed),
                 "tier2_deep": len(tier2_results),
@@ -2162,6 +2215,14 @@ class AutoTradeOrchestrator:
             "risk_mode": risk_mode,
             "pipeline_funnel": funnel.to_dict(),
             "no_trade_summary": no_trade_summary,
+            "top_movers": {
+                "injected": len(top_mover_symbols),
+                "in_prefilter": len([s for s in dt_prefilter_symbols if s in top_mover_symbols]),
+                "as_candidates": len([c for c in day_trade_candidates if c.get("is_top_mover")]),
+                "as_watchlist": len([w for w in watchlist if w.get("is_top_mover")]),
+                "symbols": list(top_mover_symbols)[:50],
+                "sources": {s: top_movers_data.get(s, {}).get("source", "?") for s in list(top_mover_symbols)[:50]},
+            },
             "mtf_heatmap": heatmap_entries,
             "mtf_heatmap_distribution": heatmap_dist,
             "lt_pipeline": lt_pipeline,

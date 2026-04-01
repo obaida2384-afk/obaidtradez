@@ -1,0 +1,86 @@
+{
+  "iteration": 34,
+  "timestamp": "2026-04-01T05:30:00Z",
+  "summary": "Top Movers Scanner enhancement fully verified. All backend APIs return correct data with source tags and pipeline stats. Frontend displays Top Movers Scanner panel with Injected/Passed Prefilter/DT Candidates/Watchlist metrics. Active Movers section shows symbols with G/L/A source tags. Pipeline Summary includes 'top movers' count. Source badges (TOP GAINER/TOP LOSER/MOST ACTIVE) visible on candidates.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "backend_tests": {
+      "auth_access": "PASS - Login with code Bullishalmarkhan7.7 works",
+      "top_movers_scan": "PASS - GET /api/top-movers/scan returns accepted symbols with source tags (top_gainer/top_loser/most_active) and pipeline stats (raw_gainers, raw_losers, raw_actives, filtered counts, rejections_by_reason)",
+      "top_movers_status": "PASS - GET /api/top-movers/status returns has_data, accepted_count, config (max_gainers=30, max_losers=30, max_actives=20, price_range=$5.0-$50.0, min_volume=500,000, min_market_cap=$100M)",
+      "top_movers_performance": "PASS - GET /api/top-movers/performance returns daily performance summary with date, total_scans, unique_accepted_symbols",
+      "auto_trade_scan_top_movers_block": "PASS - GET /api/auto-trade/scan returns top_movers block with injected/in_prefilter/as_candidates/as_watchlist counts",
+      "auto_trade_scan_stats": "PASS - scan stats include top_movers_injected and top_movers_in_prefilter fields",
+      "rejection_reasons_grouped": "PASS - Rejection reasons are grouped (e.g., 'Price > $50.0', 'Volume too low') not individual values",
+      "quality_filters_config": "PASS - Config shows correct filter values: price $5-$50, volume 500K, market cap $100M, 2% min change"
+    },
+    "frontend_tests": {
+      "access_gate": "PASS - Login with code Bullishalmarkhan7.7 works",
+      "auto_trade_page_load": "PASS - Auto Trade page loads with AI Auto-Trade header",
+      "top_movers_scanner_panel": "PASS - Panel visible with Injected (20), Passed Prefilter (20), DT Candidates (1), Watchlist (3)",
+      "active_movers_section": "PASS - Shows symbols with G/L/A source tags (HP, RSI, LOCO, CLB, DOW, NTCT, FSLY, KGC, APA, KALV, HAL, U, CRK, WES, DK, BORR, IAG, VECO, LBRT, CLMT)",
+      "source_badges_legend": "PASS - Legend shows 'G=Gainer L=Loser A=Active | Green=Candidate Amber=Watchlist'",
+      "green_badges_candidates": "PASS - Green badges visible for candidates (APA, KALV, U, BORR)",
+      "amber_badges_watchlist": "PASS - Amber badges visible for watchlist symbols",
+      "pipeline_summary_top_movers": "PASS - Pipeline Summary shows '20 top movers' in flow: 1083 scanned → 20 top movers → 20 momentum filter → 20 TA analyzed → 6 setups → 3 passed → 1 DT candidates",
+      "aggressive_momentum_strategy_panel": "PASS - All parameters visible: Price Range $5.0-$50.0, Min RelVol 1.5x, Min ATR 2.0%, Confidence 61, Position Sizing tiers, Max Trades/Day 8, Stop Loss -1.5%, Take Profit +3.0%, Partial Profit 1.5%, Max Daily Loss -3.0%, Hard Stop 3 losses, Cooldown 30min",
+      "day_tab_candidates": "PASS - Day tab shows candidates with TOP GAINER badges (U, DOW, IAG)",
+      "source_badges_on_candidates": "PASS - TOP GAINER badges visible on U, DOW, IAG candidates"
+    }
+  },
+  "features_verified": [
+    "Access gate with code Bullishalmarkhan7.7",
+    "GET /api/top-movers/scan returns accepted symbols with source tags and pipeline stats",
+    "GET /api/top-movers/status returns has_data, accepted_count, config",
+    "GET /api/top-movers/performance returns daily performance summary",
+    "GET /api/auto-trade/scan returns top_movers block with injected/in_prefilter/as_candidates counts",
+    "scan stats include top_movers_injected and top_movers_in_prefilter fields",
+    "Rejection reasons grouped (e.g., 'Price > $50.0' not individual prices)",
+    "Top Movers Scanner panel visible with Injected/Passed Prefilter/DT Candidates/Watchlist metrics",
+    "Active Movers section shows symbols with G/L/A source tags",
+    "Green badges for candidates, amber for watchlist symbols",
+    "Pipeline Summary includes 'top movers' count in the pipeline flow",
+    "Aggressive Momentum Strategy panel shows all parameters correctly",
+    "Day tab shows candidates with source badges (TOP GAINER/TOP LOSER/MOST ACTIVE)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_top_movers_scanner.py",
+    "/app/test_reports/pytest/pytest_top_movers_scanner.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TopMoversScanner class correctly implements FMP + DB fallback for fetching top gainers/losers/actives",
+    "Quality filters correctly applied: $5-50 price, 500K volume, 2% min change, $100M market cap",
+    "Caps correctly set: 30 gainers + 30 losers + 20 actives",
+    "Rejection reasons properly grouped in rejections_by_reason dict",
+    "Source tags (top_gainer/top_loser/most_active) correctly assigned to accepted symbols",
+    "Frontend correctly displays source badges on ExplanationCard component",
+    "Pipeline Summary correctly shows top movers count in the flow"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_top_movers_scanner.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "test_credentials": {
+    "access_code": "Bullishalmarkhan7.7"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Top Movers Scanner feature fully verified. FMP API returns 403 (key tier limitation) so scanner falls back to computing movers from trading_signals MongoDB collection - this is expected behavior. Currently finding ~20 top movers from DB data. Market was closed during testing. All backend endpoints working correctly. Frontend displays all Top Movers Scanner UI components correctly including source badges on candidates.",
+  "notes": {
+    "fmp_fallback": "FMP top gainers/losers/actives endpoints return 403 due to API key tier limitation. Scanner correctly falls back to computing movers from existing trading_signals collection in MongoDB.",
+    "current_top_movers": "20 symbols injected from DB fallback: HP, RSI, LOCO, CLB, DOW, NTCT, FSLY, KGC, APA, KALV, HAL, U, CRK, WES, DK, BORR, IAG, VECO, LBRT, CLMT"
+  }
+}

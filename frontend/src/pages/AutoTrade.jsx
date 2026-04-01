@@ -272,6 +272,11 @@ const ExplanationCard = ({ item, expanded, onToggle, livePrices = {} }) => {
                     TF CONFLICT
                   </Badge>
                 )}
+                {item.is_top_mover && (
+                  <Badge variant="outline" className="text-[10px] border-yellow-500/40 text-yellow-300 bg-yellow-500/10">
+                    {item.source === "top_gainer" ? "TOP GAINER" : item.source === "top_loser" ? "TOP LOSER" : item.source === "most_active" ? "MOST ACTIVE" : "TOP MOVER"}
+                  </Badge>
+                )}
               </div>
               <p className="text-xs text-slate-500">{isDay ? `${item.direction || ''} ${item.best_setup ? `- ${item.best_setup}` : ''}`.trim() : (signal.name || signal.company_name || "")}</p>
               {isDay && ki.signals_aligned && (
@@ -1043,6 +1048,8 @@ const AutoTrade = () => {
                 <div className="flex items-center gap-2 text-[10px] font-mono flex-wrap">
                   <span className="text-slate-400">{opportunities.stats?.total_scanned || 0} scanned</span>
                   <span className="text-slate-600">&rarr;</span>
+                  <span className="text-yellow-400">{opportunities.stats?.top_movers_injected || 0} top movers</span>
+                  <span className="text-slate-600">&rarr;</span>
                   <span className={opportunities.stats?.prefilter_passed > 0 ? "text-emerald-400" : "text-red-400"}>{opportunities.stats?.prefilter_passed || 0} momentum filter</span>
                   <span className="text-slate-600">&rarr;</span>
                   <span className="text-blue-400">{opportunities.stats?.ta_analyzed || 0} TA analyzed</span>
@@ -1063,6 +1070,58 @@ const AutoTrade = () => {
                   </div>
                 )}
               </div>
+            </Card>
+          )}
+          {/* Top Movers Scanner */}
+          {opportunities?.top_movers && (
+            <Card className="terminal-card p-4 border border-yellow-500/20" data-testid="top-movers-panel">
+              <h3 className="text-sm text-white font-medium flex items-center gap-2 mb-3"><TrendingUp className="w-4 h-4 text-yellow-400" /> Top Movers Scanner</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Injected</p>
+                  <p className="text-yellow-400 font-mono font-bold">{opportunities.top_movers.injected}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Passed Prefilter</p>
+                  <p className="text-emerald-400 font-mono font-bold">{opportunities.top_movers.in_prefilter}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">DT Candidates</p>
+                  <p className="text-cyan-400 font-mono font-bold">{opportunities.top_movers.as_candidates}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Watchlist</p>
+                  <p className="text-amber-400 font-mono font-bold">{opportunities.top_movers.as_watchlist}</p>
+                </div>
+              </div>
+              {opportunities.top_movers.symbols?.length > 0 && (
+                <div className="bg-slate-900/60 rounded-lg p-3 border border-slate-800">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-2">Active Movers</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {opportunities.top_movers.symbols.map(sym => {
+                      const src = opportunities.top_movers.sources?.[sym] || "?";
+                      const isCandidate = (opportunities.day_trades || []).some(d => d.symbol === sym);
+                      const isWatchlist = (opportunities.watchlist || []).some(w => w.symbol === sym);
+                      return (
+                        <span key={sym} className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                          isCandidate ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" :
+                          isWatchlist ? "bg-amber-500/10 border-amber-500/20 text-amber-400" :
+                          "bg-slate-900/50 border-slate-700 text-slate-400"
+                        }`}>
+                          {sym}
+                          <span className="text-[8px] ml-1 opacity-60">
+                            {src === "top_gainer" ? "G" : src === "top_loser" ? "L" : src === "most_active" ? "A" : "?"}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] text-slate-600 mt-2">G=Gainer L=Loser A=Active | Green=Candidate Amber=Watchlist</p>
+                </div>
+              )}
+              {opportunities.top_movers.injected === 0 && (
+                <p className="text-xs text-slate-500 text-center py-2">Scanner awaiting market open to fetch top movers</p>
+              )}
             </Card>
           )}
           {/* Deploy Stages */}

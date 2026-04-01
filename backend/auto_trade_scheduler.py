@@ -379,6 +379,16 @@ class AutoTradeScheduler:
                 # Monitor existing positions (every tick)
                 await self._monitor_positions_cycle(session)
 
+                # Top Movers Scanner auto-refresh during regular hours
+                if session == MarketSession.REGULAR:
+                    try:
+                        scanner = getattr(self.orchestrator, 'top_movers_scanner', None)
+                        if scanner and scanner.should_refresh():
+                            await scanner.scan()
+                            logger.info(f"Top Movers Scanner refreshed: {len(scanner.get_accepted_symbols())} symbols")
+                    except Exception as e:
+                        logger.warning(f"Top movers auto-refresh failed: {e}")
+
                 await asyncio.sleep(self.LOOP_TICK)
 
             except asyncio.CancelledError:
