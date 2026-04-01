@@ -560,6 +560,36 @@ class AutoTradeScheduler:
                                 self._post_cooldown_active = False
                                 await self._notify("trade_opened",
                                     f"BUY {c['symbol']} x{shares} (DT, conf={c['confidence']}, regime={dynamic['risk_mode']})", "info")
+                                # === PERFORMANCE TRACKER: Log trade entry ===
+                                tracker = getattr(self.orchestrator, 'performance_tracker', None)
+                                if tracker:
+                                    exp = c.get("explanation", {})
+                                    ki = exp.get("key_indicators", {})
+                                    exit_plan = exp.get("exit_plan", {})
+                                    await tracker.log_trade_entry({
+                                        "symbol": c["symbol"],
+                                        "classification": "DAY_TRADE",
+                                        "shares": shares,
+                                        "entry_price": c["signal"].get("price", 0),
+                                        "position_value": size.get("value", 0),
+                                        "position_pct": size.get("pct_of_equity", 0),
+                                        "confidence": c["confidence"],
+                                        "stop_loss": exit_plan.get("stop_loss", 0),
+                                        "take_profit": exit_plan.get("take_profit", 0),
+                                        "partial_target": exit_plan.get("partial_target", 0),
+                                        "entry_reasons": exp.get("entry_reasons", []),
+                                        "signal_count": ki.get("signal_count", 0),
+                                        "signals_aligned": ki.get("signals_aligned", ""),
+                                        "best_setup": ki.get("best_setup", ""),
+                                        "direction": ki.get("direction", ""),
+                                        "momentum_mode": ki.get("momentum_mode", False),
+                                        "is_top_mover": c.get("is_top_mover", False),
+                                        "source": c.get("source", "universe"),
+                                        "market_regime": market_regime,
+                                        "regime_label": market_regime.get("regime", "unknown"),
+                                        "risk_mode": dynamic["risk_mode"],
+                                        "dynamic_threshold": threshold,
+                                    })
                             else:
                                 skipped.append({"symbol": c["symbol"], "reason": result.get("error")})
                     else:
@@ -605,6 +635,25 @@ class AutoTradeScheduler:
             self._last_cycle_result = cycle_result
             self._cycle_count += 1
             await self._log_execution("day_trade_cycle", cycle_result)
+
+            # === PERFORMANCE TRACKER: Log scan cycle pipeline ===
+            tracker = getattr(self.orchestrator, 'performance_tracker', None)
+            if tracker:
+                await tracker.log_scan_cycle({
+                    "total_scanned": funnel.to_dict().get("funnel", {}).get("universe_scanned", 0),
+                    "top_movers_injected": funnel.to_dict().get("funnel", {}).get("top_mover_accepted", 0),
+                    "prefilter_passed": funnel.to_dict().get("funnel", {}).get("prefilter_passed", len(trading_signals)),
+                    "ta_analyzed": funnel.to_dict().get("funnel", {}).get("ta_analyzed", 0),
+                    "setups_found": funnel.to_dict().get("funnel", {}).get("setup_found", 0),
+                    "filters_passed": funnel.to_dict().get("funnel", {}).get("filters_passed", 0),
+                    "confidence_passed": funnel.to_dict().get("funnel", {}).get("confidence_passed", 0),
+                    "candidates": len(candidates),
+                    "executed": len(executed),
+                    "top_rejections": funnel.to_dict().get("top_rejections", {}),
+                    "market_regime": market_regime.get("regime", "unknown"),
+                    "risk_mode": dynamic["risk_mode"],
+                    "threshold_used": threshold,
+                })
 
             # Persist confidence distribution for post-session analysis
             await self.db.confidence_distribution.insert_one({
@@ -777,6 +826,31 @@ class AutoTradeScheduler:
                 pnl = sell.get("pnl", 0)
                 symbol = sell.get("symbol", "")
                 reasons = sell.get("reason", [])
+
+                # === PERFORMANCE TRACKER: Log trade exit ===
+                tracker = getattr(self.orchestrator, 'performance_tracker', None)
+                if tracker:
+                    await tracker.log_trade_exit({
+                        "symbol": symbol,
+                        "classification": "DAY_TRADE",
+                        "shares": sell.get("shares", 0),
+                        "entry_price": sell.get("entry_price", 0),
+                        "exit_price": sell.get("exit_price", sell.get("price", 0)),
+                        "pnl": pnl,
+                        "exit_reasons": reasons if isinstance(reasons, list) else [str(reasons)],
+                        "entry_time": sell.get("entry_time"),
+                        "confidence": sell.get("confidence", 0),
+                        "best_setup": sell.get("best_setup", ""),
+                        "entry_signals": sell.get("entry_signals", []),
+                        "signal_count": sell.get("signal_count", 0),
+                        "is_top_mover": sell.get("is_top_mover", False),
+                        "source": sell.get("source", "universe"),
+                        "entry_regime": sell.get("entry_regime", "unknown"),
+                        "exit_regime": sell.get("exit_regime", "unknown"),
+                        "risk_mode": sell.get("risk_mode", "NORMAL"),
+                        "stop_loss": sell.get("stop_loss", 0),
+                        "entry_time_window": sell.get("entry_time_window", "unknown"),
+                    })
 
                 if pnl < 0:
                     self._consecutive_losses += 1

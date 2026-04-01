@@ -622,6 +622,7 @@ const AutoTrade = () => {
   const [notifications, setNotifications] = useState([]);
   const [tradeLog, setTradeLog] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+  const [perfReport, setPerfReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -685,6 +686,10 @@ const AutoTrade = () => {
     try {
       const resp = await fetch(`${API}/auto-trade/analytics`, { headers });
       if (resp.ok) setAnalytics(await resp.json());
+    } catch (e) { console.error(e); }
+    try {
+      const resp2 = await fetch(`${API}/analytics/full-report`, { headers });
+      if (resp2.ok) setPerfReport(await resp2.json());
     } catch (e) { console.error(e); }
   }, [token]);
 
@@ -1706,6 +1711,205 @@ const AutoTrade = () => {
               <PieChart className="w-8 h-8 mx-auto mb-2 text-slate-600" />
               Click to load analytics. Data is derived from actual logged executions and skipped signals.
             </Card>
+          )}
+
+          {/* === PERFORMANCE EVALUATION REPORT === */}
+          {perfReport && (
+            <div className="space-y-4 mt-6" data-testid="performance-report">
+              <h2 className="text-sm text-amber-400 flex items-center gap-2 border-t border-slate-800 pt-4">
+                <Target className="w-4 h-4" /> Session Performance Report — {perfReport.report_date}
+              </h2>
+
+              {/* Session Summary */}
+              {perfReport.session_summary?.performance && (
+                <Card className="terminal-card p-4 border border-amber-500/20" data-testid="session-perf-summary">
+                  <h3 className="text-xs text-white font-medium mb-3">Session Performance</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
+                    {[
+                      { label: "Total Trades", val: perfReport.session_summary.performance.total_trades, color: "text-white" },
+                      { label: "Win Rate", val: `${perfReport.session_summary.performance.win_rate_pct}%`, color: perfReport.session_summary.performance.win_rate_pct >= 50 ? "text-emerald-400" : "text-red-400" },
+                      { label: "Avg Win", val: `$${perfReport.session_summary.performance.avg_win}`, color: "text-emerald-400" },
+                      { label: "Avg Loss", val: `$${perfReport.session_summary.performance.avg_loss}`, color: "text-red-400" },
+                      { label: "Net P&L", val: `$${perfReport.session_summary.performance.net_pnl}`, color: perfReport.session_summary.performance.net_pnl >= 0 ? "text-emerald-400" : "text-red-400" },
+                      { label: "Max Drawdown", val: `$${perfReport.session_summary.performance.max_drawdown}`, color: "text-red-400" },
+                    ].map(({ label, val, color }) => (
+                      <div key={label} className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                        <p className="text-[10px] text-slate-500">{label}</p>
+                        <p className={`font-mono font-bold ${color}`}>{val}</p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* P&L by Time Window */}
+              {perfReport.session_summary?.pnl_by_time_window && Object.keys(perfReport.session_summary.pnl_by_time_window).length > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="pnl-by-window">
+                  <h3 className="text-xs text-white font-medium mb-3">P&L by Time Window</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {Object.entries(perfReport.session_summary.pnl_by_time_window).map(([window, data]) => (
+                      <div key={window} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                        <p className="text-[10px] text-cyan-400 capitalize">{window.replace(/_/g, " ")}</p>
+                        <p className={`text-sm font-mono font-bold ${data.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>${data.pnl}</p>
+                        <p className="text-[10px] text-slate-500">{data.trades} trades | {data.wins} wins</p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* Pipeline Efficiency */}
+              {perfReport.pipeline_efficiency?.total_cycles > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="pipeline-efficiency">
+                  <h3 className="text-xs text-white font-medium mb-3">Pipeline Efficiency ({perfReport.pipeline_efficiency.total_cycles} scan cycles)</h3>
+                  <div className="grid grid-cols-3 gap-3 text-xs mb-3">
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Movers → Setups</p>
+                      <p className="text-yellow-400 font-mono font-bold">{perfReport.pipeline_efficiency.conversion_rates?.movers_to_setups_pct}%</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Setups → Executed</p>
+                      <p className="text-emerald-400 font-mono font-bold">{perfReport.pipeline_efficiency.conversion_rates?.setups_to_executed_pct}%</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Scanned → Executed</p>
+                      <p className="text-blue-400 font-mono font-bold">{perfReport.pipeline_efficiency.conversion_rates?.scanned_to_executed_pct}%</p>
+                    </div>
+                  </div>
+                  {perfReport.pipeline_efficiency.top_3_rejection_reasons && Object.keys(perfReport.pipeline_efficiency.top_3_rejection_reasons).length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Top 3 Rejection Reasons</p>
+                      {Object.entries(perfReport.pipeline_efficiency.top_3_rejection_reasons).map(([reason, count]) => (
+                        <div key={reason} className="flex items-center justify-between text-xs py-0.5">
+                          <span className="text-slate-400 truncate max-w-[300px]">{reason}</span>
+                          <span className="text-red-400 font-mono">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* Risk Compliance */}
+              {perfReport.risk_compliance && perfReport.risk_compliance.total_trades > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="risk-compliance">
+                  <h3 className="text-xs text-white font-medium mb-3">Risk Compliance</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Stop-Loss</p>
+                      <p className={`font-mono font-bold ${perfReport.risk_compliance.stop_loss?.compliance_pct === 100 ? "text-emerald-400" : "text-red-400"}`}>
+                        {perfReport.risk_compliance.stop_loss?.compliance_pct}%
+                      </p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">SL Violations</p>
+                      <p className="text-red-400 font-mono font-bold">{perfReport.risk_compliance.stop_loss?.violations?.length || 0}</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Trailing Profits</p>
+                      <p className="text-emerald-400 font-mono font-bold">{perfReport.risk_compliance.trailing_stops?.locked_profits || 0}</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Position Sizing</p>
+                      <p className={`font-mono font-bold ${perfReport.risk_compliance.position_sizing?.all_compliant ? "text-emerald-400" : "text-red-400"}`}>
+                        {perfReport.risk_compliance.position_sizing?.all_compliant ? "COMPLIANT" : "VIOLATIONS"}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* Regime Performance */}
+              {perfReport.regime_performance?.regimes && Object.keys(perfReport.regime_performance.regimes).length > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="regime-performance">
+                  <h3 className="text-xs text-white font-medium mb-3">Performance by Market Regime</h3>
+                  <div className="space-y-2">
+                    {Object.entries(perfReport.regime_performance.regimes).map(([regime, data]) => (
+                      <div key={regime} className="flex items-center justify-between bg-slate-900/50 rounded px-3 py-2 border border-slate-800 text-xs">
+                        <span className="text-amber-400 font-mono capitalize w-28">{regime}</span>
+                        <span className="text-slate-400">{data.trades} trades</span>
+                        <span className={`font-mono ${data.win_rate_pct >= 50 ? "text-emerald-400" : "text-red-400"}`}>{data.win_rate_pct}% WR</span>
+                        <span className={`font-mono ${data.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>${data.total_pnl}</span>
+                        <span className="text-slate-500">avg hold: {data.avg_hold_minutes}m</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* Best/Worst Trades */}
+              {perfReport.best_worst_trades && (perfReport.best_worst_trades.best_trades?.length > 0 || perfReport.best_worst_trades.worst_trades?.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Card className="terminal-card p-4 border border-emerald-500/20" data-testid="best-trades">
+                    <h3 className="text-xs text-emerald-400 font-medium mb-3">Best Trades</h3>
+                    {(perfReport.best_worst_trades.best_trades || []).map((t, i) => (
+                      <div key={i} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800 mb-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-white font-mono font-bold">{t.symbol}</span>
+                          <span className="text-emerald-400 font-mono">+${t.pnl} ({t.pnl_pct}%)</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Setup: {t.best_setup} | Conf: {t.confidence} | {t.exit_type} | {t.hold_minutes?.toFixed(0)}min</p>
+                        <p className="text-[10px] text-slate-500">{t.entry_quality} entry | {t.time_window?.replace(/_/g, " ")} | {t.entry_regime}</p>
+                      </div>
+                    ))}
+                    {(!perfReport.best_worst_trades.best_trades || perfReport.best_worst_trades.best_trades.length === 0) && (
+                      <p className="text-xs text-slate-500 text-center">No winning trades yet</p>
+                    )}
+                  </Card>
+                  <Card className="terminal-card p-4 border border-red-500/20" data-testid="worst-trades">
+                    <h3 className="text-xs text-red-400 font-medium mb-3">Worst Trades</h3>
+                    {(perfReport.best_worst_trades.worst_trades || []).map((t, i) => (
+                      <div key={i} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800 mb-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-white font-mono font-bold">{t.symbol}</span>
+                          <span className="text-red-400 font-mono">${t.pnl} ({t.pnl_pct}%)</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">Setup: {t.best_setup} | Conf: {t.confidence} | {t.exit_type} | {t.hold_minutes?.toFixed(0)}min</p>
+                        <p className="text-[10px] text-slate-500">{t.entry_quality} entry | {t.time_window?.replace(/_/g, " ")} | {t.entry_regime}</p>
+                      </div>
+                    ))}
+                    {(!perfReport.best_worst_trades.worst_trades || perfReport.best_worst_trades.worst_trades.length === 0) && (
+                      <p className="text-xs text-slate-500 text-center">No losing trades yet</p>
+                    )}
+                  </Card>
+                </div>
+              )}
+
+              {/* Trade Quality */}
+              {perfReport.trade_quality && perfReport.trade_quality.total_analyzed > 0 && (
+                <Card className="terminal-card p-4 border border-slate-800" data-testid="trade-quality">
+                  <h3 className="text-xs text-white font-medium mb-3">Entry Quality Analysis</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                    <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Top Mover Trades</p>
+                      <p className="text-yellow-400 font-mono">{perfReport.trade_quality.top_mover_performance?.trades || 0} | WR: {perfReport.trade_quality.top_mover_performance?.win_rate || 0}%</p>
+                      <p className={`font-mono text-sm ${(perfReport.trade_quality.top_mover_performance?.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>${perfReport.trade_quality.top_mover_performance?.pnl || 0}</p>
+                    </div>
+                    <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                      <p className="text-[10px] text-slate-500">Universe Trades</p>
+                      <p className="text-blue-400 font-mono">{perfReport.trade_quality.universe_performance?.trades || 0} | WR: {perfReport.trade_quality.universe_performance?.win_rate || 0}%</p>
+                      <p className={`font-mono text-sm ${(perfReport.trade_quality.universe_performance?.pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>${perfReport.trade_quality.universe_performance?.pnl || 0}</p>
+                    </div>
+                    {perfReport.trade_quality.confidence_vs_outcome && (
+                      <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                        <p className="text-[10px] text-slate-500">Confidence vs Outcome</p>
+                        {Object.entries(perfReport.trade_quality.confidence_vs_outcome).map(([band, data]) => (
+                          <p key={band} className="text-[10px] text-slate-400">{band}: {data.wins}W/{data.losses}L → ${data.pnl}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {/* No data message */}
+              {(!perfReport.session_summary?.performance || perfReport.session_summary.performance.total_trades === 0) && (
+                <Card className="terminal-card p-6 text-center border border-slate-800" data-testid="no-perf-data">
+                  <p className="text-slate-500 text-xs">No trade data for {perfReport.report_date}. Performance metrics will populate once trades are executed during regular market hours.</p>
+                  <p className="text-[10px] text-slate-600 mt-2">Pipeline efficiency and scan cycle data is tracked automatically during scheduler scans.</p>
+                </Card>
+              )}
+            </div>
           )}
         </TabsContent>
 

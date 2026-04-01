@@ -44,6 +44,7 @@ from price_integrity import PriceIntegrityService
 from reeval_verifier import ReEvalVerifier
 from starlette.responses import StreamingResponse
 from top_movers_scanner import TopMoversScanner
+from performance_tracker import PerformanceTracker
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -4275,6 +4276,10 @@ live_reeval_engine.set_verifier(reeval_verifier)
 top_movers_scanner = TopMoversScanner(db, config.FMP_API_KEY)
 auto_orchestrator.top_movers_scanner = top_movers_scanner
 
+# Performance Tracker
+performance_tracker = PerformanceTracker(db)
+auto_orchestrator.performance_tracker = performance_tracker
+
 
 # ===================== TOP MOVERS SCANNER ENDPOINTS =====================
 
@@ -4309,6 +4314,45 @@ async def get_top_movers_status(auth: bool = Depends(verify_access)):
 async def get_top_movers_performance(auth: bool = Depends(verify_access)):
     """Get today's top movers scanning performance summary."""
     return await top_movers_scanner.get_performance_summary()
+
+
+# ===================== PERFORMANCE ANALYTICS ENDPOINTS =====================
+
+@api_router.get("/analytics/session-summary")
+async def get_session_summary(date: str = None, auth: bool = Depends(verify_access)):
+    """Get session performance summary: trades, win rate, P&L, drawdown, by time window."""
+    return await performance_tracker.get_session_summary(date)
+
+@api_router.get("/analytics/trade-quality")
+async def get_trade_quality(date: str = None, auth: bool = Depends(verify_access)):
+    """Analyze signal quality: which signals led to wins vs losses."""
+    return await performance_tracker.get_trade_quality_analysis(date)
+
+@api_router.get("/analytics/pipeline-efficiency")
+async def get_pipeline_efficiency(date: str = None, auth: bool = Depends(verify_access)):
+    """Pipeline conversion rates and top rejection reasons."""
+    return await performance_tracker.get_pipeline_efficiency(date)
+
+@api_router.get("/analytics/best-worst-trades")
+async def get_best_worst_trades(date: str = None, count: int = 3, auth: bool = Depends(verify_access)):
+    """Get top N best and worst trades with full reasoning."""
+    return await performance_tracker.get_best_worst_trades(date, count)
+
+@api_router.get("/analytics/risk-compliance")
+async def get_risk_compliance(date: str = None, auth: bool = Depends(verify_access)):
+    """Verify risk rule compliance: stop-loss, trailing stops, position sizing."""
+    return await performance_tracker.get_risk_compliance(date)
+
+@api_router.get("/analytics/regime-performance")
+async def get_regime_performance(date: str = None, auth: bool = Depends(verify_access)):
+    """Compare performance across market regimes."""
+    return await performance_tracker.get_regime_performance(date)
+
+@api_router.get("/analytics/full-report")
+async def get_full_report(date: str = None, auth: bool = Depends(verify_access)):
+    """Generate complete performance report: session, quality, pipeline, risk, regime."""
+    return await performance_tracker.get_full_report(date)
+
 
 
 
