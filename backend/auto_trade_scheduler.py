@@ -103,10 +103,10 @@ class MarketSessionManager:
 class AutoTradeScheduler:
     """Main scheduler orchestrating all auto-trade operations"""
 
-    DT_SCAN_INTERVAL = 300
+    DT_SCAN_INTERVAL = 180  # Scan every 3 minutes (aggressive)
     LT_SCAN_INTERVAL = 1800
     LOOP_TICK = 15
-    MAX_CONSECUTIVE_LOSSES_COOLDOWN = 2  # Changed from 3 to 2
+    MAX_CONSECUTIVE_LOSSES_COOLDOWN = 2
     COOLDOWN_MINUTES = 30
     STALE_DATA_MINUTES = 15
     MAX_API_FAILURES = 3
@@ -139,20 +139,22 @@ class AutoTradeScheduler:
         self._scheduler_settings = {
             "dt_interval_seconds": self.DT_SCAN_INTERVAL,
             "lt_interval_seconds": self.LT_SCAN_INTERVAL,
-            "pre_market_execution": False,  # OFF by default
-            "after_hours_execution": False,  # OFF by default
+            "pre_market_execution": False,
+            "after_hours_execution": False,
             "max_daily_loss_pct": 3.0,
             "max_portfolio_drawdown_pct": 10.0,
-            "max_consecutive_losses": 2,  # Changed from 3 to 2
+            "max_consecutive_losses": 2,
             "cooldown_minutes": 30,
-            "min_confidence_day": 70,  # Set to 70 for paper validation run
-            "min_confidence_long": 75,  # Raised from 55
+            "min_confidence_day": 60,  # Aggressive momentum: base 60
+            "min_confidence_long": 70,
             "stale_data_minutes": 15,
             "max_api_failures": 3,
             "live_position_size_multiplier": 0.5,
             "live_confidence_boost": 10,
-            "post_cooldown_threshold_boost": 5,  # +5 after cooldown ends
-            "soft_lock_daily_loss_pct": 80,  # At 80% of max loss → reduce sizes
+            "post_cooldown_threshold_boost": 3,  # Reduced from 5
+            "soft_lock_daily_loss_pct": 80,
+            "max_daily_losses": 3,  # Hard stop: 3 total losses/day
+            "prioritize_power_hours": True,  # First 2h + last 2h priority
         }
 
     async def initialize(self):
@@ -351,6 +353,19 @@ class AutoTradeScheduler:
                 if self._next_dt_scan and now >= self._next_dt_scan:
                     await self._run_day_trade_cycle(session)
                     interval = self._scheduler_settings["dt_interval_seconds"]
+                    
+                    # Power Hours: First 2h (9:30-11:30) and last 2h (14:00-16:00) — scan faster
+                    if self._scheduler_settings.get("prioritize_power_hours", True) and session == MarketSession.REGULAR:
+                        try:
+                            import pytz
+                            et = pytz.timezone("US/Eastern")
+                            now_et = now.astimezone(et)
+                            hour_et = now_et.hour + now_et.minute / 60.0
+                            if (9.5 <= hour_et <= 11.5) or (14.0 <= hour_et <= 16.0):
+                                interval = max(120, interval // 2)  # 2x faster in power hours
+                        except Exception:
+                            pass
+                    
                     self._next_dt_scan = now + timedelta(seconds=interval)
                     self._last_dt_scan = now
 

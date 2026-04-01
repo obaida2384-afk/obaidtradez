@@ -27,32 +27,41 @@ def _safe_float(val, default=0):
 # ===================== MODELS =====================
 
 class AutoTradeSettings(BaseModel):
-    """Master auto-trade configuration"""
+    """Master auto-trade configuration — Aggressive Momentum Strategy"""
     auto_enabled: bool = False
     
-    # Day Trading Settings
+    # Day Trading Settings (Momentum-First)
     dt_enabled: bool = True
-    dt_risk_per_trade_pct: float = 0.04  # 4% of capital
-    dt_high_conf_risk_pct: float = 0.08  # 8% for high confidence
-    dt_max_positions: int = 6
-    dt_confidence_threshold: int = 65  # TA-first: lowered from 80
-    dt_take_profit_pct: float = 2.5  # 2.5%
-    dt_stop_loss_pct: float = 0.8  # 0.8%
-    dt_time_exit_days: int = 2
+    dt_risk_per_trade_pct: float = 0.02  # 2% risk per trade ($20 on $1K)
+    dt_high_conf_risk_pct: float = 0.02  # Same — sizing controlled by confidence tiers
+    dt_max_positions: int = 8  # Max 5-8 trades/day
+    dt_confidence_threshold: int = 60  # Aggressive: base 60, dynamic 58-62
+    dt_take_profit_pct: float = 3.0  # Target 1-3%
+    dt_stop_loss_pct: float = 1.5  # Hard stop-loss
+    dt_partial_profit_pct: float = 1.5  # Take 50% profit at 1.5%
+    dt_time_exit_days: int = 1  # Day trades only
     dt_carry_overnight: bool = False
-    dt_cooldown_after_loss: int = 15  # minutes
+    dt_cooldown_after_loss: int = 30  # 30min cooldown after consecutive losses
+    dt_max_daily_losses: int = 3  # Hard stop after 3 total losses in a day
     
-    # Long-Term Settings
-    lt_enabled: bool = True
-    lt_max_position_pct: float = 0.15  # 15% of capital
+    # Momentum Filters
+    dt_min_price: float = 5.0  # $5 minimum
+    dt_max_price: float = 50.0  # $50 maximum
+    dt_min_volume: int = 500000  # 500K minimum daily volume
+    dt_min_rel_vol: float = 1.5  # RelVol >= 1.5x
+    dt_min_atr_pct: float = 2.0  # ATR > 2% for sufficient volatility
+    
+    # Long-Term Settings (Secondary)
+    lt_enabled: bool = False  # Disabled — focus on momentum day trading
+    lt_max_position_pct: float = 0.15
     lt_max_positions: int = 8
-    lt_confidence_threshold: int = 70  # Adjusted from 75
-    lt_trailing_stop_pct: float = 15.0  # 15%
-    lt_rebalance_threshold_pct: float = 25.0  # rebalance if +25% overweight
-    lt_valuation_margin_pct: float = 10.0  # margin of safety
+    lt_confidence_threshold: int = 70
+    lt_trailing_stop_pct: float = 15.0
+    lt_rebalance_threshold_pct: float = 25.0
+    lt_valuation_margin_pct: float = 10.0
     
     # Global Risk Settings
-    max_daily_loss_pct: float = 3.0
+    max_daily_loss_pct: float = 3.0  # 3% max daily loss ($30 on $1K)
     max_portfolio_drawdown_pct: float = 10.0
     max_sector_concentration_pct: float = 30.0
     emergency_pause: bool = False
@@ -78,10 +87,10 @@ class TradeExplanation(BaseModel):
 # ===================== DYNAMIC THRESHOLD MANAGER =====================
 
 class DynamicThresholdManager:
-    """Adjusts confidence thresholds based on market regime, recent performance, post-cooldown state"""
+    """Adjusts confidence thresholds based on market regime — Aggressive Momentum"""
 
     DT_FLOOR = 55
-    DT_DEFAULT = 65
+    DT_DEFAULT = 60
     LT_FLOOR = 60
     LT_DEFAULT = 70
 
@@ -91,48 +100,53 @@ class DynamicThresholdManager:
         regime = market_regime.get("regime", "neutral")
         vol_pct = _safe_float(market_regime.get("volatility_pct", 0))
 
-        dt_thresh = settings.dt_confidence_threshold
+        dt_thresh = settings.dt_confidence_threshold  # Base: 60
         lt_thresh = settings.lt_confidence_threshold
 
-        # Regime adjustments (calibrated for TA-first engine)
-        # User-specified: Neutral/Neutral Bearish: 65, Bullish: 60-65, Bearish: 68-70
-        if regime == "bearish":
-            dt_thresh += 5
-            lt_thresh += 4
-        elif regime == "neutral_bearish":
-            dt_thresh += 0  # Stays at base (65)
-            lt_thresh += 2
-        elif regime == "high_volatility":
-            dt_thresh += 3
-            lt_thresh += 2
-        elif regime == "bullish":
-            dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 5)
-            lt_thresh = max(DynamicThresholdManager.LT_FLOOR, lt_thresh - 4)
+        # Aggressive momentum regime adjustments:
+        # Strong/bullish market → LOWER threshold (58) — more opportunities
+        # Choppy/bearish → RAISE threshold (62) — be selective
+        # Neutral → keep at 60
+        if regime == "bullish":
+            dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 2)  # 58
+            lt_thresh = max(DynamicThresholdManager.LT_FLOOR, lt_thresh - 3)
         elif regime == "neutral_bullish":
-            dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 3)
+            dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh - 1)  # 59
             lt_thresh = max(DynamicThresholdManager.LT_FLOOR, lt_thresh - 2)
+        elif regime == "neutral_bearish":
+            dt_thresh += 1  # 61
+            lt_thresh += 2
+        elif regime == "bearish":
+            dt_thresh += 2  # 62
+            lt_thresh += 3
+        elif regime == "high_volatility":
+            # High vol = more momentum opportunities, allow more trades but slightly tighter
+            dt_thresh += 1  # 61
+            lt_thresh += 2
 
-        # Post-cooldown boost (+5 for safety after consecutive losses)
+        # Post-cooldown: slight tightening (+3, not +5)
         if post_cooldown:
-            dt_thresh += 5
-            lt_thresh += 5
+            dt_thresh += 3
+            lt_thresh += 3
 
         # Near daily loss limit (at 80%+) → further tighten
         if daily_loss_pct >= 80:
-            dt_thresh += 5
-            lt_thresh += 5
+            dt_thresh += 3
+            lt_thresh += 3
 
         # Enforce floors
         dt_thresh = max(DynamicThresholdManager.DT_FLOOR, dt_thresh)
         lt_thresh = max(DynamicThresholdManager.LT_FLOOR, lt_thresh)
 
-        # Risk mode
-        if regime in ("bearish", "high_volatility") or daily_loss_pct >= 60:
-            risk_mode = "DEFENSIVE"
-        elif regime == "bullish" and daily_loss_pct < 30:
-            risk_mode = "NORMAL"
+        # Risk mode — adapt trading frequency
+        if regime in ("bearish",) or daily_loss_pct >= 60:
+            risk_mode = "DEFENSIVE"  # Reduce frequency, tighter stops
+        elif regime == "high_volatility":
+            risk_mode = "VOLATILE"  # Allow more trades, wider stops
+        elif regime in ("bullish", "neutral_bullish") and daily_loss_pct < 30:
+            risk_mode = "AGGRESSIVE"  # Full momentum trading
         else:
-            risk_mode = "CAUTIOUS"
+            risk_mode = "NORMAL"
 
         return {
             "dt_threshold": dt_thresh,
@@ -148,10 +162,11 @@ class DynamicThresholdManager:
                           market_regime: Dict) -> int:
         regime = market_regime.get("regime", "neutral")
         base = settings.dt_max_positions if classification == "DAY_TRADE" else settings.lt_max_positions
-        if regime in ("bearish", "neutral_bearish"):
-            return max(1, int(base * 0.5))
-        if regime == "high_volatility":
-            return max(1, int(base * 0.6))
+        # Aggressive: only reduce in truly bearish conditions
+        if regime == "bearish":
+            return max(2, int(base * 0.6))
+        if regime == "neutral_bearish":
+            return max(2, int(base * 0.75))
         return base
 
 
@@ -203,9 +218,9 @@ class TradePipelineFunnel:
 # ===================== TRADE FREQUENCY CONTROLLER =====================
 
 class TradeFrequencyController:
-    """Limits trade frequency to prevent overtrading"""
+    """Limits trade frequency — aggressive momentum allows up to 8/day"""
 
-    MAX_DT_PER_HOUR = 3
+    MAX_DT_PER_HOUR = 4  # Allow 4 DT per hour in active markets
     MAX_LT_PER_HOUR = 1
 
     def __init__(self, db):
@@ -225,19 +240,19 @@ class TradeFrequencyController:
         limit = (self.MAX_DT_PER_HOUR if classification == "DAY_TRADE"
                  else self.MAX_LT_PER_HOUR)
 
-        # Reduce frequency in weak regime
-        if regime in ("bearish", "neutral_bearish", "high_volatility"):
-            limit = max(1, limit // 2)
+        # Only reduce in truly bearish conditions
+        if regime == "bearish":
+            limit = max(2, limit - 1)
 
         if recent >= limit:
             return False, f"Frequency limit: {recent}/{limit} trades this hour ({classification})"
 
-        # Check recent performance (if last 3 trades all negative, reduce)
+        # Check recent performance (3 consecutive losses → stop)
         last_sells = await self.db.auto_trade_log.find(
             {"action": "SELL"}, {"_id": 0, "pnl": 1}
         ).sort("timestamp", -1).limit(3).to_list(3)
         if len(last_sells) >= 3 and all(s.get("pnl", 0) < 0 for s in last_sells):
-            return False, "Recent performance negative (last 3 trades all losses)"
+            return False, "3 consecutive losses — pausing trades"
 
         return True, "OK"
 
@@ -649,24 +664,16 @@ class RiskManager:
             violations.append("Emergency pause is active")
             return False, violations
         
-        # 2. Confidence threshold
+        # 2. Confidence threshold (uses dynamic threshold from caller)
         threshold = settings.dt_confidence_threshold if classification == "DAY_TRADE" else settings.lt_confidence_threshold
         if confidence < threshold:
             violations.append(f"Confidence {confidence} below threshold {threshold}")
         else:
             checks.append(f"Confidence {confidence} >= {threshold} threshold")
         
-        # 3. Market regime adjustment
+        # 3. Market regime info (NO extra threshold raise — handled by DynamicThresholdManager)
         regime = market_regime.get("regime", "neutral")
-        regime_score = market_regime.get("score", 50)
-        if classification == "DAY_TRADE" and regime in ["bearish", "high_volatility"]:
-            adjusted_threshold = threshold + 10
-            if confidence < adjusted_threshold:
-                violations.append(f"Weak market ({regime}): raised threshold to {adjusted_threshold}")
-        if regime in ["bearish", "high_volatility"]:
-            checks.append(f"Market regime: {regime} (caution)")
-        else:
-            checks.append(f"Market regime: {regime}")
+        checks.append(f"Market regime: {regime}")
         
         # 4. Max positions
         max_pos = settings.dt_max_positions if classification == "DAY_TRADE" else settings.lt_max_positions
@@ -675,7 +682,7 @@ class RiskManager:
         else:
             checks.append(f"Positions: {len(open_positions)}/{max_pos}")
         
-        # 5. Daily loss limit
+        # 5. Daily loss limit (3%)
         daily_pnl = await self._get_daily_pnl()
         max_daily_loss = equity * (settings.max_daily_loss_pct / 100)
         if daily_pnl < -max_daily_loss:
@@ -683,7 +690,16 @@ class RiskManager:
         else:
             checks.append(f"Daily P&L: ${daily_pnl:.0f} (limit: -${max_daily_loss:.0f})")
         
-        # 6. Drawdown protection
+        # 6. Hard stop: 3 total losses in a day
+        if classification == "DAY_TRADE":
+            daily_losses = await self._get_daily_loss_count()
+            max_losses = getattr(settings, 'dt_max_daily_losses', 3)
+            if daily_losses >= max_losses:
+                violations.append(f"Hard stop: {daily_losses} losses today (max {max_losses})")
+            else:
+                checks.append(f"Daily losses: {daily_losses}/{max_losses}")
+        
+        # 7. Drawdown protection
         peak_equity = await self._get_peak_equity(equity)
         drawdown = ((equity - peak_equity) / peak_equity * 100) if peak_equity > 0 else 0
         if drawdown < -settings.max_portfolio_drawdown_pct:
@@ -691,7 +707,7 @@ class RiskManager:
         else:
             checks.append(f"Drawdown: {drawdown:.1f}% (limit: -{settings.max_portfolio_drawdown_pct}%)")
         
-        # 7. Sector concentration
+        # 8. Sector concentration
         symbol = signal.get("symbol", "")
         sector = signal.get("sector", signal.get("profile", {}).get("sector", "Unknown"))
         sector_exposure = self._calc_sector_exposure(open_positions, sector, equity)
@@ -700,13 +716,13 @@ class RiskManager:
         else:
             checks.append(f"Sector exposure ({sector}): {sector_exposure:.0f}%")
         
-        # 8. Buying power
+        # 9. Buying power
         if buying_power < equity * 0.05:
             violations.append("Insufficient buying power (<5%)")
         else:
             checks.append(f"Buying power: ${buying_power:,.0f}")
         
-        # 9. Cooldown after loss (day trading)
+        # 10. Cooldown after consecutive losses (30min)
         if classification == "DAY_TRADE":
             last_loss = await self._last_loss_time()
             if last_loss:
@@ -724,6 +740,14 @@ class RiskManager:
             {"date": today, "action": "SELL"}
         ).to_list(100)
         return sum(t.get("pnl", 0) for t in trades)
+    
+    async def _get_daily_loss_count(self) -> int:
+        """Count total losing trades today for hard stop rule"""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        loss_count = await self.db.auto_trade_log.count_documents({
+            "date": today, "action": "SELL", "pnl": {"$lt": 0}
+        })
+        return loss_count
     
     async def _get_peak_equity(self, current: float) -> float:
         record = await self.db.auto_trade_metrics.find_one({"_id": "peak_equity"})
@@ -761,92 +785,68 @@ class RiskManager:
 # ===================== POSITION SIZER =====================
 
 class PositionSizer:
-    """Smart position sizing based on confidence, risk, regime, and classification"""
+    """Confidence-tiered position sizing for aggressive momentum trading.
+    60-70 conf → 10% of account
+    70-80 conf → 15% of account  
+    80+   conf → 20% of account"""
     
     # Caps
-    DT_MAX_PCT = 5.0   # max 5% per day trade
-    LT_MAX_PCT = 20.0  # max 20% per long-term position
+    DT_MAX_PCT = 20.0  # max 20% per trade (for $1K = $200)
+    LT_MAX_PCT = 20.0
     
     @staticmethod
     def calculate(classification: str, confidence: int, settings: AutoTradeSettings,
                   equity: float, stop_distance_pct: float, signal: Dict,
                   market_regime: Dict = None, dynamic_thresholds: Dict = None) -> Dict:
-        """Calculate position size with regime-aware risk-based logic"""
+        """Calculate position size using confidence-tiered allocation"""
         
         if equity <= 0:
             return {"shares": 0, "value": 0, "logic": "No equity", "regime_adj": 1.0}
 
-        # Regime-based multiplier
-        regime_mult = 1.0
         regime = (market_regime or {}).get("regime", "neutral")
-        if regime in ("bearish", "neutral_bearish"):
-            regime_mult = 0.5  # -50% in bearish
-        elif regime == "high_volatility":
-            regime_mult = 0.6  # -40% in high vol
-        elif regime == "neutral":
-            regime_mult = 0.85
-
-        # Confidence-near-threshold reduction (if just barely above threshold, reduce size)
-        threshold = 65 if classification == "DAY_TRADE" else 70
-        if dynamic_thresholds:
-            threshold = (dynamic_thresholds.get("dt_threshold", 80) if classification == "DAY_TRADE"
-                         else dynamic_thresholds.get("lt_threshold", 75))
-        margin = confidence - threshold
-        conf_mult = 1.0
-        if 0 <= margin <= 5:
-            conf_mult = 0.6  # Just barely passed → 60% size
-        elif 5 < margin <= 10:
-            conf_mult = 0.8  # Moderate margin → 80%
-        # Above 10 margin → full size
 
         if classification == "DAY_TRADE":
-            if confidence >= 90:
-                risk_pct = settings.dt_high_conf_risk_pct
-                label = "High confidence"
-            elif confidence >= 85:
-                risk_pct = (settings.dt_risk_per_trade_pct + settings.dt_high_conf_risk_pct) / 2
-                label = "Above average confidence"
+            # Confidence-tiered position sizing
+            if confidence >= 80:
+                alloc_pct = 0.20  # 20% of account
+                label = "High confidence (20%)"
+            elif confidence >= 70:
+                alloc_pct = 0.15  # 15% of account
+                label = "Medium confidence (15%)"
             else:
-                risk_pct = settings.dt_risk_per_trade_pct
-                label = "Standard confidence"
+                alloc_pct = 0.10  # 10% of account
+                label = "Standard confidence (10%)"
             
-            risk_amount = equity * risk_pct
+            position_value = equity * alloc_pct
             
-            if stop_distance_pct > 0:
-                position_value = risk_amount / (stop_distance_pct / 100)
-            else:
-                position_value = risk_amount * 10
+            # Regime adjustment — minor for momentum strategy
+            if regime == "bearish":
+                position_value *= 0.7
+                label += " | bearish -30%"
+            elif regime == "neutral_bearish":
+                position_value *= 0.85
+                label += " | cautious -15%"
             
-            # Apply caps: max 5% per day trade
-            max_value = equity * (PositionSizer.DT_MAX_PCT / 100)
-            position_value = min(position_value, max_value)
-            
-        else:
-            if confidence >= 90:
+        else:  # LONG_TERM
+            if confidence >= 85:
                 alloc_pct = settings.lt_max_position_pct
                 label = "High conviction"
-            elif confidence >= 85:
-                alloc_pct = settings.lt_max_position_pct * 0.7
-                label = "Medium-high conviction"
-            elif confidence >= 80:
-                alloc_pct = settings.lt_max_position_pct * 0.5
-                label = "Standard conviction"
+            elif confidence >= 75:
+                alloc_pct = settings.lt_max_position_pct * 0.6
+                label = "Medium conviction"
             else:
                 alloc_pct = settings.lt_max_position_pct * 0.3
                 label = "Low conviction"
             
             position_value = equity * alloc_pct
-            
-            # Apply caps: max 20% per long-term position
-            max_value = equity * (PositionSizer.LT_MAX_PCT / 100)
-            position_value = min(position_value, max_value)
         
-        # Apply regime and confidence multipliers
-        position_value *= regime_mult * conf_mult
+        # Apply cap
+        max_value = equity * (PositionSizer.DT_MAX_PCT / 100) if classification == "DAY_TRADE" else equity * (PositionSizer.LT_MAX_PCT / 100)
+        position_value = min(position_value, max_value)
         
         price = signal.get("price", signal.get("entry", 0))
         if not price or price <= 0:
-            return {"shares": 0, "value": 0, "logic": "No valid price", "regime_adj": regime_mult}
+            return {"shares": 0, "value": 0, "logic": "No valid price", "regime_adj": 1.0}
         
         shares = max(1, int(position_value / price))
         actual_value = shares * price
@@ -856,9 +856,9 @@ class PositionSizer:
             "shares": shares,
             "value": round(actual_value, 2),
             "pct_of_equity": pct_equity,
-            "regime_adj": round(regime_mult, 2),
-            "conf_adj": round(conf_mult, 2),
-            "logic": f"{label} | {confidence}/100 conf | regime:{regime}({regime_mult:.0%}) | ${actual_value:,.0f} ({pct_equity}%)"
+            "regime_adj": 1.0,
+            "conf_adj": 1.0,
+            "logic": f"{label} | {confidence}/100 conf | regime:{regime} | ${actual_value:,.0f} ({pct_equity}%)"
         }
 
 
@@ -870,14 +870,10 @@ class DayTradingEngine:
     @staticmethod
     def evaluate_buy(ta_signal: Dict, news_data: Optional[Dict],
                      market_regime: Dict, settings: AutoTradeSettings) -> TradeExplanation:
-        """Evaluate day trade using Technical Analysis signal as PRIMARY driver.
-        News is used ONLY as a confidence boost, never as a gate.
-        Technical structure drives the decision. No catalyst gate.
-        Strict Multi-Timeframe Confirmation:
-        - LONG requires 5m bullish + 15m supportive/neutral
-        - SHORT requires 5m bearish + 15m supportive/neutral
-        - 1m conflict → confidence downgrade
-        Momentum Mode: disciplined bypass for explosive movers."""
+        """Evaluate day trade — AGGRESSIVE MOMENTUM STRATEGY.
+        Entry only on: confirmed breakout, VWAP pullback in trend, or volume spike.
+        Relaxed quality filters: focus on momentum, not fundamentals.
+        3 signals must align: momentum + volume + (trend OR breakout OR catalyst)."""
         symbol = ta_signal.get("symbol", "")
         explanation = TradeExplanation(
             ticker=symbol,
@@ -899,7 +895,7 @@ class DayTradingEngine:
         price = ta_signal.get("price", 0)
         confidence = ta_signal.get("confidence", 0)
 
-        # === TECHNICAL SETUP EVALUATION (PRIMARY DRIVER) ===
+        # === HARD GATES (cannot be bypassed) ===
 
         # 1. Must have a direction
         if direction == "NONE":
@@ -910,212 +906,213 @@ class DayTradingEngine:
             explanation.key_indicators = {"direction": "NONE", "reject_stage": "no_direction"}
             return explanation
 
-        # 2. Must have at least one setup
-        if not best_setup:
-            reject_reasons.append("No technical setup detected (breakout/FVG/VWAP reclaim)")
-            explanation.action = "REJECT"
-            explanation.reject_reasons = reject_reasons
-            explanation.confidence_score = confidence
-            explanation.key_indicators = {"direction": direction, "reject_stage": "no_setup"}
-            return explanation
-
-        # 3. Spread filter (<= 0.5%) — Momentum Mode does NOT bypass this
+        # 2. Spread filter (<= 0.5%) — HARD
         spread = indicators.get("spread_pct", 0)
         if spread > 0.5:
             reject_reasons.append(f"Spread too wide: {spread:.2f}% (max 0.5%)")
         elif spread > 0.3:
-            reject_reasons.append(f"Spread elevated: {spread:.2f}% (penalized)")
+            entry_reasons.append(f"Spread acceptable: {spread:.2f}%")
 
-        # 4. Volume filter — STRICT
-        # RelVol < 1.0 → HARD REJECT (never bypassed)
-        # RelVol 1.0-1.3 → PENALIZE
-        # RelVol >= 1.5 → PREFERRED
+        # 3. Volume filter — RelVol >= 1.5x HARD, < 1.0 REJECT
         rel_vol = indicators.get("rel_vol", 0)
         if rel_vol < 1.0:
-            reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (min 1.0x, HARD REJECT)")
-        elif rel_vol < 1.3 and not momentum_mode:
-            reject_reasons.append(f"RelVol weak: {rel_vol:.1f}x (min 1.3x preferred)")
-        if momentum_mode:
-            entry_reasons.append(f"MOMENTUM MODE: RelVol {rel_vol:.1f}x (explosive volume)")
+            reject_reasons.append(f"RelVol too low: {rel_vol:.1f}x (HARD REJECT)")
+        elif rel_vol < 1.5:
+            reject_reasons.append(f"RelVol below minimum: {rel_vol:.1f}x (need 1.5x)")
         if rel_vol >= 2.5:
-            entry_reasons.append(f"Strong volume surge: {rel_vol:.1f}x")
+            entry_reasons.append(f"Explosive volume: {rel_vol:.1f}x")
+            confidence += 3
         elif rel_vol >= 2.0:
-            entry_reasons.append(f"Elevated volume: {rel_vol:.1f}x")
+            entry_reasons.append(f"Strong volume surge: {rel_vol:.1f}x")
+            confidence += 2
         elif rel_vol >= 1.5:
-            entry_reasons.append(f"Preferred volume: {rel_vol:.1f}x")
+            entry_reasons.append(f"Active volume: {rel_vol:.1f}x")
 
-        # 5. Overextension check — Momentum Mode does NOT bypass this
+        # 4. Overextension check — HARD
         if ta_signal.get("overextended"):
-            reject_reasons.append(f"Overextended: {ta_signal.get('overextension_reason', 'price too far from VWAP')}")
+            reject_reasons.append(f"Overextended: {ta_signal.get('overextension_reason', 'price too far')}")
 
-        # 6. Fake breakout penalty — Momentum Mode does NOT bypass this
+        # 5. Fake breakout — HARD
         fake = ta_signal.get("fake_breakout")
         if fake:
-            reject_reasons.append(f"Fake breakout: {fake.get('reason', 'bull/bear trap detected')}")
+            reject_reasons.append(f"Fake breakout: {fake.get('reason', 'trap detected')}")
 
-        # 7. R:R ratio check
-        rr = ta_signal.get("rr_ratio", 0)
-        if rr >= 2.0:
-            entry_reasons.append(f"Good R:R ratio: {rr:.1f}:1")
-        elif 0 < rr < 1.2:
-            reject_reasons.append(f"Poor R:R ratio: {rr:.1f}:1")
-
-        # 8. Structure alignment
+        # === ENTRY VALIDATION: 3 signals must align ===
+        # Valid entries: confirmed breakout, VWAP pullback in trend, volume spike confirmation
+        signal_count = 0
+        
+        # Signal 1: Momentum (direction + structure alignment)
+        has_momentum = False
         struct_type = structure.get("structure", "ranging")
         if direction == "LONG" and struct_type == "bullish":
-            entry_reasons.append("Bullish market structure (HH+HL)")
+            has_momentum = True
+            signal_count += 1
+            entry_reasons.append("Bullish structure (HH+HL)")
         elif direction == "SHORT" and struct_type == "bearish":
-            entry_reasons.append("Bearish market structure (LH+LL)")
+            has_momentum = True
+            signal_count += 1
+            entry_reasons.append("Bearish structure (LH+LL)")
         elif struct_type == "ranging":
-            reject_reasons.append("Ranging structure (low quality)")
-
-        # === MULTI-TIMEFRAME CONFIRMATION (STRICT GATE) ===
-        mtf_aligned = mtf.get("aligned", False)
-        has_tf_conflict = mtf.get("has_tf_conflict", False)
-        has_1m_conflict = mtf.get("has_1m_conflict", False)
-        mtf_reject_reasons = mtf.get("reject_reasons", [])
-        struct_15m = mtf.get("struct_15m", "unknown")
-        is_15m_ranging = struct_15m in ("ranging", "unknown")
-
-        # STRICT 15m Trend Filter
-        if is_15m_ranging:
-            if rel_vol >= 2.0 and best_setup and best_setup.get("type", "") in (
-                "breakout_long", "breakdown_short"
-            ):
-                entry_reasons.append(f"15m ranging BUT strong breakout + RelVol {rel_vol:.1f}x (exception)")
-            else:
-                reject_reasons.append(f"15m trend is ranging (low conviction, no strong breakout volume)")
-                confidence -= 5
-
-        if mtf_aligned and not is_15m_ranging:
-            entry_reasons.append(f"MTF aligned: 5m+15m confirm {direction} ({mtf.get('score', 0)}/{mtf.get('max', 5)})")
-            if mtf.get("timing_1m_aligned"):
-                entry_reasons.append("1m timing confirms entry")
-        elif mtf_aligned and is_15m_ranging:
-            entry_reasons.append(f"MTF partial: 5m supports {direction}, 15m ranging ({mtf.get('score', 0)}/{mtf.get('max', 5)})")
-        elif has_tf_conflict and not momentum_mode:
-            for r in mtf_reject_reasons:
-                reject_reasons.append(f"MTF CONFLICT: {r}")
-        elif has_tf_conflict and momentum_mode:
-            for r in mtf_reject_reasons:
-                reject_reasons.append(f"MTF CONFLICT: {r} (not bypassed by Momentum Mode)")
-
-        # 1m conflict: soft downgrade
-        if has_1m_conflict:
-            reject_reasons.append(f"1m timing conflicts with {direction} direction (soft downgrade)")
-
-        # === ENTRY TIMING GATE ===
-        # Only execute when 1m timing = "entry_ready"
-        # early or weak → watchlist / near-miss, DO NOT execute
-        timing_1m_aligned = mtf.get("timing_1m_aligned", False)
-        timing_status = "entry_ready" if timing_1m_aligned else ("weak" if has_1m_conflict else "early")
-        if not timing_1m_aligned:
-            reject_reasons.append(f"1m timing not entry-ready ({timing_status}) — watchlist only")
-
-        # 10. RSI context
-        rsi = indicators.get("rsi", 50)
-        if direction == "LONG" and rsi > 75:
-            reject_reasons.append(f"RSI overbought: {rsi:.0f}")
-        elif direction == "SHORT" and rsi < 25:
-            reject_reasons.append(f"RSI oversold: {rsi:.0f}")
-
-        # === NEWS BOOST (SECONDARY - NOT A GATE) ===
+            # Ranging is OK for momentum breakouts, just no structure signal
+            entry_reasons.append("Ranging structure (breakout candidate)")
+        
+        # Signal 2: Volume confirmation (RelVol >= 1.5x)
+        has_volume = rel_vol >= 1.5
+        if has_volume:
+            signal_count += 1
+        
+        # Signal 3: Setup/Breakout confirmation
+        has_setup = False
+        if best_setup:
+            setup_type = best_setup.get("type", "") if isinstance(best_setup, dict) else str(best_setup)
+            has_setup = True
+            signal_count += 1
+            entry_reasons.append(f"Setup: {setup_type}")
+        
+        # Signal 4: VWAP alignment
+        above_vwap = indicators.get("above_vwap")
+        vwap_dist = abs(indicators.get("vwap_distance_pct", 0))
+        has_vwap = False
+        if direction == "LONG" and above_vwap and vwap_dist < 2.0:
+            has_vwap = True
+            signal_count += 1
+            entry_reasons.append(f"VWAP pullback: above VWAP, {vwap_dist:.1f}% away")
+        elif direction == "SHORT" and above_vwap == False and vwap_dist < 2.0:
+            has_vwap = True
+            signal_count += 1
+            entry_reasons.append(f"Below VWAP: {vwap_dist:.1f}% away")
+        
+        # Signal 5: Catalyst/News boost
+        has_catalyst = False
         news_boost = 0
         if news_data and isinstance(news_data, dict):
             composite = _safe_float(news_data.get("composite_score", 0.5), 0.5)
             catalyst_score = _safe_float(news_data.get("catalyst_score", 0), 0)
-
             if composite >= 0.7 or catalyst_score >= 70:
-                news_boost = 5
-                entry_reasons.append(f"News sentiment boost: strong ({composite:.2f})")
+                has_catalyst = True
+                news_boost = 8
+                signal_count += 1
+                entry_reasons.append(f"Strong catalyst: news score {composite:.2f}")
             elif composite >= 0.55 or catalyst_score >= 50:
-                news_boost = 2
-                entry_reasons.append(f"News sentiment boost: moderate ({composite:.2f})")
+                has_catalyst = True
+                news_boost = 4
+                signal_count += 1
+                entry_reasons.append(f"Moderate catalyst: news score {composite:.2f}")
             elif composite < 0.3:
-                entry_reasons.append(f"News: negative sentiment ({composite:.2f}), no boost")
-
+                entry_reasons.append(f"Negative sentiment ({composite:.2f})")
+        
         confidence += news_boost
 
-        # === MARKET REGIME SOFT CHECK ===
-        regime = market_regime.get("regime", "neutral")
-        if regime in ("bearish", "high_volatility") and direction == "LONG":
+        # R:R check
+        rr = ta_signal.get("rr_ratio", 0)
+        if rr >= 2.0:
+            entry_reasons.append(f"Good R:R: {rr:.1f}:1")
+            confidence += 2
+        elif 0 < rr < 1.0:
+            reject_reasons.append(f"Poor R:R: {rr:.1f}:1")
+
+        # === MTF CONFIRMATION (SOFT — not a hard gate for momentum) ===
+        mtf_aligned = mtf.get("aligned", False)
+        has_tf_conflict = mtf.get("has_tf_conflict", False)
+        struct_15m = mtf.get("struct_15m", "unknown")
+        
+        if mtf_aligned:
+            entry_reasons.append(f"MTF aligned: {mtf.get('score', 0)}/{mtf.get('max', 5)}")
+            confidence += 3
+        elif has_tf_conflict:
+            # Soft penalty, not hard reject for momentum trades
             confidence -= 3
-            entry_reasons.append(f"Caution: long in {regime} market (-3 conf)")
+            entry_reasons.append(f"MTF conflict (soft penalty -3 conf)")
+        
+        if struct_15m in ("ranging", "unknown"):
+            # Not a hard reject anymore — ranging is fine for breakouts
+            if rel_vol >= 2.0:
+                entry_reasons.append(f"15m ranging but strong volume {rel_vol:.1f}x")
+            else:
+                confidence -= 2
+
+        # === MARKET REGIME (soft adjustment) ===
+        regime = market_regime.get("regime", "neutral")
+        if regime in ("bearish",) and direction == "LONG":
+            confidence -= 3
+            entry_reasons.append(f"Caution: long in {regime} (-3 conf)")
+        elif regime in ("bullish",) and direction == "LONG":
+            confidence += 2
+            entry_reasons.append(f"Bullish regime boost (+2 conf)")
+
+        # RSI context
+        rsi = indicators.get("rsi", 50)
+        if direction == "LONG" and rsi > 80:
+            reject_reasons.append(f"RSI extremely overbought: {rsi:.0f}")
+        elif direction == "SHORT" and rsi < 20:
+            reject_reasons.append(f"RSI extremely oversold: {rsi:.0f}")
 
         confidence = max(0, min(100, confidence))
 
-        # === MOMENTUM MODE BYPASS LOGIC ===
-        # Momentum mode can bypass: RelVol minimum (already handled), confidence threshold softening
-        # Momentum mode CANNOT bypass: spread, fake breakout, overextension, MTF conflict, risk rules
+        # === MOMENTUM MODE BYPASS ===
         momentum_bypass_active = False
         if momentum_mode:
-            # Check if all non-bypassable filters pass
-            hard_reject_keywords_momentum = ["spread too wide", "overextended", "fake breakout", "mtf conflict"]
+            hard_reject_keywords_momentum = ["spread too wide", "overextended", "fake breakout"]
             has_hard_block = any(
                 any(kw in r.lower() for kw in hard_reject_keywords_momentum)
                 for r in reject_reasons
             )
             if not has_hard_block:
                 momentum_bypass_active = True
-                entry_reasons.append("Momentum Mode ACTIVE: bypassing conservative filters")
+                entry_reasons.append("MOMENTUM MODE ACTIVE")
                 for r in list(ta_signal.get("momentum_reasons", [])):
                     entry_reasons.append(f"  Momentum: {r}")
 
         # === DECISION ===
-        # Determine correct action based on direction: LONG→BUY, SHORT→SELL
         positive_action = "BUY" if direction == "LONG" else "SELL"
 
-        # Hard filter rejects (never bypassed, even by momentum mode)
-        hard_reject_keywords = ["spread too wide", "overextended", "mtf conflict",
+        # Hard rejects (never bypassed)
+        hard_reject_keywords = ["spread too wide", "overextended", "fake breakout",
                                 "relvol too low", "hard reject"]
         hard_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in hard_reject_keywords)]
-
-        # Soft rejects (can be bypassed by momentum mode)
-        soft_reject_keywords = ["relvol weak", "poor r:r", "1m timing conflicts",
-                                "spread elevated", "ranging structure"]
-        soft_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in soft_reject_keywords)]
-
-        # Entry timing gate rejects (force watchlist, not hard reject)
-        timing_rejects = [r for r in reject_reasons if "not entry-ready" in r.lower()]
-
-        # Filter out soft rejects if momentum mode is active
-        effective_rejects = reject_reasons.copy()
-        if momentum_bypass_active:
-            effective_rejects = [r for r in reject_reasons if r not in soft_rejects]
 
         if hard_rejects:
             explanation.action = "REJECT"
             explanation.reject_reasons = reject_reasons
-        elif len(effective_rejects) >= 3:
-            explanation.action = "REJECT"
-            explanation.reject_reasons = reject_reasons
-        elif timing_rejects and not momentum_bypass_active:
-            # 1m not entry-ready → WATCHLIST (do not execute, but keep visible)
-            explanation.action = "WATCHLIST"
-            explanation.entry_reasons = entry_reasons
-            explanation.reject_reasons = reject_reasons
-        elif len(entry_reasons) >= 2 and len(effective_rejects) <= 1:
+        elif signal_count >= 3:
+            # 3+ signals aligned → TRADE
             explanation.action = positive_action
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
-        elif len(entry_reasons) >= 1:
+        elif signal_count >= 2 and (momentum_bypass_active or confidence >= 70):
+            # 2 signals + high confidence or momentum → TRADE
+            explanation.action = positive_action
+            explanation.entry_reasons = entry_reasons
+            explanation.reject_reasons = reject_reasons
+        elif signal_count >= 2:
+            # 2 signals → WATCHLIST
             explanation.action = "WATCHLIST"
+            explanation.entry_reasons = entry_reasons
+            explanation.reject_reasons = reject_reasons
+        elif signal_count >= 1 and momentum_bypass_active:
+            # Momentum override with at least 1 signal
+            explanation.action = positive_action
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
         else:
             explanation.action = "REJECT"
-            explanation.reject_reasons = reject_reasons if reject_reasons else ["Insufficient technical signals"]
+            explanation.reject_reasons = reject_reasons if reject_reasons else ["Insufficient signal alignment (need 3+)"]
 
-        # Exit plan from TA signal
+        # Exit plan with partial profit logic
         stop_loss = ta_signal.get("stop_loss", 0)
         take_profit = ta_signal.get("take_profit", 0)
+        partial_pct = getattr(settings, 'dt_partial_profit_pct', 1.5)
         if stop_loss and take_profit and price:
+            partial_target = round(price * (1 + partial_pct / 100), 2) if direction == "LONG" else round(price * (1 - partial_pct / 100), 2)
             explanation.exit_plan = {
                 "entry": round(price, 2),
                 "take_profit": round(take_profit, 2),
                 "take_profit_pct": round(((take_profit / price) - 1) * 100, 1) if price > 0 else 0,
                 "stop_loss": round(stop_loss, 2),
                 "stop_loss_pct": round(((stop_loss / price) - 1) * 100, 1) if price > 0 else 0,
+                "partial_target": partial_target,
+                "partial_pct": partial_pct,
+                "partial_size": "50%",
                 "rr_ratio": rr,
                 "time_exit": f"{settings.dt_time_exit_days} day(s)"
             }
@@ -1123,7 +1120,7 @@ class DayTradingEngine:
         explanation.confidence_score = confidence
         explanation.key_indicators = {
             "direction": direction,
-            "best_setup": best_setup.get("type", "") if best_setup else "none",
+            "best_setup": best_setup.get("type", "") if isinstance(best_setup, dict) and best_setup else "none",
             "setup_count": len(all_setups),
             "structure": struct_type,
             "rel_vol": rel_vol,
@@ -1140,12 +1137,14 @@ class DayTradingEngine:
             "mtf_15m": mtf.get("struct_15m", "?"),
             "mtf_1m": mtf.get("timing_1m", "?"),
             "has_tf_conflict": has_tf_conflict,
-            "is_15m_ranging": is_15m_ranging,
-            "timing_status": timing_status,
+            "is_15m_ranging": struct_15m in ("ranging", "unknown"),
+            "timing_status": "entry_ready" if mtf.get("timing_1m_aligned") else "early",
             "momentum_mode": momentum_mode,
             "momentum_bypass_active": momentum_bypass_active,
             "news_boost": news_boost,
             "rr_ratio": rr,
+            "signal_count": signal_count,
+            "signals_aligned": f"{signal_count}/3 (momentum+volume+trend/breakout/catalyst)",
             "overextended": ta_signal.get("overextended", False),
             "fake_breakout": bool(fake),
         }
@@ -1155,7 +1154,8 @@ class DayTradingEngine:
     @staticmethod
     def evaluate_sell(position: Dict, current_price: float, entry_price: float,
                       settings: AutoTradeSettings, entry_time: datetime) -> TradeExplanation:
-        """Evaluate if a day trade position should be sold"""
+        """Evaluate if a day trade position should be sold.
+        Partial profit at 1.5%, trail remainder toward 3%+."""
         ticker = position.get("symbol", "")
         explanation = TradeExplanation(
             ticker=ticker,
@@ -1165,21 +1165,33 @@ class DayTradingEngine:
         
         exit_reasons = []
         pnl_pct = ((current_price / entry_price) - 1) * 100 if entry_price > 0 else 0
+        partial_pct = getattr(settings, 'dt_partial_profit_pct', 1.5)
         
-        # Take profit
-        if pnl_pct >= settings.dt_take_profit_pct:
-            exit_reasons.append(f"Take profit hit: +{pnl_pct:.1f}% (target: {settings.dt_take_profit_pct}%)")
-        
-        # Stop loss
+        # Hard stop loss
         if pnl_pct <= -settings.dt_stop_loss_pct:
-            exit_reasons.append(f"Stop loss hit: {pnl_pct:.1f}% (limit: -{settings.dt_stop_loss_pct}%)")
+            exit_reasons.append(f"STOP LOSS: {pnl_pct:.1f}% (limit: -{settings.dt_stop_loss_pct}%)")
         
-        # Time exit
+        # Full take profit
+        if pnl_pct >= settings.dt_take_profit_pct:
+            exit_reasons.append(f"TAKE PROFIT: +{pnl_pct:.1f}% (target: {settings.dt_take_profit_pct}%)")
+        
+        # Partial profit signal at 1.5%
+        partial_taken = position.get("partial_taken", False)
+        if not partial_taken and pnl_pct >= partial_pct:
+            exit_reasons.append(f"PARTIAL PROFIT: +{pnl_pct:.1f}% (take 50%, trail rest)")
+        
+        # Time exit (end of day for day trades)
         if entry_time:
             hours_held = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
             max_hours = settings.dt_time_exit_days * 24
             if hours_held >= max_hours:
-                exit_reasons.append(f"Time exit: held {hours_held:.0f}h (max: {max_hours}h)")
+                exit_reasons.append(f"TIME EXIT: held {hours_held:.0f}h (max: {max_hours}h)")
+        
+        # Momentum weakening check (if was profitable but now fading)
+        if 0 < pnl_pct < 0.3 and entry_time:
+            hours_held = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+            if hours_held > 1.5:
+                exit_reasons.append(f"MOMENTUM FADE: +{pnl_pct:.1f}% after {hours_held:.1f}h (exit)")
         
         if exit_reasons:
             explanation.action = "SELL"
@@ -1190,7 +1202,10 @@ class DayTradingEngine:
         explanation.key_indicators = {
             "pnl_pct": round(pnl_pct, 2),
             "current_price": current_price,
-            "entry_price": entry_price
+            "entry_price": entry_price,
+            "partial_target_pct": partial_pct,
+            "take_profit_pct": settings.dt_take_profit_pct,
+            "stop_loss_pct": settings.dt_stop_loss_pct,
         }
         
         return explanation
@@ -1528,18 +1543,45 @@ class AutoTradeOrchestrator:
         from technical_analysis_engine import TechnicalSignalGenerator, TACache, BarCache
         TACache.reset_counters()
 
-        # === PHASE 1: Pre-filter liquid stocks for TA (volume >= 0.5) ===
+        # === PHASE 1: Pre-filter for MOMENTUM candidates ===
+        # Aggressive filters: price $5-$50, volume >= 500K, RelVol >= 1.5x, ATR > 2%
         dt_prefilter_symbols = []
         if settings.dt_enabled:
+            min_price = getattr(settings, 'dt_min_price', 5.0)
+            max_price = getattr(settings, 'dt_max_price', 50.0)
+            min_volume = getattr(settings, 'dt_min_volume', 500000)
+            min_rel_vol = getattr(settings, 'dt_min_rel_vol', 1.5)
+            min_atr_pct = getattr(settings, 'dt_min_atr_pct', 2.0)
+            
             for symbol in all_symbols:
                 t_sig = trade_lookup.get(symbol)
-                if t_sig:
-                    indicators = t_sig.get("indicators", {})
-                    vol_ratio = indicators.get("volume_ratio", 0)
-                    if vol_ratio >= 0.5:
-                        dt_prefilter_symbols.append(symbol)
-                    else:
-                        funnel.reject("pre_filter_low_volume")
+                if not t_sig:
+                    continue
+                indicators = t_sig.get("indicators", {})
+                price = t_sig.get("price", 0)
+                vol_ratio = indicators.get("volume_ratio", 0)
+                rel_vol = indicators.get("rel_vol", vol_ratio)
+                atr_pct = indicators.get("atr_pct", 0)
+                volume = indicators.get("volume", 0)
+                
+                # Price filter: $5-$50
+                if price < min_price or price > max_price:
+                    funnel.reject("price_outside_5_50")
+                    continue
+                # Volume floor: >= 500K
+                if volume > 0 and volume < min_volume:
+                    funnel.reject("volume_below_500k")
+                    continue
+                # RelVol >= 1.5x (actively moving today)
+                if rel_vol < min_rel_vol:
+                    funnel.reject("relvol_below_1.5x")
+                    continue
+                # ATR > 2% (sufficient volatility for profit)
+                if atr_pct > 0 and atr_pct < min_atr_pct:
+                    funnel.reject("atr_below_2pct")
+                    continue
+                
+                dt_prefilter_symbols.append(symbol)
 
         funnel.record("prefilter_passed", len(dt_prefilter_symbols))
 
@@ -2066,6 +2108,22 @@ class AutoTradeOrchestrator:
             "auto_enabled": settings.auto_enabled,
             "market_session": current_session.value,
             "market_regime": market_regime,
+            "strategy": {
+                "name": "Aggressive Momentum",
+                "price_range": f"${getattr(settings, 'dt_min_price', 5)}-${getattr(settings, 'dt_max_price', 50)}",
+                "min_rel_vol": f"{getattr(settings, 'dt_min_rel_vol', 1.5)}x",
+                "min_atr_pct": f"{getattr(settings, 'dt_min_atr_pct', 2.0)}%",
+                "min_volume": f"{getattr(settings, 'dt_min_volume', 500000):,}",
+                "confidence_threshold": dt_threshold,
+                "position_sizing": "60-70→10% | 70-80→15% | 80+→20%",
+                "max_trades_per_day": settings.dt_max_positions,
+                "max_daily_loss": f"{settings.max_daily_loss_pct}%",
+                "daily_loss_hard_stop": f"{getattr(settings, 'dt_max_daily_losses', 3)} losses",
+                "stop_loss": f"{settings.dt_stop_loss_pct}%",
+                "take_profit": f"{settings.dt_take_profit_pct}%",
+                "partial_profit": f"{getattr(settings, 'dt_partial_profit_pct', 1.5)}% (50% scale-out)",
+                "cooldown": f"{settings.dt_cooldown_after_loss}min after consecutive losses",
+            },
             "day_trades": day_trade_candidates[:20],
             "long_term": long_term_candidates[:20],
             "watchlist": sorted(watchlist, key=lambda x: x.get("confidence", 0), reverse=True)[:30],
@@ -2078,6 +2136,7 @@ class AutoTradeOrchestrator:
             )[:15],
             "stats": {
                 "total_scanned": len(all_symbols),
+                "prefilter_passed": len(dt_prefilter_symbols),
                 "ta_analyzed": len(tier1_results),
                 "tier1_passed": len(tier1_passed),
                 "tier2_deep": len(tier2_results),
@@ -2091,10 +2150,10 @@ class AutoTradeOrchestrator:
                 "watchlist": len(watchlist),
                 "rejected": len(rejected),
                 "confidence_distribution": {
-                    "elite_85_95": len([c for c in day_trade_candidates if 85 <= c.get("confidence", 0) <= 95]),
-                    "strong_75_85": len([c for c in day_trade_candidates if 75 <= c.get("confidence", 0) < 85]),
-                    "acceptable_65_75": len([c for c in day_trade_candidates if 65 <= c.get("confidence", 0) < 75]),
-                    "below_65": len([c for c in day_trade_candidates if c.get("confidence", 0) < 65]),
+                    "elite_80_plus": len([c for c in day_trade_candidates if c.get("confidence", 0) >= 80]),
+                    "strong_70_80": len([c for c in day_trade_candidates if 70 <= c.get("confidence", 0) < 80]),
+                    "acceptable_60_70": len([c for c in day_trade_candidates if 60 <= c.get("confidence", 0) < 70]),
+                    "below_60": len([c for c in day_trade_candidates if c.get("confidence", 0) < 60]),
                 },
                 "momentum_pct": round(momentum_mode_count / max(1, len(final_ta_results)) * 100, 1),
             },

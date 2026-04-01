@@ -274,6 +274,9 @@ const ExplanationCard = ({ item, expanded, onToggle, livePrices = {} }) => {
                 )}
               </div>
               <p className="text-xs text-slate-500">{isDay ? `${item.direction || ''} ${item.best_setup ? `- ${item.best_setup}` : ''}`.trim() : (signal.name || signal.company_name || "")}</p>
+              {isDay && ki.signals_aligned && (
+                <p className="text-[10px] text-cyan-400 font-mono mt-0.5">Signals: {ki.signals_aligned}</p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -373,11 +376,12 @@ const ExplanationCard = ({ item, expanded, onToggle, livePrices = {} }) => {
           {exp.exit_plan && Object.keys(exp.exit_plan).length > 0 && (
             <div className="p-3 rounded bg-slate-900/50 border border-slate-800">
               <p className="text-[10px] text-slate-400 mb-2 font-medium">EXIT PLAN</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                 {exp.exit_plan.entry && <div><p className="text-slate-500">Entry</p><p className="text-white font-mono">${exp.exit_plan.entry}</p></div>}
-                {exp.exit_plan.take_profit && <div><p className="text-slate-500">TP</p><p className="text-emerald-400 font-mono">${exp.exit_plan.take_profit}</p></div>}
-                {exp.exit_plan.stop_loss && <div><p className="text-slate-500">SL</p><p className="text-red-400 font-mono">${exp.exit_plan.stop_loss}</p></div>}
-                {exp.exit_plan.time_exit && <div><p className="text-slate-500">Time</p><p className="text-slate-300">{exp.exit_plan.time_exit}</p></div>}
+                {exp.exit_plan.partial_target && <div><p className="text-slate-500">Partial ({exp.exit_plan.partial_size || '50%'})</p><p className="text-yellow-400 font-mono">${exp.exit_plan.partial_target} (+{exp.exit_plan.partial_pct}%)</p></div>}
+                {exp.exit_plan.take_profit && <div><p className="text-slate-500">Full TP</p><p className="text-emerald-400 font-mono">${exp.exit_plan.take_profit} ({exp.exit_plan.take_profit_pct > 0 ? '+' : ''}{exp.exit_plan.take_profit_pct}%)</p></div>}
+                {exp.exit_plan.stop_loss && <div><p className="text-slate-500">Stop Loss</p><p className="text-red-400 font-mono">${exp.exit_plan.stop_loss} ({exp.exit_plan.stop_loss_pct}%)</p></div>}
+                {exp.exit_plan.rr_ratio !== undefined && <div><p className="text-slate-500">R:R</p><p className="text-white font-mono">{exp.exit_plan.rr_ratio?.toFixed(1)}:1</p></div>}
               </div>
             </div>
           )}
@@ -978,6 +982,89 @@ const AutoTrade = () => {
               </div>
             </div>
           </Card>
+          {/* Deploy Stages */}
+          {/* Strategy Overview */}
+          {opportunities?.strategy && (
+            <Card className="terminal-card p-4 border border-amber-500/20" data-testid="strategy-overview">
+              <h3 className="text-sm text-white font-medium flex items-center gap-2 mb-3"><Zap className="w-4 h-4 text-amber-400" /> {opportunities.strategy.name} Strategy</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Price Range</p>
+                  <p className="text-amber-400 font-mono font-bold">{opportunities.strategy.price_range}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Min RelVol</p>
+                  <p className="text-blue-400 font-mono font-bold">{opportunities.strategy.min_rel_vol}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Min ATR</p>
+                  <p className="text-cyan-400 font-mono font-bold">{opportunities.strategy.min_atr_pct}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Confidence</p>
+                  <p className="text-emerald-400 font-mono font-bold">{opportunities.strategy.confidence_threshold}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Position Sizing</p>
+                  <p className="text-white font-mono text-[10px]">{opportunities.strategy.position_sizing}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Max Trades/Day</p>
+                  <p className="text-white font-mono font-bold">{opportunities.strategy.max_trades_per_day}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Stop Loss</p>
+                  <p className="text-red-400 font-mono font-bold">-{opportunities.strategy.stop_loss}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Take Profit</p>
+                  <p className="text-emerald-400 font-mono font-bold">+{opportunities.strategy.take_profit}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Partial Profit</p>
+                  <p className="text-yellow-400 font-mono text-[10px]">{opportunities.strategy.partial_profit}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Max Daily Loss</p>
+                  <p className="text-red-400 font-mono font-bold">-{opportunities.strategy.max_daily_loss}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Hard Stop</p>
+                  <p className="text-red-400 font-mono font-bold">{opportunities.strategy.daily_loss_hard_stop}</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2 border border-slate-800">
+                  <p className="text-[10px] text-slate-500">Cooldown</p>
+                  <p className="text-amber-400 font-mono text-[10px]">{opportunities.strategy.cooldown}</p>
+                </div>
+              </div>
+              {/* Prefilter Pipeline Summary */}
+              <div className="mt-3 bg-slate-900/60 rounded-lg p-3 border border-slate-800">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-2">Pipeline Summary</p>
+                <div className="flex items-center gap-2 text-[10px] font-mono flex-wrap">
+                  <span className="text-slate-400">{opportunities.stats?.total_scanned || 0} scanned</span>
+                  <span className="text-slate-600">&rarr;</span>
+                  <span className={opportunities.stats?.prefilter_passed > 0 ? "text-emerald-400" : "text-red-400"}>{opportunities.stats?.prefilter_passed || 0} momentum filter</span>
+                  <span className="text-slate-600">&rarr;</span>
+                  <span className="text-blue-400">{opportunities.stats?.ta_analyzed || 0} TA analyzed</span>
+                  <span className="text-slate-600">&rarr;</span>
+                  <span className="text-cyan-400">{opportunities.stats?.setups_found || 0} setups</span>
+                  <span className="text-slate-600">&rarr;</span>
+                  <span className="text-amber-400">{opportunities.stats?.filters_passed || 0} passed</span>
+                  <span className="text-slate-600">&rarr;</span>
+                  <span className="text-emerald-400 font-bold">{opportunities.stats?.day_trade_candidates || 0} DT candidates</span>
+                </div>
+                {opportunities.pipeline_funnel?.top_rejections && Object.keys(opportunities.pipeline_funnel.top_rejections).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {Object.entries(opportunities.pipeline_funnel.top_rejections).slice(0, 6).map(([reason, count]) => (
+                      <span key={reason} className="text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 rounded px-1.5 py-0.5">
+                        {reason}: {count}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
           {/* Deploy Stages */}
           <Card className="terminal-card p-4">
             <h3 className="text-sm text-white font-medium flex items-center gap-2 mb-3"><Gauge className="w-4 h-4 text-blue-400" /> Deployment Stage</h3>
