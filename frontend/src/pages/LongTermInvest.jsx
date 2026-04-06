@@ -200,7 +200,7 @@ const CompanyCard = ({ company, onStageBuy }) => {
           </div>
         </div>
         {/* Live price */}
-        <div className="text-right shrink-0">
+        <div className="text-right shrink-0 mr-1">
           <div className="text-sm font-medium text-white">{fmtUSD(c.live_price)}</div>
           {c.trade_indicators?.change_pct != null && c.trade_indicators.change_pct !== 0 && (
             <div className={`text-[11px] font-mono ${pctColor(c.trade_indicators.change_pct)}`}>
@@ -208,6 +208,15 @@ const CompanyCard = ({ company, onStageBuy }) => {
             </div>
           )}
         </div>
+        {/* Fair value */}
+        {c.valuation?.fair_value > 0 && (
+          <div className="text-right shrink-0 mr-1 hidden sm:block">
+            <div className={`text-sm font-medium ${c.live_price > 0 && c.valuation.fair_value > c.live_price ? "text-emerald-400" : c.live_price > 0 && c.valuation.fair_value < c.live_price ? "text-red-400" : "text-slate-400"}`}>
+              {fmtUSD(c.valuation.fair_value)}
+            </div>
+            <div className="text-[9px] text-slate-500">Fair Value</div>
+          </div>
+        )}
         {/* Rating */}
         <div className="text-center shrink-0 w-14">
           <div className={`text-lg font-bold ${ratingColor(c.rating_label)}`}>{c.rating_score}</div>
@@ -320,13 +329,36 @@ const CompanyCard = ({ company, onStageBuy }) => {
           )}
 
           {/* Valuation detail */}
-          {c.valuation?.pe_ratio && (
-            <div className="flex items-center gap-4 text-xs">
-              <span className="text-slate-500">P/E</span>
-              <span className="text-white font-mono">{fmt(c.valuation.pe_ratio, 1)}</span>
-              {c.valuation.upside_potential && (
-                <><span className="text-slate-500">Upside</span>
-                <span className="text-emerald-400 font-mono">{c.valuation.upside_potential}</span></>
+          {(c.valuation?.fair_value > 0 || c.valuation?.pe_ratio) && (
+            <div className="flex items-center gap-4 text-xs flex-wrap">
+              {c.valuation?.fair_value > 0 && (
+                <>
+                  <span className="text-slate-500">Fair Value</span>
+                  <span className={`font-mono font-semibold ${c.live_price > 0 && c.valuation.fair_value > c.live_price ? "text-emerald-400" : "text-red-400"}`}>
+                    {fmtUSD(c.valuation.fair_value)}
+                  </span>
+                  <span className="text-slate-500">vs</span>
+                  <span className="font-mono text-white">{fmtUSD(c.live_price)}</span>
+                  {c.live_price > 0 && c.valuation.fair_value > 0 && (
+                    <span className={`font-mono ${c.valuation.fair_value > c.live_price ? "text-emerald-400" : "text-red-400"}`}>
+                      ({c.valuation.fair_value > c.live_price ? "+" : ""}{fmt(((c.valuation.fair_value / c.live_price) - 1) * 100, 1)}%)
+                    </span>
+                  )}
+                </>
+              )}
+              {c.valuation?.pe_ratio && (
+                <>
+                  <span className="text-slate-500">P/E</span>
+                  <span className="text-white font-mono">{fmt(c.valuation.pe_ratio, 1)}</span>
+                </>
+              )}
+              {c.valuation?.upside_potential && (
+                <>
+                  <span className="text-slate-500">Upside</span>
+                  <span className={`font-mono ${c.valuation.upside_potential?.startsWith("-") ? "text-red-400" : "text-emerald-400"}`}>
+                    {c.valuation.upside_potential}
+                  </span>
+                </>
               )}
             </div>
           )}

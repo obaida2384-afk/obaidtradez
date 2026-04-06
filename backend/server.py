@@ -5452,6 +5452,7 @@ async def get_lt_market_overview(auth: bool = Depends(verify_access)):
                 "classification": valuation.get("classification", "N/A") if isinstance(valuation, dict) else "N/A",
                 "pe_ratio": valuation.get("pe_ratio") if isinstance(valuation, dict) else None,
                 "upside_potential": i_sig.get("upside_potential", ""),
+                "fair_value": valuation.get("intrinsic_value") if isinstance(valuation, dict) else (i_sig.get("intrinsic_value")),
             },
             "quality_rating": quality.get("quality_rating", "N/A") if isinstance(quality, dict) else "N/A",
             "growth_trend": growth.get("growth_trend", "N/A") if isinstance(growth, dict) else "N/A",
