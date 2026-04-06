@@ -46,7 +46,7 @@ class AutoTradeSettings(BaseModel):
     
     # Momentum Filters
     dt_min_price: float = 5.0  # $5 minimum
-    dt_max_price: float = 50.0  # $50 maximum
+    dt_max_price: float = 100.0  # $100 maximum (expanded from $50 for quality momentum)
     dt_min_volume: int = 500000  # 500K minimum daily volume
     dt_min_rel_vol: float = 1.5  # RelVol >= 1.5x
     dt_min_atr_pct: float = 2.0  # ATR > 2% for sufficient volatility
@@ -1592,10 +1592,17 @@ class AutoTradeOrchestrator:
         prefilter_sources = {}  # symbol -> source tag
         if settings.dt_enabled:
             min_price = getattr(settings, 'dt_min_price', 5.0)
-            max_price = getattr(settings, 'dt_max_price', 50.0)
+            max_price = getattr(settings, 'dt_max_price', 100.0)
             min_volume = getattr(settings, 'dt_min_volume', 500000)
             min_rel_vol = getattr(settings, 'dt_min_rel_vol', 1.5)
             min_atr_pct = getattr(settings, 'dt_min_atr_pct', 2.0)
+
+            # === REGIME-AWARE PREFILTER RELAXATION ===
+            regime = market_regime.get("regime", "neutral")
+            if regime in ("bearish", "neutral_bearish"):
+                min_rel_vol = max(1.0, min_rel_vol - 0.3)  # 1.5 → 1.2
+                min_atr_pct = max(1.0, min_atr_pct - 0.5)  # 2.0 → 1.5
+                logger.info(f"Bearish regime: relaxed prefilter (RelVol≥{min_rel_vol}, ATR≥{min_atr_pct}%)")
             
             for symbol in all_symbols:
                 t_sig = trade_lookup.get(symbol)

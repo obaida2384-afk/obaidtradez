@@ -5306,6 +5306,187 @@ async def lt_rebalance_check(auth: bool = Depends(verify_access)):
     }
 
 
+@api_router.get("/lt-invest/market-overview")
+async def get_lt_market_overview(auth: bool = Depends(verify_access)):
+    """Unified market view merging trading signals + investment signals + live prices + ratings.
+    Labels match the Trading Signals and Investment Ideas tabs."""
+
+    # 1. Fetch all trading signals
+    trading_signals = {}
+    try:
+        cursor = db.trading_signals.find({}, {"_id": 0})
+        async for doc in cursor:
+            sym = doc.get("symbol", "")
+            if sym:
+                trading_signals[sym] = doc
+    except Exception as e:
+        logger.warning(f"LT market overview trading signals error: {e}")
+
+    # 2. Fetch all investment signals
+    investment_signals = {}
+    try:
+        cursor = db.investment_signals.find({}, {"_id": 0})
+        async for doc in cursor:
+            sym = doc.get("symbol", "")
+            if sym:
+                investment_signals[sym] = doc
+    except Exception as e:
+        logger.warning(f"LT market overview investment signals error: {e}")
+
+    # 3. Merge into unified list
+    all_symbols = set(list(trading_signals.keys()) + list(investment_signals.keys()))
+
+    # 4. Get live prices for all symbols
+    price_lookup = {}
+    sym_list = list(all_symbols)
+    try:
+        for i in range(0, len(sym_list), 50):
+            batch_syms = sym_list[i:i+50]
+            batch = await price_integrity.get_batch_validated(batch_syms)
+            for sym, record in batch.items():
+                if record and record.price > 0:
+                    price_lookup[sym] = record.price
+    except Exception as e:
+        logger.warning(f"LT market overview price lookup failure: {e}")
+
+    # 5. Get LT portfolio positions for held status
+    positions = await lt_engine.get_positions()
+    held_symbols = {p["symbol"] for p in positions}
+
+    # 6. Build unified company entries
+    companies = []
+    for sym in sorted(all_symbols):
+        t_sig = trading_signals.get(sym, {})
+        i_sig = investment_signals.get(sym, {})
+
+        live_price = price_lookup.get(sym, t_sig.get("price") or i_sig.get("price") or 0)
+
+        # Trading signal data
+        trade_signal = t_sig.get("signal", "")
+        trade_confidence = t_sig.get("confidence", 0)
+        if isinstance(trade_confidence, float) and trade_confidence <= 1:
+            trade_confidence = round(trade_confidence * 100)
+        entry_zone = t_sig.get("entry_zone", "")
+        stop_loss = t_sig.get("stop_loss", "")
+        take_profit = t_sig.get("take_profit", "")
+        risk_reward = t_sig.get("risk_reward", "")
+        trade_reasoning = t_sig.get("reasoning", "")
+        trade_category = t_sig.get("category", "")
+        trade_indicators = t_sig.get("indicators", {})
+
+        # Investment signal data
+        inv_signal = i_sig.get("signal", "")
+        inv_score = i_sig.get("overall_score", 0)
+        inv_category = i_sig.get("category", "")
+        inv_reasoning = i_sig.get("reasoning", "")
+        bull_case = i_sig.get("bull_case", [])
+        bear_case = i_sig.get("bear_case", [])
+        valuation = i_sig.get("valuation_summary", {})
+        quality = i_sig.get("business_quality", {})
+        growth = i_sig.get("growth_profile", {})
+        historical = i_sig.get("historical_performance", {})
+
+        # Performance rating (0-100, combines trading + investment scores)
+        rating_score = 0
+        rating_label = "Unrated"
+        rating_sources = []
+        if inv_score > 0:
+            rating_score = inv_score
+            rating_sources.append(f"Investment: {inv_score:.0f}")
+        if trade_confidence > 0:
+            if rating_score > 0:
+                rating_score = round((rating_score + trade_confidence) / 2)
+            else:
+                rating_score = trade_confidence
+            rating_sources.append(f"Trading: {trade_confidence}")
+
+        if rating_score >= 80:
+            rating_label = "Strong"
+        elif rating_score >= 65:
+            rating_label = "Good"
+        elif rating_score >= 50:
+            rating_label = "Average"
+        elif rating_score >= 35:
+            rating_label = "Weak"
+        elif rating_score > 0:
+            rating_label = "Poor"
+
+        # Determine primary label (matches Trading/Investments tabs)
+        primary_label = trade_category or inv_category or "Unclassified"
+        primary_signal = trade_signal or inv_signal or "N/A"
+
+        entry = {
+            "symbol": sym,
+            "name": t_sig.get("name") or i_sig.get("name", sym),
+            "sector": i_sig.get("sector", ""),
+            "industry": i_sig.get("industry", ""),
+            "live_price": round(live_price, 2) if live_price else 0,
+            "is_held": sym in held_symbols,
+            # Labels (match Trading & Investments tabs)
+            "primary_label": primary_label,
+            "primary_signal": primary_signal,
+            # Trading analysis
+            "trade_signal": trade_signal,
+            "trade_confidence": trade_confidence,
+            "trade_category": trade_category,
+            "entry_zone": entry_zone,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "risk_reward": risk_reward,
+            "trade_reasoning": trade_reasoning,
+            "trade_indicators": {
+                "change_pct": trade_indicators.get("change_pct", 0),
+                "volume_ratio": trade_indicators.get("volume_ratio", 0),
+                "atr_pct": trade_indicators.get("atr_pct", 0),
+                "structure_type": trade_indicators.get("structure_type", ""),
+                "confluence_score": trade_indicators.get("confluence_score", 0),
+            },
+            # Investment analysis
+            "inv_signal": inv_signal,
+            "inv_score": round(inv_score, 1) if inv_score else 0,
+            "inv_category": inv_category,
+            "inv_reasoning": inv_reasoning,
+            "bull_case": bull_case[:3] if bull_case else [],
+            "bear_case": bear_case[:3] if bear_case else [],
+            "valuation": {
+                "classification": valuation.get("classification", "N/A") if isinstance(valuation, dict) else "N/A",
+                "pe_ratio": valuation.get("pe_ratio") if isinstance(valuation, dict) else None,
+                "upside_potential": i_sig.get("upside_potential", ""),
+            },
+            "quality_rating": quality.get("quality_rating", "N/A") if isinstance(quality, dict) else "N/A",
+            "growth_trend": growth.get("growth_trend", "N/A") if isinstance(growth, dict) else "N/A",
+            "historical_rating": historical.get("historical_rating", "N/A") if isinstance(historical, dict) else "N/A",
+            # Combined rating
+            "rating_score": rating_score,
+            "rating_label": rating_label,
+            "rating_sources": rating_sources,
+            # Source flags
+            "has_trading_signal": bool(t_sig),
+            "has_investment_signal": bool(i_sig),
+        }
+        companies.append(entry)
+
+    # Sort by rating score descending
+    companies.sort(key=lambda x: x["rating_score"], reverse=True)
+
+    # Category counts
+    categories = {}
+    for c in companies:
+        lbl = c["primary_label"]
+        categories[lbl] = categories.get(lbl, 0) + 1
+
+    return {
+        "companies": companies,
+        "total": len(companies),
+        "categories": categories,
+        "sources": {
+            "trading_signals": len(trading_signals),
+            "investment_signals": len(investment_signals),
+            "with_live_price": len(price_lookup),
+        },
+    }
+
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():

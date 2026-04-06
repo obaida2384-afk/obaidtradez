@@ -4,18 +4,18 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   PiggyBank, TrendingUp, TrendingDown, Target, AlertTriangle,
   Loader2, DollarSign, Shield, BarChart3, RefreshCw, Plus, Minus,
-  ChevronRight, Layers, PieChart, ArrowUpRight, ArrowDownRight,
-  Briefcase, Gem, Search as SearchIcon, CheckCircle2, XCircle, Info
+  ChevronRight, ChevronDown, Layers, PieChart, ArrowUpRight, ArrowDownRight,
+  Briefcase, Gem, Search as SearchIcon, CheckCircle2, XCircle, Info,
+  Flame, Zap, Eye, Filter, Star, Activity
 } from "lucide-react";
 import { toast } from "sonner";
 
 // ---- Helpers ----
-const fmt = (n, decimals = 2) => n != null ? Number(n).toFixed(decimals) : "—";
+const fmt = (n, d = 2) => n != null ? Number(n).toFixed(d) : "—";
 const fmtUSD = (n) => n != null ? `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
 const pctColor = (v) => v > 0 ? "text-emerald-400" : v < 0 ? "text-red-400" : "text-slate-400";
 const bucketLabel = { core: "Core", quality_growth: "Quality Growth", opportunistic_value: "Opportunistic Value" };
@@ -24,6 +24,42 @@ const bucketAccent = { core: "border-blue-500/40 bg-blue-500/5", quality_growth:
 const bucketBadge = { core: "bg-blue-500/20 text-blue-400", quality_growth: "bg-emerald-500/20 text-emerald-400", opportunistic_value: "bg-amber-500/20 text-amber-400" };
 const priorityColor = { high: "text-red-400", medium: "text-amber-400", low: "text-slate-400" };
 const actionColor = { BUY: "bg-emerald-500/20 text-emerald-400", ADD: "bg-blue-500/20 text-blue-400", TRIM: "bg-amber-500/20 text-amber-400", SELL: "bg-red-500/20 text-red-400", HOLD: "bg-slate-500/20 text-slate-400", REBALANCE: "bg-purple-500/20 text-purple-400" };
+
+const signalBadge = (signal) => {
+  const map = {
+    "Strong Buy": "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+    "Buy": "bg-emerald-500/15 text-emerald-300 border-emerald-500/20",
+    "Watch": "bg-amber-500/15 text-amber-400 border-amber-500/20",
+    "Hold": "bg-slate-500/15 text-slate-400 border-slate-500/20",
+    "Sell": "bg-red-500/15 text-red-400 border-red-500/20",
+    "Strong Sell": "bg-red-500/20 text-red-400 border-red-500/30",
+  };
+  return map[signal] || "bg-slate-700 text-slate-400 border-slate-600";
+};
+
+const categoryBadge = (cat) => {
+  const map = {
+    "Hot": "bg-red-500/15 text-red-400",
+    "Momentum": "bg-orange-500/15 text-orange-400",
+    "Breakout": "bg-cyan-500/15 text-cyan-400",
+    "Bullish": "bg-emerald-500/15 text-emerald-400",
+    "Undervalued": "bg-blue-500/15 text-blue-400",
+    "Overpriced": "bg-purple-500/15 text-purple-400",
+    "Bearish": "bg-red-500/15 text-red-400",
+    "Watch": "bg-amber-500/15 text-amber-400",
+  };
+  return map[cat] || "bg-slate-700 text-slate-400";
+};
+
+const ratingColor = (label) => {
+  const map = { "Strong": "text-emerald-400", "Good": "text-blue-400", "Average": "text-amber-400", "Weak": "text-orange-400", "Poor": "text-red-400" };
+  return map[label] || "text-slate-500";
+};
+
+const ratingBg = (label) => {
+  const map = { "Strong": "bg-emerald-500", "Good": "bg-blue-500", "Average": "bg-amber-500", "Weak": "bg-orange-500", "Poor": "bg-red-500" };
+  return map[label] || "bg-slate-600";
+};
 
 // ---- Diversification Ring ----
 const DiversificationRing = ({ score }) => {
@@ -139,6 +175,177 @@ const RecommendationCard = ({ rec, onAction }) => {
   );
 };
 
+// ---- Company Card (Market Tab) ----
+const CompanyCard = ({ company, onStageBuy }) => {
+  const [expanded, setExpanded] = useState(false);
+  const c = company;
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/40 hover:border-slate-700 transition overflow-hidden"
+      data-testid={`company-card-${c.symbol}`}>
+      {/* Header row */}
+      <div className="flex items-center gap-3 p-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        {/* Rating bar */}
+        <div className="w-1.5 h-12 rounded-full shrink-0" style={{ background: c.rating_score >= 80 ? "#10b981" : c.rating_score >= 65 ? "#3b82f6" : c.rating_score >= 50 ? "#f59e0b" : "#ef4444" }} />
+        {/* Symbol & name */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-white">{c.symbol}</span>
+            <span className="text-xs text-slate-500 truncate">{c.name}</span>
+            {c.is_held && <Badge className="text-[10px] bg-emerald-500/20 text-emerald-400">HELD</Badge>}
+          </div>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            <Badge className={`text-[10px] border ${signalBadge(c.primary_signal)}`}>{c.primary_signal}</Badge>
+            <Badge className={`text-[10px] ${categoryBadge(c.primary_label)}`}>{c.primary_label}</Badge>
+            {c.sector && <span className="text-[10px] text-slate-600">{c.sector}</span>}
+          </div>
+        </div>
+        {/* Live price */}
+        <div className="text-right shrink-0">
+          <div className="text-sm font-medium text-white">{fmtUSD(c.live_price)}</div>
+          {c.trade_indicators?.change_pct != null && c.trade_indicators.change_pct !== 0 && (
+            <div className={`text-[11px] font-mono ${pctColor(c.trade_indicators.change_pct)}`}>
+              {c.trade_indicators.change_pct > 0 ? "+" : ""}{fmt(c.trade_indicators.change_pct, 1)}%
+            </div>
+          )}
+        </div>
+        {/* Rating */}
+        <div className="text-center shrink-0 w-14">
+          <div className={`text-lg font-bold ${ratingColor(c.rating_label)}`}>{c.rating_score}</div>
+          <div className={`text-[9px] uppercase font-semibold ${ratingColor(c.rating_label)}`}>{c.rating_label}</div>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-600 transition-transform shrink-0 ${expanded ? "rotate-180" : ""}`} />
+      </div>
+
+      {/* Expanded analysis */}
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-slate-800/60 pt-3 space-y-3" data-testid={`company-detail-${c.symbol}`}>
+          {/* Entry / Stop / Target */}
+          {(c.entry_zone || c.stop_loss || c.take_profit) && (
+            <div className="grid grid-cols-3 gap-2">
+              {c.entry_zone && (
+                <div className="p-2 rounded bg-slate-800/60">
+                  <span className="text-[9px] text-slate-500 uppercase block">Entry Zone</span>
+                  <span className="text-xs font-mono text-white">{c.entry_zone}</span>
+                </div>
+              )}
+              {c.stop_loss && (
+                <div className="p-2 rounded bg-red-500/5 border border-red-500/10">
+                  <span className="text-[9px] text-red-400 uppercase block">Stop Loss</span>
+                  <span className="text-xs font-mono text-red-300">${c.stop_loss}</span>
+                </div>
+              )}
+              {c.take_profit && (
+                <div className="p-2 rounded bg-emerald-500/5 border border-emerald-500/10">
+                  <span className="text-[9px] text-emerald-400 uppercase block">Take Profit</span>
+                  <span className="text-xs font-mono text-emerald-300">${c.take_profit}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Risk:Reward */}
+          {c.risk_reward && (
+            <div className="flex items-center gap-4 text-xs">
+              <span className="text-slate-500">R:R</span>
+              <span className="text-white font-mono">{c.risk_reward}</span>
+              {c.trade_indicators?.volume_ratio > 0 && (
+                <><span className="text-slate-500">Vol Ratio</span>
+                <span className="text-white font-mono">{fmt(c.trade_indicators.volume_ratio, 1)}x</span></>
+              )}
+              {c.trade_indicators?.atr_pct > 0 && (
+                <><span className="text-slate-500">ATR</span>
+                <span className="text-white font-mono">{fmt(c.trade_indicators.atr_pct, 1)}%</span></>
+              )}
+            </div>
+          )}
+
+          {/* Performance Ratings Row */}
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { label: "Quality", val: c.quality_rating },
+              { label: "Growth", val: c.growth_trend },
+              { label: "Valuation", val: c.valuation?.classification },
+              { label: "Historical", val: c.historical_rating },
+            ].map(({ label, val }) => val && val !== "N/A" ? (
+              <div key={label} className="p-1.5 rounded bg-slate-800/40 text-center">
+                <span className="text-[9px] text-slate-500 block">{label}</span>
+                <span className={`text-[11px] font-medium ${
+                  val === "Excellent" || val === "Exceptional" || val === "Accelerating" || val === "Undervalued" ? "text-emerald-400"
+                  : val === "Good" || val === "Strong" || val === "Stable" || val === "Fair Value" ? "text-blue-400"
+                  : val === "Average" || val === "Decelerating" || val === "Slightly Overvalued" || val === "Slightly Undervalued" ? "text-amber-400"
+                  : "text-red-400"
+                }`}>{val}</span>
+              </div>
+            ) : null)}
+          </div>
+
+          {/* Analysis / Reasoning */}
+          {(c.trade_reasoning || c.inv_reasoning) && (
+            <div className="space-y-1.5">
+              {c.trade_reasoning && (
+                <div className="flex items-start gap-2">
+                  <Activity className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
+                  <span className="text-xs text-slate-400">{c.trade_reasoning}</span>
+                </div>
+              )}
+              {c.inv_reasoning && (
+                <div className="flex items-start gap-2">
+                  <BarChart3 className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
+                  <span className="text-xs text-slate-400">{c.inv_reasoning}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bull / Bear */}
+          {(c.bull_case?.length > 0 || c.bear_case?.length > 0) && (
+            <div className="grid grid-cols-2 gap-2">
+              {c.bull_case?.length > 0 && (
+                <div className="p-2 rounded bg-emerald-500/5 border border-emerald-500/10">
+                  <span className="text-[9px] text-emerald-400 uppercase block mb-1">Bull Case</span>
+                  {c.bull_case.map((b, i) => (
+                    <div key={i} className="text-[11px] text-emerald-300/80 leading-snug">+ {b}</div>
+                  ))}
+                </div>
+              )}
+              {c.bear_case?.length > 0 && (
+                <div className="p-2 rounded bg-red-500/5 border border-red-500/10">
+                  <span className="text-[9px] text-red-400 uppercase block mb-1">Bear Case</span>
+                  {c.bear_case.map((b, i) => (
+                    <div key={i} className="text-[11px] text-red-300/80 leading-snug">- {b}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Valuation detail */}
+          {c.valuation?.pe_ratio && (
+            <div className="flex items-center gap-4 text-xs">
+              <span className="text-slate-500">P/E</span>
+              <span className="text-white font-mono">{fmt(c.valuation.pe_ratio, 1)}</span>
+              {c.valuation.upside_potential && (
+                <><span className="text-slate-500">Upside</span>
+                <span className="text-emerald-400 font-mono">{c.valuation.upside_potential}</span></>
+              )}
+            </div>
+          )}
+
+          {/* Stage Buy action */}
+          {!c.is_held && c.primary_signal !== "Sell" && c.primary_signal !== "Strong Sell" && (
+            <Button size="sm" variant="outline"
+              className="w-full border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+              onClick={() => onStageBuy(c)}
+              data-testid={`stage-buy-btn-${c.symbol}`}>
+              <Plus className="w-3 h-3 mr-1" />Add to Long-Term Portfolio
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ---- Thesis Modal ----
 const ThesisPanel = ({ thesis, onClose }) => {
   if (!thesis) return null;
@@ -198,14 +405,15 @@ const ThesisPanel = ({ thesis, onClose }) => {
 const StageBuyModal = ({ symbol, name, bucket, onClose, onSubmit }) => {
   const [shares, setShares] = useState("");
   const [price, setPrice] = useState("");
-  const [thesis, setThesis] = useState("");
+  const [thesisText, setThesisText] = useState("");
+  const [selectedBucket, setSelectedBucket] = useState(bucket || "quality_growth");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     if (!shares || !price) { toast.error("Enter shares and price"); return; }
     setSubmitting(true);
     try {
-      await onSubmit({ symbol, bucket, shares: parseFloat(shares), price: parseFloat(price), thesis, name });
+      await onSubmit({ symbol, bucket: selectedBucket, shares: parseFloat(shares), price: parseFloat(price), thesis: thesisText, name });
       onClose();
     } catch {
       toast.error("Failed to execute stage buy");
@@ -218,8 +426,18 @@ const StageBuyModal = ({ symbol, name, bucket, onClose, onSubmit }) => {
       <Card className="bg-slate-900 border-slate-700 max-w-sm w-full p-6" onClick={e => e.stopPropagation()}
         data-testid="stage-buy-modal">
         <h3 className="text-lg font-semibold text-white mb-1">Stage Buy — {symbol}</h3>
-        <p className="text-xs text-slate-500 mb-4">{name} · {bucketLabel[bucket]}</p>
+        <p className="text-xs text-slate-500 mb-4">{name}</p>
         <div className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-500">Bucket</label>
+            <div className="flex gap-1.5 mt-1">
+              {Object.entries(bucketLabel).map(([k, v]) => (
+                <Button key={k} size="sm" variant={selectedBucket === k ? "default" : "ghost"}
+                  className={`text-[10px] h-7 ${selectedBucket === k ? "bg-blue-600" : "text-slate-400"}`}
+                  onClick={() => setSelectedBucket(k)}>{v}</Button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="text-xs text-slate-500">Shares</label>
             <Input type="number" placeholder="e.g. 5" value={shares} onChange={e => setShares(e.target.value)}
@@ -232,7 +450,7 @@ const StageBuyModal = ({ symbol, name, bucket, onClose, onSubmit }) => {
           </div>
           <div>
             <label className="text-xs text-slate-500">Investment Thesis (optional)</label>
-            <Input placeholder="Why this stock?" value={thesis} onChange={e => setThesis(e.target.value)}
+            <Input placeholder="Why this stock?" value={thesisText} onChange={e => setThesisText(e.target.value)}
               className="bg-slate-800 border-slate-700 text-white mt-1" data-testid="stage-buy-thesis" />
           </div>
           <div className="flex gap-2 pt-2">
@@ -255,10 +473,15 @@ export default function LongTermInvest() {
   const [portfolio, setPortfolio] = useState(null);
   const [recommendations, setRecs] = useState([]);
   const [universe, setUniverse] = useState(null);
+  const [marketData, setMarketData] = useState(null);
   const [thesis, setThesis] = useState(null);
   const [stageBuy, setStageBuy] = useState(null);
-  const [tab, setTab] = useState("portfolio");
-  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("market");
+  const [marketSearch, setMarketSearch] = useState("");
+  const [marketFilter, setMarketFilter] = useState("all");
+  const [universeSearch, setUniverseSearch] = useState("");
+  const [marketPage, setMarketPage] = useState(0);
+  const MARKET_PAGE_SIZE = 30;
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -286,11 +509,19 @@ export default function LongTermInvest() {
     } catch { toast.error("Failed to load universe"); }
   }, [headers]);
 
+  const fetchMarket = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/lt-invest/market-overview`, { headers });
+      const data = await res.json();
+      setMarketData(data);
+    } catch { toast.error("Failed to load market data"); }
+  }, [headers]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchPortfolio(), fetchRecs(), fetchUniverse()]);
+    await Promise.all([fetchPortfolio(), fetchRecs(), fetchUniverse(), fetchMarket()]);
     setLoading(false);
-  }, [fetchPortfolio, fetchRecs, fetchUniverse]);
+  }, [fetchPortfolio, fetchRecs, fetchUniverse, fetchMarket]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -312,9 +543,31 @@ export default function LongTermInvest() {
     loadAll();
   };
 
+  // Market tab filtering
+  const filteredMarket = useMemo(() => {
+    if (!marketData?.companies) return [];
+    let items = marketData.companies;
+    if (marketSearch) {
+      const q = marketSearch.toLowerCase();
+      items = items.filter(c => c.symbol.toLowerCase().includes(q) || (c.name || "").toLowerCase().includes(q));
+    }
+    if (marketFilter !== "all") {
+      items = items.filter(c => c.primary_label === marketFilter);
+    }
+    return items;
+  }, [marketData, marketSearch, marketFilter]);
+
+  const marketPageItems = useMemo(() => {
+    const start = marketPage * MARKET_PAGE_SIZE;
+    return filteredMarket.slice(start, start + MARKET_PAGE_SIZE);
+  }, [filteredMarket, marketPage]);
+
+  const totalMarketPages = Math.ceil(filteredMarket.length / MARKET_PAGE_SIZE);
+
   const summary = portfolio?.summary || {};
   const positions = portfolio?.positions || [];
   const buckets = portfolio?.bucket_breakdown || {};
+  const categories = marketData?.categories || {};
 
   if (loading) return (
     <div className="flex items-center justify-center h-96" data-testid="lt-loading">
@@ -323,7 +576,7 @@ export default function LongTermInvest() {
   );
 
   return (
-    <div className="space-y-6 p-4 md:p-6 max-w-6xl mx-auto" data-testid="lt-invest-page">
+    <div className="space-y-6 p-4 md:p-6 max-w-7xl mx-auto" data-testid="lt-invest-page">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
@@ -331,7 +584,9 @@ export default function LongTermInvest() {
             <Briefcase className="w-6 h-6 text-blue-500" />
             Long-Term Portfolio
           </h1>
-          <p className="text-sm text-slate-500 mt-0.5">ETF core + Quality Growth + Opportunistic Value</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {marketData?.total || 0} companies tracked · ETF Core + Growth + Value
+          </p>
         </div>
         <Button variant="outline" size="sm" onClick={loadAll} className="border-slate-700 text-slate-300 hover:bg-slate-800"
           data-testid="lt-refresh-btn">
@@ -366,9 +621,6 @@ export default function LongTermInvest() {
               ? <Badge className="bg-amber-500/20 text-amber-400 text-xs"><AlertTriangle className="w-3 h-3 mr-1" />Needed</Badge>
               : <Badge className="bg-emerald-500/20 text-emerald-400 text-xs"><CheckCircle2 className="w-3 h-3 mr-1" />OK</Badge>}
           </div>
-          {summary.rebalance_reasons?.length > 0 && (
-            <span className="text-[10px] text-slate-500 mt-1 block">{summary.rebalance_reasons.length} issues</span>
-          )}
         </Card>
       </div>
 
@@ -380,13 +632,19 @@ export default function LongTermInvest() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={tab} onValueChange={setTab} data-testid="lt-tabs">
+      <Tabs value={tab} onValueChange={(v) => { setTab(v); setMarketPage(0); }} data-testid="lt-tabs">
         <TabsList className="bg-slate-900 border border-slate-800">
+          <TabsTrigger value="market" data-testid="lt-tab-market">
+            <Activity className="w-4 h-4 mr-1" />Market
+            {marketData?.total > 0 && (
+              <Badge className="ml-1 text-[10px] bg-slate-700 text-slate-300">{marketData.total}</Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="portfolio" data-testid="lt-tab-portfolio">
             <Briefcase className="w-4 h-4 mr-1" />Portfolio
           </TabsTrigger>
           <TabsTrigger value="recommendations" data-testid="lt-tab-recs">
-            <Target className="w-4 h-4 mr-1" />Recommendations
+            <Target className="w-4 h-4 mr-1" />Recs
             {recommendations.length > 0 && (
               <Badge className="ml-1 text-[10px] bg-blue-500/20 text-blue-400">{recommendations.length}</Badge>
             )}
@@ -396,13 +654,66 @@ export default function LongTermInvest() {
           </TabsTrigger>
         </TabsList>
 
+        {/* Market Tab — All Companies with Full Analysis */}
+        <TabsContent value="market" className="mt-4">
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
+            <div className="relative flex-1">
+              <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <Input placeholder="Search by symbol or name..." value={marketSearch}
+                onChange={e => { setMarketSearch(e.target.value); setMarketPage(0); }}
+                className="bg-slate-800 border-slate-700 text-white pl-9" data-testid="market-search" />
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              <Button size="sm" variant={marketFilter === "all" ? "default" : "ghost"}
+                className={`text-[10px] h-7 ${marketFilter === "all" ? "bg-blue-600" : "text-slate-400"}`}
+                onClick={() => { setMarketFilter("all"); setMarketPage(0); }}>
+                All ({marketData?.total || 0})
+              </Button>
+              {Object.entries(categories).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
+                <Button key={cat} size="sm" variant={marketFilter === cat ? "default" : "ghost"}
+                  className={`text-[10px] h-7 ${marketFilter === cat ? "bg-blue-600" : "text-slate-400"}`}
+                  onClick={() => { setMarketFilter(cat); setMarketPage(0); }}
+                  data-testid={`market-filter-${cat}`}>
+                  {cat} ({count})
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Stats bar */}
+          <div className="flex items-center justify-between mb-3 text-xs text-slate-500">
+            <span>{filteredMarket.length} companies · Sorted by rating</span>
+            <span>Page {marketPage + 1}/{totalMarketPages || 1}</span>
+          </div>
+
+          {/* Company cards */}
+          <div className="space-y-2" data-testid="market-companies-list">
+            {marketPageItems.map(c => (
+              <CompanyCard key={c.symbol} company={c}
+                onStageBuy={(co) => setStageBuy({ symbol: co.symbol, name: co.name, bucket: "quality_growth" })} />
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {totalMarketPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-4">
+              <Button size="sm" variant="ghost" disabled={marketPage === 0}
+                onClick={() => setMarketPage(p => p - 1)} className="text-slate-400">Previous</Button>
+              <span className="text-xs text-slate-500">{marketPage + 1} / {totalMarketPages}</span>
+              <Button size="sm" variant="ghost" disabled={marketPage >= totalMarketPages - 1}
+                onClick={() => setMarketPage(p => p + 1)} className="text-slate-400">Next</Button>
+            </div>
+          )}
+        </TabsContent>
+
         {/* Portfolio Tab */}
         <TabsContent value="portfolio" className="mt-4">
           {positions.length === 0 ? (
             <Card className="bg-slate-900/40 border-slate-800 p-8 text-center">
               <Briefcase className="w-10 h-10 text-slate-600 mx-auto mb-3" />
               <p className="text-sm text-slate-400">No long-term positions yet.</p>
-              <p className="text-xs text-slate-500 mt-1">Go to Recommendations or Universe to add your first position.</p>
+              <p className="text-xs text-slate-500 mt-1">Browse the Market tab to find and add positions.</p>
             </Card>
           ) : (
             <div className="space-y-2" data-testid="lt-positions-list">
@@ -435,7 +746,7 @@ export default function LongTermInvest() {
           <div className="mb-3">
             <div className="relative">
               <SearchIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <Input placeholder="Search universe..." value={search} onChange={e => setSearch(e.target.value)}
+              <Input placeholder="Search universe..." value={universeSearch} onChange={e => setUniverseSearch(e.target.value)}
                 className="bg-slate-800 border-slate-700 text-white pl-9" data-testid="lt-universe-search" />
             </div>
           </div>
@@ -445,8 +756,8 @@ export default function LongTermInvest() {
             opportunistic_value: { label: "Opportunistic Value", data: universe.opportunistic_value },
           }).map(([bucket, { label, data }]) => {
             const filtered = Object.entries(data || {}).filter(([sym, info]) =>
-              !search || sym.toLowerCase().includes(search.toLowerCase()) ||
-              (info.name || "").toLowerCase().includes(search.toLowerCase())
+              !universeSearch || sym.toLowerCase().includes(universeSearch.toLowerCase()) ||
+              (info.name || "").toLowerCase().includes(universeSearch.toLowerCase())
             );
             if (filtered.length === 0) return null;
             return (
