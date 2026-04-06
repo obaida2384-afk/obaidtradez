@@ -45,6 +45,7 @@ from reeval_verifier import ReEvalVerifier
 from starlette.responses import StreamingResponse
 from top_movers_scanner import TopMoversScanner
 from performance_tracker import PerformanceTracker
+from long_term_engine import LongTermInvestingEngine
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -1788,6 +1789,9 @@ investment_engine = InvestmentEngine()
 
 # Initialize enhanced investment engine
 enhanced_investment_engine = EnhancedInvestmentEngine(api_client, db)
+
+# Initialize long-term investing engine
+lt_engine = LongTermInvestingEngine(db)
 
 # ===================== NEWS & SENTIMENT =====================
 
@@ -5148,10 +5152,164 @@ async def get_ticker_mappings(auth: bool = Depends(verify_access)):
         "stats": price_integrity.get_stats(),
     }
 
+# ===================== LONG-TERM INVESTING ROUTES =====================
+
+@api_router.get("/lt-invest/portfolio")
+async def get_lt_portfolio(auth: bool = Depends(verify_access)):
+    """Get full long-term investment portfolio with live prices."""
+    price_lookup = {}
+    positions = await lt_engine.get_positions()
+    if positions:
+        symbols = [p["symbol"] for p in positions]
+        try:
+            batch = await price_integrity.get_batch_validated(symbols)
+            for sym, record in batch.items():
+                if record and record.price > 0:
+                    price_lookup[sym] = record.price
+        except Exception as e:
+            logger.warning(f"LT price lookup partial failure: {e}")
+
+    portfolio = await lt_engine.get_portfolio_summary(price_lookup)
+    return portfolio
+
+
+@api_router.get("/lt-invest/universe")
+async def get_lt_universe(auth: bool = Depends(verify_access)):
+    """Get the long-term investment universe organized by bucket."""
+    return lt_engine.get_universe()
+
+
+@api_router.get("/lt-invest/recommendations")
+async def get_lt_recommendations(auth: bool = Depends(verify_access)):
+    """Generate buy/add/trim recommendations for the LT portfolio."""
+    price_lookup = {}
+    positions = await lt_engine.get_positions()
+    if positions:
+        symbols = [p["symbol"] for p in positions]
+        try:
+            batch = await price_integrity.get_batch_validated(symbols)
+            for sym, record in batch.items():
+                if record and record.price > 0:
+                    price_lookup[sym] = record.price
+        except Exception as e:
+            logger.warning(f"LT rec price lookup failure: {e}")
+
+    investment_signals = {}
+    try:
+        cursor = db.investment_signals.find({}, {"_id": 0}).limit(300)
+        async for doc in cursor:
+            sym = doc.get("symbol", "")
+            if sym:
+                investment_signals[sym] = doc
+    except Exception:
+        pass
+
+    recs = await lt_engine.generate_recommendations(price_lookup, investment_signals)
+    return {"recommendations": recs, "count": len(recs)}
+
+
+@api_router.post("/lt-invest/stage-buy")
+async def lt_stage_buy(
+    request: dict,
+    auth: bool = Depends(verify_access)
+):
+    """Execute a staged buy (25% increment) for a long-term position."""
+    symbol = request.get("symbol", "").upper()
+    bucket = request.get("bucket", "")
+    shares = float(request.get("shares", 0))
+    price = float(request.get("price", 0))
+    thesis = request.get("thesis", "")
+    name = request.get("name", "")
+
+    if not symbol or not bucket or shares <= 0 or price <= 0:
+        return {"error": "Missing required fields: symbol, bucket, shares, price"}
+
+    from long_term_engine import BUCKET_RULES
+    if bucket not in BUCKET_RULES:
+        return {"error": f"Invalid bucket: {bucket}. Must be one of: {list(BUCKET_RULES.keys())}"}
+
+    result = await lt_engine.stage_buy(symbol, bucket, shares, price, thesis, name)
+    return {"success": True, "position": result}
+
+
+@api_router.post("/lt-invest/trim")
+async def lt_trim_position(
+    request: dict,
+    auth: bool = Depends(verify_access)
+):
+    """Trim (partial sell) a long-term position."""
+    symbol = request.get("symbol", "").upper()
+    shares = float(request.get("shares", 0))
+    price = float(request.get("price", 0))
+    reason = request.get("reason", "")
+
+    if not symbol or shares <= 0 or price <= 0:
+        return {"error": "Missing required fields: symbol, shares, price"}
+
+    result = await lt_engine.trim_position(symbol, shares, price, reason)
+    return result
+
+
+@api_router.post("/lt-invest/close")
+async def lt_close_position(
+    request: dict,
+    auth: bool = Depends(verify_access)
+):
+    """Close a long-term position entirely."""
+    symbol = request.get("symbol", "").upper()
+    reason = request.get("reason", "")
+
+    if not symbol:
+        return {"error": "Missing required field: symbol"}
+
+    await lt_engine.close_position(symbol, reason)
+    return {"success": True, "symbol": symbol, "action": "closed"}
+
+
+@api_router.get("/lt-invest/thesis/{symbol}")
+async def get_lt_thesis(symbol: str, auth: bool = Depends(verify_access)):
+    """Get thesis health for a specific long-term position."""
+    investment_signal = None
+    try:
+        investment_signal = await db.investment_signals.find_one(
+            {"symbol": symbol.upper()}, {"_id": 0}
+        )
+    except Exception:
+        pass
+
+    health = await lt_engine.get_thesis_health(symbol.upper(), investment_signal)
+    return health
+
+
+@api_router.get("/lt-invest/rebalance-check")
+async def lt_rebalance_check(auth: bool = Depends(verify_access)):
+    """Check if rebalancing is needed and return reasons."""
+    price_lookup = {}
+    positions = await lt_engine.get_positions()
+    if positions:
+        symbols = [p["symbol"] for p in positions]
+        try:
+            batch = await price_integrity.get_batch_validated(symbols)
+            for sym, record in batch.items():
+                if record and record.price > 0:
+                    price_lookup[sym] = record.price
+        except Exception as e:
+            logger.warning(f"LT rebalance price lookup failure: {e}")
+
+    portfolio = await lt_engine.get_portfolio_summary(price_lookup)
+    summary = portfolio.get("summary", {})
+    return {
+        "needs_rebalance": summary.get("needs_rebalance", False),
+        "reasons": summary.get("rebalance_reasons", []),
+        "bucket_allocation": summary.get("bucket_allocation", {}),
+        "diversification_score": summary.get("diversification_score", 0),
+    }
+
+
 # Health check (no auth required)
 @api_router.get("/")
 async def root():
-    return {"name": "ObaidTradez API", "version": "2.5.0", "status": "running"}
+    return {"name": "ObaidTradez API", "version": "3.0.0", "status": "running"}
 
 # Include router
 app.include_router(api_router)

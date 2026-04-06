@@ -888,6 +888,7 @@ class DayTradingEngine:
         direction = ta_signal.get("direction", "NONE")
         mtf = ta_signal.get("mtf_confirmation", {})
         momentum_mode = ta_signal.get("momentum_mode", False)
+        is_top_mover = ta_signal.get("is_top_mover", False)
 
         entry_reasons = list(ta_signal.get("entry_reasons", []))
         reject_reasons = []
@@ -1071,21 +1072,39 @@ class DayTradingEngine:
                                 "relvol too low", "hard reject"]
         hard_rejects = [r for r in reject_reasons if any(kw in r.lower() for kw in hard_reject_keywords)]
 
+        # === P0 RELAXED SIGNAL LOGIC ===
+        # 2 strong confirmations sufficient. Momentum/top-mover overrides for 58-61 range.
+        # All risk limits (daily loss, max trades, cooldowns) remain UNCHANGED.
+
         if hard_rejects:
             explanation.action = "REJECT"
             explanation.reject_reasons = reject_reasons
         elif signal_count >= 3:
-            # 3+ signals aligned → TRADE
+            # 3+ signals aligned → TRADE (unchanged)
             explanation.action = positive_action
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
-        elif signal_count >= 2 and (momentum_bypass_active or confidence >= 70):
-            # 2 signals + high confidence or momentum → TRADE
+        elif signal_count >= 2 and (momentum_bypass_active or confidence >= 62):
+            # 2 strong confirmations → TRADE (relaxed from 70 to 62)
             explanation.action = positive_action
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
+            if confidence < 70:
+                entry_reasons.append(f"2-signal relaxed entry (conf {confidence})")
+        elif signal_count >= 2 and is_top_mover and confidence >= 58:
+            # Top mover momentum override: 2 signals + top mover breakout
+            explanation.action = positive_action
+            explanation.entry_reasons = entry_reasons
+            explanation.reject_reasons = reject_reasons
+            entry_reasons.append(f"TOP MOVER OVERRIDE: {confidence} conf, 2 signals")
+        elif signal_count >= 2 and confidence >= 58 and rel_vol >= 2.0:
+            # Near-threshold execution: 2 signals + strong volume surge in 58-61 range
+            explanation.action = positive_action
+            explanation.entry_reasons = entry_reasons
+            explanation.reject_reasons = reject_reasons
+            entry_reasons.append(f"Near-threshold momentum: {confidence} conf, {rel_vol:.1f}x vol")
         elif signal_count >= 2:
-            # 2 signals → WATCHLIST
+            # 2 signals but below all relaxed thresholds → WATCHLIST
             explanation.action = "WATCHLIST"
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
@@ -1094,9 +1113,15 @@ class DayTradingEngine:
             explanation.action = positive_action
             explanation.entry_reasons = entry_reasons
             explanation.reject_reasons = reject_reasons
+        elif signal_count >= 1 and is_top_mover and confidence >= 62:
+            # Top mover with 1 signal and solid confidence → TRADE
+            explanation.action = positive_action
+            explanation.entry_reasons = entry_reasons
+            explanation.reject_reasons = reject_reasons
+            entry_reasons.append(f"TOP MOVER 1-SIGNAL: {confidence} conf")
         else:
             explanation.action = "REJECT"
-            explanation.reject_reasons = reject_reasons if reject_reasons else ["Insufficient signal alignment (need 3+)"]
+            explanation.reject_reasons = reject_reasons if reject_reasons else ["Insufficient signal alignment (need 2+ signals)"]
 
         # Exit plan with partial profit logic
         stop_loss = ta_signal.get("stop_loss", 0)
@@ -1668,8 +1693,14 @@ class AutoTradeOrchestrator:
                 tier1_rejected_early.append({**r, "tier1_reject": "overextended"})
                 funnel.reject("t1_overextended")
             elif r.get("direction") == "NONE" and not r.get("best_setup"):
-                tier1_rejected_early.append({**r, "tier1_reject": "no_signal"})
-                funnel.reject("t1_no_signal")
+                # Relaxed: allow top movers through — their price action speaks
+                if r["symbol"] in top_mover_symbols and indicators.get("rel_vol", 0) >= 1.5:
+                    tier1_passed.append(r)
+                    entry_reasons_note = f"T1 pass: top mover {r['symbol']} (no direction but strong movement)"
+                    logger.info(entry_reasons_note)
+                else:
+                    tier1_rejected_early.append({**r, "tier1_reject": "no_signal"})
+                    funnel.reject("t1_no_signal")
             else:
                 tier1_passed.append(r)
 
@@ -1722,6 +1753,8 @@ class AutoTradeOrchestrator:
 
         for ta_sig in final_ta_results:
             symbol = ta_sig["symbol"]
+            # Tag with top mover status for DayTradingEngine signal relaxation
+            ta_sig["is_top_mover"] = symbol in top_mover_symbols
             cached_sig = trade_lookup.get(symbol, {})
 
             news_data = None
@@ -1859,6 +1892,23 @@ class AutoTradeOrchestrator:
             if explanation.action in ("BUY", "SELL") and confidence >= dt_threshold:
                 funnel.record("confidence_passed")
                 day_trade_candidates.append(entry)
+            elif explanation.action in ("BUY", "SELL") and confidence >= (dt_threshold - 2):
+                # P0 Near-threshold pass (58-59): allow through when momentum is strong
+                has_momentum_strength = (
+                    entry.get("is_top_mover") or
+                    ta_sig.get("momentum_mode") or
+                    indicators.get("rel_vol", 0) >= 2.0
+                )
+                if has_momentum_strength:
+                    funnel.record("confidence_passed")
+                    entry["near_threshold_pass"] = True
+                    day_trade_candidates.append(entry)
+                    logger.info(f"NEAR-THRESHOLD PASS: {symbol} conf={confidence} (threshold={dt_threshold})")
+                else:
+                    diagnostics.add_near_miss(
+                        symbol, "DAY_TRADE", confidence, "NEAR_MISS",
+                        explanation.reject_reasons or [f"Confidence {confidence} near threshold {dt_threshold}"])
+                    watchlist.append(entry)
             elif explanation.action in ("BUY", "SELL") and confidence >= (dt_threshold - 10):
                 diagnostics.add_near_miss(
                     symbol, "DAY_TRADE", confidence, "NEAR_MISS",
