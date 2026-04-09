@@ -1,89 +1,58 @@
 # ObaidTradez - AI Trading & Investing Platform
 
-## Original Problem Statement
-Secure, dark-themed AI day trading platform. Aggressive momentum strategy designed to scale a $1,000 account toward $1,000/month. Dual-mode: Day Trading (momentum) + Long-Term Investing (ETF core + quality growth + value). Strict separation between engines. Full execution transparency.
+## Problem Statement
+Secure, dark-themed AI trading and investing platform protected by access code (`Bullishalmarkhan7.7`). Features dual modes: Day Trading (short-term momentum) and Long-Term Investments. Core requirements: high performance, strict risk controls, 1000+ company universe, ownership-tagged positions (manual vs bot), execution transparency.
+
+## Access
+- Access Code: `Bullishalmarkhan7.7`
 
 ## Architecture
-```
-/app/backend/
-├── ai_trading_system.py          (Orchestrator, Momentum Engine, Ownership-tagged orders, Manual protection)
-├── execution_transparency.py     (NEW: Candidate-to-execution rejection tracking)
-├── long_term_engine.py           (LT Portfolio Engine - 3 buckets, staged buying, rebalancing)
-├── auto_trade_scheduler.py       (Full transparency logging, ownership gates, 7-gate execution pipeline)
-├── enhanced_investment_engine.py  (Scoring with overvaluation penalty)
-├── live_price_engine.py          (Alpaca WS + REST fallback)
-├── price_integrity.py            (Single source of truth)
-├── top_movers_scanner.py         (DB-backed gainer/loser scanner)
-├── performance_tracker.py        (Session analytics)
-└── server.py                     (FastAPI routes, ~5800 lines)
-/app/frontend/src/pages/
-├── LongTermInvest.jsx            (Market tab: 1250 companies with ratings, Portfolio, Recs, Universe)
-├── AutoTrade.jsx                 (Analytics, Scheduler, Top Movers)
-├── Trading.jsx                   (News Sentiment)
-├── Investments.jsx               (Short-term screener)
-```
+- **Backend**: FastAPI (Python) on port 8001
+- **Frontend**: React on port 3000
+- **Database**: MongoDB
+- **APIs**: FMP, Finnhub, Alpaca (Paper), Polygon, OpenAI GPT-5.2
 
-## Execution Transparency (NEW)
-Every qualified candidate is tracked through a 7-gate pipeline:
-1. **Max trades reached** — cycle limit
-2. **Cooldown active** — post-loss cooldown
-3. **Duplicate position** — already holding symbol
-4. **Soft lock** — near daily loss limit
-5. **Risk manager** — violations (drawdown, concentration, etc.)
-6. **Position sizing** — 0 shares after calculation
-7. **Order submission** — Alpaca rejection
+## Core Systems
+1. **Day Trading Engine** — Momentum-driven TA pipeline: prefilter → Tier1 fast scan → Tier2 deep analysis → DayTradingEngine.evaluate_buy() → confidence scoring → execution
+2. **Long-Term Engine** — Fundamental scoring, 1250+ company Market Overview with fair value, ratings
+3. **Auto Trade Scheduler** — Autonomous execution loop with 7-gate pipeline, session awareness, risk controls
+4. **Execution Transparency** — Logs every candidate's journey through execution gates with rejection reasons
+5. **Position Protection** — Manual Alpaca positions tagged separately, never touched by bot
 
-Each non-executed candidate is logged with exact rejection category from 18 defined categories.
+## Key Endpoints
+- `/api/execution/diagnostics` — Real-time score breakdowns, component utilization, pipeline health
+- `/api/execution/rejection-report` — Post-session candidate rejection analysis
+- `/api/trading/scan` — Full TA pipeline scan
+- `/api/lt-invest/market-overview` — 1250+ company master list
+- `/api/scheduler/status` — Scheduler state
 
-## Ownership & Strategy Separation (NEW)
-- Every bot order tagged: `ownership=bot`, `strategy_type=day_trade|long_term`
-- `client_order_id` prefix: `OT_bot_day_trade_xxxx` or `OT_bot_long_term_xxxx`
-- Manual positions identified by absence of bot ownership record
-- Day trade engine NEVER touches long-term or manual positions
-- Long-term engine NEVER interferes with day trades
+## What's Implemented
+- Trading signals engine with FMP/Finnhub news sentiment
+- Investment engine scanning 1097+ companies via background batching
+- Auto Trade scheduler with 7-gate execution pipeline
+- Strict ownership tagging (bot vs manual) for position protection
+- Execution transparency logger
+- Long-Term Investing tab with Market Overview
+- Watchlist, Portfolio, Alerts, Chatbot, Screener, News, Backtesting pages
+- Risk controls: RISKY_STOCKS blocklist (83+), daily loss limits, cooldowns, drawdown protection
 
-## Separated Analytics (NEW)
-- **Day Trading**: Round trips from Alpaca fills, win rate, avg win/loss, best/worst, P&L
-- **Long-Term**: Active/closed positions, portfolio value, bucket allocation
-- **Manual/External**: Listed separately, marked as PROTECTED
+## Recent Fixes (April 2026)
+### P0: Day Trading Execution Bottleneck — RESOLVED
+- **Root Cause**: `ConfidenceScoringEngine.score_day_trade()` was scoring against fields that didn't exist in stored signals:
+  - `confluence_factors` → signals store `confluence_score` (field name mismatch)
+  - `rr_ratio` → missing from indicators (now calculated from stop_loss/take_profit/price)
+  - `news_sentiment` → stored as string, scorer expected dict
+- **Fix**: Recalibrated scorer with 7 components (technical_setup 25%, volume 18%, sentiment 12%, risk_reward 12%, trend_alignment 13%, volatility 10%, market_regime 10%)
+- **Result**: 102 of 168 signals now pass 61 threshold (was 0 before)
+- **Additional Fix**: Scheduler refactored to use `scan_opportunities()` for TA-enriched data instead of stale DB reads
 
-## Current Day Trading Performance
-- 3 round trips, 66.7% win rate, +$498.35 P&L
-- TSM: +$262.40 (7.74%), CRUS: +$301.05 (4.53%), CF: -$65.10 (-1.58%)
-- Account: $100,495.84 equity on $100K base
+### P1: Verifier Watcher Bug — RESOLVED
+- `MarketSessionManager._now_et()` → `_now_et()` (module-level function)
 
-## Key API Endpoints
-### Execution Transparency
-- `/api/execution/rejection-report` — Why setups weren't traded (18 categories)
-- `/api/execution/pipeline-stages` — Candidate counts per pipeline stage
+### P2: Execution Diagnostics Endpoint — IMPLEMENTED
+- `/api/execution/diagnostics` with component utilization, top signal breakdowns, pipeline health
 
-### Separated Analytics
-- `/api/analytics/by-strategy` — DT/LT/Manual separated with full metrics
-
-### Day Trading
-- `/api/trading/scan` — Full trading scan
-- `/api/auto-trade/scan` — Auto trade scan
-
-### Long-Term Investing
-- `/api/lt-invest/market-overview` — 1,250 companies with full analysis
-- `/api/lt-invest/portfolio` — LT portfolio with live prices
-- `/api/lt-invest/stage-buy` — Staged buy (POST)
-
-## Completed (April 9, 2026)
-- [x] Execution transparency engine (18 rejection categories, 7-gate pipeline logging)
-- [x] Ownership + strategy tagging on all bot orders
-- [x] Manual position protection (bot never touches unowned positions)
-- [x] Separated analytics (DT/LT/Manual with actual P&L from Alpaca fills)
-- [x] Backfilled existing trades with ownership=bot, strategy_type=day_trade
-
-## Previously Completed (April 6, 2026)
-- [x] P0: Relaxed T1 signals (2 confirmations, top mover override, near-threshold momentum)
-- [x] Scanner tuning (price cap $100, regime-aware prefilter)
-- [x] P1/P2: Long-Term Investing Engine + Frontend (3 buckets, staged buying, Market tab with 1,250 companies)
-
-## Upcoming
-- [ ] Evaluate paper trading during live market session
-- [ ] Compare stocks side-by-side (P3)
-- [ ] Modularize server.py (>5800 lines) and AutoTrade.jsx (>2300 lines) (P3)
-
-## Access: `Bullishalmarkhan7.7`
+## Backlog
+- Compare stocks side-by-side (P3)
+- Modularize server.py (>5800 lines) and AutoTrade.jsx (>2500 lines) (P3)
+- Auto-rebalance alerts for Long-Term portfolio drift (P3)
