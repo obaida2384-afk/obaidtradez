@@ -2466,12 +2466,19 @@ class AutoTradeOrchestrator:
         }
     
     async def _place_order(self, symbol: str, shares: int, side: str, 
-                           classification: str, candidate: Dict) -> Dict:
-        """Place order via Alpaca"""
+                           classification: str, candidate: Dict,
+                           ownership: str = "bot", strategy_type: str = "") -> Dict:
+        """Place order via Alpaca with ownership + strategy tagging"""
+        if not strategy_type:
+            strategy_type = "day_trade" if classification == "DAY_TRADE" else "long_term"
         try:
             from server import PaperExecutionEngine
             if symbol.upper() in PaperExecutionEngine.RISKY_STOCKS:
                 return {"success": False, "error": f"{symbol} is blocked (risky stock)"}
+            
+            # Tag order with ownership via client_order_id prefix
+            import uuid
+            order_tag = f"OT_{ownership}_{strategy_type}_{uuid.uuid4().hex[:8]}"
             
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -2482,26 +2489,32 @@ class AutoTradeOrchestrator:
                         "qty": str(shares),
                         "side": side,
                         "type": "market",
-                        "time_in_force": "day"
+                        "time_in_force": "day",
+                        "client_order_id": order_tag
                     },
                     timeout=10
                 )
                 
                 if resp.status_code in [200, 201]:
                     order = resp.json()
-                    # Log the trade
+                    # Log the trade with ownership + strategy_type
                     await self.db.auto_trade_log.insert_one({
                         "symbol": symbol,
                         "action": side.upper(),
                         "shares": shares,
                         "classification": classification,
+                        "ownership": ownership,
+                        "strategy_type": strategy_type,
                         "confidence": candidate.get("confidence", 0),
                         "explanation": candidate.get("explanation", {}),
                         "order_id": order.get("id"),
+                        "client_order_id": order_tag,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     })
-                    return {"success": True, "symbol": symbol, "shares": shares, "order_id": order.get("id")}
+                    return {"success": True, "symbol": symbol, "shares": shares, 
+                            "order_id": order.get("id"), "ownership": ownership,
+                            "strategy_type": strategy_type, "client_order_id": order_tag}
                 else:
                     return {"success": False, "error": resp.text}
         except Exception as e:
@@ -2635,7 +2648,8 @@ class AutoTradeOrchestrator:
                      f"reason={skip_reason[:80]}")
     
     async def _monitor_positions(self, settings: AutoTradeSettings, market_regime: Dict) -> List[Dict]:
-        """Check existing positions for sell signals"""
+        """Check existing positions for sell signals.
+        OWNERSHIP PROTECTION: Only manages bot-owned positions. Manual positions are never touched."""
         positions = await self.get_positions()
         sell_results = []
         
@@ -2647,20 +2661,34 @@ class AutoTradeOrchestrator:
             if not current_price or not entry_price:
                 continue
             
-            # Check trade log for classification (check both BUY and SELL actions)
+            # === OWNERSHIP VERIFICATION ===
+            # Check trade log for ownership + strategy_type
             trade_log = await self.db.auto_trade_log.find_one(
                 {"symbol": symbol, "action": {"$in": ["BUY", "SELL"]}},
                 sort=[("timestamp", -1)]
             )
             
-            classification = trade_log.get("classification", "DAY_TRADE") if trade_log else "DAY_TRADE"
+            ownership = trade_log.get("ownership", "") if trade_log else ""
+            strategy_type = trade_log.get("strategy_type", "") if trade_log else ""
+            classification = trade_log.get("classification", "") if trade_log else ""
+            
+            # PROTECT MANUAL POSITIONS: If no bot ownership record, skip entirely
+            if ownership != "bot":
+                logger.debug(f"PROTECTED: {symbol} — manual/external position, skipping auto-sell")
+                continue
+            
+            # PROTECT CROSS-STRATEGY: Day trade engine only sells day_trade positions
+            if strategy_type == "long_term":
+                logger.debug(f"PROTECTED: {symbol} — long-term position, day trade engine will not touch")
+                continue
+            
             entry_time = None
             if trade_log and trade_log.get("timestamp"):
                 ts = trade_log["timestamp"]
                 if isinstance(ts, str):
                     try:
                         entry_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    except:
+                    except Exception:
                         pass
             
             if classification == "DAY_TRADE":
@@ -2681,7 +2709,7 @@ class AutoTradeOrchestrator:
                     result = await self._place_order(symbol, qty, "sell", classification, {
                         "confidence": 0,
                         "explanation": explanation.dict()
-                    })
+                    }, ownership="bot", strategy_type=strategy_type or "day_trade")
                     if result.get("success"):
                         pnl_dollars = (current_price - entry_price) * qty
                         pnl_pct = ((current_price / entry_price) - 1) * 100 if entry_price > 0 else 0

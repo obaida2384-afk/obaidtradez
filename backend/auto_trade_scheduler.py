@@ -11,6 +11,8 @@ from datetime import datetime, timezone, timedelta, time
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
+from execution_transparency import ExecutionTransparencyTracker
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,6 +118,7 @@ class AutoTradeScheduler:
         self.orchestrator = orchestrator
         self.news_engine = news_engine
         self.session_manager = MarketSessionManager()
+        self.transparency = ExecutionTransparencyTracker(db)
 
         self._task: Optional[asyncio.Task] = None
         self._status = SchedulerStatus.OFF
@@ -524,8 +527,73 @@ class AutoTradeScheduler:
 
             executed = []
             skipped = []
+            scan_cycle_id = f"dt_{_now_utc().strftime('%Y%m%d_%H%M%S')}_{self._cycle_count}"
 
-            if can_exec and self._deployment_mode not in (DeploymentMode.SHADOW,):
+            # === TRANSPARENCY: Log every candidate's journey ===
+            if not can_exec:
+                # All candidates blocked by timing/session/mode
+                block_reason = "timing_block"
+                block_detail = f"can_exec=False, session={session.value}, mode={self._deployment_mode.value}"
+                if self._status == SchedulerStatus.PAUSED:
+                    block_reason = "scheduler_paused"
+                    block_detail = f"Scheduler paused: {self._pause_reason}"
+                elif self._status == SchedulerStatus.EMERGENCY_STOP:
+                    block_reason = "scheduler_paused"
+                    block_detail = "Emergency stop active"
+                elif session == MarketSession.CLOSED:
+                    block_reason = "session_phase"
+                    block_detail = "Market is closed"
+                elif session in (MarketSession.PRE_MARKET, MarketSession.AFTER_HOURS):
+                    block_reason = "session_phase"
+                    block_detail = f"Session={session.value}, pre/after hours execution disabled"
+
+                for c in candidates:
+                    exp = c.get("explanation", {})
+                    ki = exp.get("key_indicators", {})
+                    await self.transparency.log_candidate_journey({
+                        "symbol": c["symbol"], "engine": "day_trade",
+                        "scan_cycle_id": scan_cycle_id,
+                        "confidence": c["confidence"],
+                        "signal_count": ki.get("signal_count", 0),
+                        "direction": ki.get("direction", ""),
+                        "best_setup": ki.get("best_setup", ""),
+                        "is_top_mover": c.get("is_top_mover", False),
+                        "price": c["signal"].get("price", 0),
+                        "entry_reasons": exp.get("entry_reasons", []),
+                        "stage_reached": "timing_blocked",
+                        "outcome": "blocked",
+                        "rejection_category": block_reason,
+                        "rejection_reason": block_detail,
+                        "market_session": session.value,
+                        "market_regime": market_regime.get("regime", ""),
+                        "risk_mode": dynamic["risk_mode"],
+                        "threshold_used": threshold,
+                    })
+
+            elif self._deployment_mode in (DeploymentMode.SHADOW,):
+                for c in candidates:
+                    exp = c.get("explanation", {})
+                    ki = exp.get("key_indicators", {})
+                    await self.transparency.log_candidate_journey({
+                        "symbol": c["symbol"], "engine": "day_trade",
+                        "scan_cycle_id": scan_cycle_id,
+                        "confidence": c["confidence"],
+                        "signal_count": ki.get("signal_count", 0),
+                        "direction": ki.get("direction", ""),
+                        "best_setup": ki.get("best_setup", ""),
+                        "price": c["signal"].get("price", 0),
+                        "entry_reasons": exp.get("entry_reasons", []),
+                        "stage_reached": "not_reached",
+                        "outcome": "blocked",
+                        "rejection_category": "shadow_mode",
+                        "rejection_reason": "Shadow mode — logging only, no execution",
+                        "market_session": session.value,
+                        "market_regime": market_regime.get("regime", ""),
+                        "risk_mode": dynamic["risk_mode"],
+                        "threshold_used": threshold,
+                    })
+
+            else:
                 risk_mult = self.session_manager.get_risk_multiplier(session)
                 max_to_exec = min(3, max_pos) if session == MarketSession.CLOSING else min(5, max_pos)
 
@@ -536,65 +604,185 @@ class AutoTradeScheduler:
                 elif self._daily_loss_pct_of_max >= 60:
                     soft_lock_mult = 0.75
 
-                for c in candidates[:max_to_exec]:
+                # Check existing bot DT positions to prevent duplicates
+                existing_bot_positions = set()
+                try:
+                    pos_list = await self.orchestrator.api_client.alpaca_positions()
+                    if pos_list:
+                        for p in pos_list:
+                            existing_bot_positions.add(p.get("symbol", ""))
+                except Exception:
+                    pass
+
+                exec_count = 0
+                for i, c in enumerate(candidates):
+                    exp = c.get("explanation", {})
+                    ki = exp.get("key_indicators", {})
+                    base_entry = {
+                        "symbol": c["symbol"], "engine": "day_trade",
+                        "scan_cycle_id": scan_cycle_id,
+                        "confidence": c["confidence"],
+                        "signal_count": ki.get("signal_count", 0),
+                        "direction": ki.get("direction", ""),
+                        "best_setup": ki.get("best_setup", ""),
+                        "is_top_mover": c.get("is_top_mover", False),
+                        "price": c["signal"].get("price", 0),
+                        "entry_reasons": exp.get("entry_reasons", []),
+                        "market_session": session.value,
+                        "market_regime": market_regime.get("regime", ""),
+                        "risk_mode": dynamic["risk_mode"],
+                        "threshold_used": threshold,
+                    }
+
+                    # Gate 1: Max trades per cycle
+                    if exec_count >= max_to_exec:
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "candidate",
+                            "outcome": "blocked",
+                            "rejection_category": "max_trades_reached",
+                            "rejection_reason": f"Max {max_to_exec} trades per cycle reached (executed {exec_count})",
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": f"max_trades_reached ({max_to_exec})"})
+                        continue
+
+                    # Gate 2: Cooldown
+                    if self._cooldown_until and _now_utc() < self._cooldown_until:
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "candidate",
+                            "outcome": "blocked",
+                            "rejection_category": "cooldown_active",
+                            "rejection_reason": f"Post-loss cooldown until {self._cooldown_until.isoformat()}",
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": "cooldown_active"})
+                        continue
+
+                    # Gate 3: Duplicate position
+                    if c["symbol"] in existing_bot_positions:
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "candidate",
+                            "outcome": "rejected",
+                            "rejection_category": "duplicate_position",
+                            "rejection_reason": f"Already holding {c['symbol']}",
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": "duplicate_position"})
+                        continue
+
+                    # Gate 4: Soft lock
+                    if self._daily_loss_pct_of_max >= 95:
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "candidate",
+                            "outcome": "blocked",
+                            "rejection_category": "soft_lock_block",
+                            "rejection_reason": f"Near daily loss limit ({self._daily_loss_pct_of_max:.0f}% of max)",
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": "soft_lock_block"})
+                        continue
+
+                    # Gate 5: Risk manager
                     approved, checks = await self.orchestrator.risk_manager.check_all(
                         c["signal"], c["confidence"], "DAY_TRADE",
                         settings, account, positions, market_regime
                     )
-                    if approved:
-                        funnel.record("risk_approved")
-                        stop_pct = abs(c["signal"].get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
-                        size = PositionSizer.calculate(
-                            "DAY_TRADE", c["confidence"], settings, equity, stop_pct,
-                            c["signal"], market_regime, dynamic
-                        )
-                        shares = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier() * soft_lock_mult))
-                        if shares > 0:
-                            result = await self.orchestrator._place_order(
-                                c["symbol"], shares, "buy", "DAY_TRADE", c
-                            )
-                            if result.get("success"):
-                                executed.append(result)
-                                funnel.record("executed")
-                                # Clear post-cooldown after successful trade
-                                self._post_cooldown_active = False
-                                await self._notify("trade_opened",
-                                    f"BUY {c['symbol']} x{shares} (DT, conf={c['confidence']}, regime={dynamic['risk_mode']})", "info")
-                                # === PERFORMANCE TRACKER: Log trade entry ===
-                                tracker = getattr(self.orchestrator, 'performance_tracker', None)
-                                if tracker:
-                                    exp = c.get("explanation", {})
-                                    ki = exp.get("key_indicators", {})
-                                    exit_plan = exp.get("exit_plan", {})
-                                    await tracker.log_trade_entry({
-                                        "symbol": c["symbol"],
-                                        "classification": "DAY_TRADE",
-                                        "shares": shares,
-                                        "entry_price": c["signal"].get("price", 0),
-                                        "position_value": size.get("value", 0),
-                                        "position_pct": size.get("pct_of_equity", 0),
-                                        "confidence": c["confidence"],
-                                        "stop_loss": exit_plan.get("stop_loss", 0),
-                                        "take_profit": exit_plan.get("take_profit", 0),
-                                        "partial_target": exit_plan.get("partial_target", 0),
-                                        "entry_reasons": exp.get("entry_reasons", []),
-                                        "signal_count": ki.get("signal_count", 0),
-                                        "signals_aligned": ki.get("signals_aligned", ""),
-                                        "best_setup": ki.get("best_setup", ""),
-                                        "direction": ki.get("direction", ""),
-                                        "momentum_mode": ki.get("momentum_mode", False),
-                                        "is_top_mover": c.get("is_top_mover", False),
-                                        "source": c.get("source", "universe"),
-                                        "market_regime": market_regime,
-                                        "regime_label": market_regime.get("regime", "unknown"),
-                                        "risk_mode": dynamic["risk_mode"],
-                                        "dynamic_threshold": threshold,
-                                    })
-                            else:
-                                skipped.append({"symbol": c["symbol"], "reason": result.get("error")})
+                    if not approved:
+                        violations = [ch for ch in checks if "VIOLATION" in ch]
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "rejected_by_risk",
+                            "outcome": "rejected",
+                            "rejection_category": "risk_violation",
+                            "rejection_reason": "; ".join(violations) if violations else "Risk check failed",
+                            "rejection_details": {"risk_checks": checks},
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": "; ".join(violations)})
+                        continue
+
+                    # Gate 6: Position sizing
+                    funnel.record("risk_approved")
+                    stop_pct = abs(c["signal"].get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
+                    size = PositionSizer.calculate(
+                        "DAY_TRADE", c["confidence"], settings, equity, stop_pct,
+                        c["signal"], market_regime, dynamic
+                    )
+                    shares = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier() * soft_lock_mult))
+
+                    if shares <= 0:
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "approved",
+                            "outcome": "rejected",
+                            "rejection_category": "safety_check_failed",
+                            "rejection_reason": "Position sizing resulted in 0 shares",
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": "zero_shares"})
+                        continue
+
+                    # Gate 7: Execute — with ownership + strategy tagging
+                    result = await self.orchestrator._place_order(
+                        c["symbol"], shares, "buy", "DAY_TRADE", c,
+                        ownership="bot", strategy_type="day_trade"
+                    )
+
+                    if result.get("success"):
+                        exec_count += 1
+                        executed.append(result)
+                        existing_bot_positions.add(c["symbol"])
+                        funnel.record("executed")
+                        self._post_cooldown_active = False
+
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "executed",
+                            "outcome": "executed",
+                            "shares_executed": shares,
+                            "execution_price": c["signal"].get("price", 0),
+                        })
+
+                        await self._notify("trade_opened",
+                            f"BUY {c['symbol']} x{shares} (DT, conf={c['confidence']}, regime={dynamic['risk_mode']})", "info")
+
+                        # Performance tracker logging
+                        tracker = getattr(self.orchestrator, 'performance_tracker', None)
+                        if tracker:
+                            exit_plan = exp.get("exit_plan", {})
+                            await tracker.log_trade_entry({
+                                "symbol": c["symbol"],
+                                "classification": "DAY_TRADE",
+                                "ownership": "bot",
+                                "strategy_type": "day_trade",
+                                "shares": shares,
+                                "entry_price": c["signal"].get("price", 0),
+                                "position_value": size.get("value", 0),
+                                "position_pct": size.get("pct_of_equity", 0),
+                                "confidence": c["confidence"],
+                                "stop_loss": exit_plan.get("stop_loss", 0),
+                                "take_profit": exit_plan.get("take_profit", 0),
+                                "partial_target": exit_plan.get("partial_target", 0),
+                                "entry_reasons": exp.get("entry_reasons", []),
+                                "signal_count": ki.get("signal_count", 0),
+                                "signals_aligned": ki.get("signals_aligned", ""),
+                                "best_setup": ki.get("best_setup", ""),
+                                "direction": ki.get("direction", ""),
+                                "momentum_mode": ki.get("momentum_mode", False),
+                                "is_top_mover": c.get("is_top_mover", False),
+                                "source": c.get("source", "universe"),
+                                "market_regime": market_regime,
+                                "regime_label": market_regime.get("regime", "unknown"),
+                                "risk_mode": dynamic["risk_mode"],
+                                "dynamic_threshold": threshold,
+                            })
                     else:
-                        skipped.append({"symbol": c["symbol"], "reason": "; ".join(
-                            ch for ch in checks if "VIOLATION" in ch)})
+                        await self.transparency.log_candidate_journey({
+                            **base_entry,
+                            "stage_reached": "submitted",
+                            "outcome": "rejected",
+                            "rejection_category": "order_failed",
+                            "rejection_reason": result.get("error", "Order submission failed"),
+                        })
+                        skipped.append({"symbol": c["symbol"], "reason": result.get("error")})
 
             # Zero-trade diagnostics
             no_trade_summary = diagnostics.build_no_trade_summary(

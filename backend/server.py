@@ -46,6 +46,7 @@ from starlette.responses import StreamingResponse
 from top_movers_scanner import TopMoversScanner
 from performance_tracker import PerformanceTracker
 from long_term_engine import LongTermInvestingEngine
+from execution_transparency import ExecutionTransparencyTracker
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -1792,6 +1793,9 @@ enhanced_investment_engine = EnhancedInvestmentEngine(api_client, db)
 
 # Initialize long-term investing engine
 lt_engine = LongTermInvestingEngine(db)
+
+# Initialize execution transparency tracker
+exec_transparency = ExecutionTransparencyTracker(db)
 
 # ===================== NEWS & SENTIMENT =====================
 
@@ -5151,6 +5155,204 @@ async def get_ticker_mappings(auth: bool = Depends(verify_access)):
         "dead_tickers": price_integrity.get_dead_ticker_list(),
         "stats": price_integrity.get_stats(),
     }
+
+# ===================== EXECUTION TRANSPARENCY ROUTES =====================
+
+@api_router.get("/execution/rejection-report")
+async def get_rejection_report(
+    date: str = None, engine: str = None, limit: int = 100,
+    auth: bool = Depends(verify_access)
+):
+    """Full candidate-to-execution rejection report showing why setups weren't traded."""
+    if not date:
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    report = await exec_transparency.get_rejection_report(date, engine, limit)
+    return report
+
+
+@api_router.get("/execution/pipeline-stages")
+async def get_pipeline_stages(date: str = None, auth: bool = Depends(verify_access)):
+    """Breakdown of how many candidates reached each pipeline stage."""
+    if not date:
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    stages = await exec_transparency.get_pipeline_stages(date)
+    return stages
+
+
+# ===================== SEPARATED ANALYTICS ROUTES =====================
+
+@api_router.get("/analytics/by-strategy")
+async def get_analytics_by_strategy(auth: bool = Depends(verify_access)):
+    """Completely separated analytics: Day Trading vs Long-Term vs Manual positions."""
+
+    # --- Day Trading Analytics from Alpaca fills ---
+    dt_round_trips = []
+    try:
+        # Get all fills from Alpaca
+        async with httpx.AsyncClient() as hclient:
+            fills_resp = await hclient.get(
+                f"{api_client.alpaca_url}/v2/account/activities/FILL",
+                headers=api_client.alpaca_headers,
+                params={"limit": 200},
+                timeout=10
+            )
+            if fills_resp.status_code == 200:
+                fills = fills_resp.json()
+                # Group by order_id → then match buys to sells per symbol
+                buy_fills = {}  # symbol → [{price, qty, time}]
+                sell_fills = {}
+
+                for f in fills:
+                    sym = f.get("symbol", "")
+                    side = f.get("side", "")
+                    price = float(f.get("price", 0))
+                    qty = float(f.get("qty", 0))
+                    time = f.get("transaction_time", "")
+                    entry = {"price": price, "qty": qty, "time": time}
+
+                    if side == "buy":
+                        buy_fills.setdefault(sym, []).append(entry)
+                    elif side == "sell":
+                        sell_fills.setdefault(sym, []).append(entry)
+
+                # Build round trips (buy → sell matches)
+                for sym in sell_fills:
+                    if sym not in buy_fills:
+                        continue
+                    total_buy_qty = sum(b["qty"] for b in buy_fills[sym])
+                    total_sell_qty = sum(s["qty"] for s in sell_fills[sym])
+                    avg_buy = sum(b["price"] * b["qty"] for b in buy_fills[sym]) / total_buy_qty if total_buy_qty else 0
+                    avg_sell = sum(s["price"] * s["qty"] for s in sell_fills[sym]) / total_sell_qty if total_sell_qty else 0
+                    closed_qty = min(total_buy_qty, total_sell_qty)
+                    pnl_per_share = avg_sell - avg_buy
+                    pnl_dollars = round(pnl_per_share * closed_qty, 2)
+                    pnl_pct = round((pnl_per_share / avg_buy) * 100, 2) if avg_buy > 0 else 0
+
+                    dt_round_trips.append({
+                        "symbol": sym,
+                        "qty": closed_qty,
+                        "avg_buy": round(avg_buy, 2),
+                        "avg_sell": round(avg_sell, 2),
+                        "pnl_dollars": pnl_dollars,
+                        "pnl_pct": pnl_pct,
+                        "buy_time": buy_fills[sym][0]["time"][:19] if buy_fills[sym] else "",
+                        "sell_time": sell_fills[sym][0]["time"][:19] if sell_fills[sym] else "",
+                    })
+    except Exception as e:
+        logger.warning(f"Alpaca fills fetch failed: {e}")
+
+    dt_wins = [t for t in dt_round_trips if t["pnl_dollars"] > 0]
+    dt_losses = [t for t in dt_round_trips if t["pnl_dollars"] < 0]
+    dt_total_pnl = sum(t["pnl_dollars"] for t in dt_round_trips)
+    dt_avg_win = sum(t["pnl_pct"] for t in dt_wins) / len(dt_wins) if dt_wins else 0
+    dt_avg_loss = sum(t["pnl_pct"] for t in dt_losses) / len(dt_losses) if dt_losses else 0
+    dt_best = max(dt_round_trips, key=lambda t: t["pnl_pct"], default={})
+    dt_worst = min(dt_round_trips, key=lambda t: t["pnl_pct"], default={})
+
+    # Setup type breakdown - not available from Alpaca fills, skip for now
+
+    # --- Long-Term Analytics ---
+    lt_positions = await lt_engine.get_positions()
+    lt_closed_cursor = db.lt_portfolio.find({"status": "closed"}, {"_id": 0}).sort("closed_at", -1).limit(100)
+    lt_closed = await lt_closed_cursor.to_list(length=100)
+
+    lt_total_value = sum(p.get("current_value", 0) for p in lt_positions)
+    lt_total_cost = sum(p.get("shares", 0) * p.get("avg_cost", 0) for p in lt_positions)
+    lt_pnl = lt_total_value - lt_total_cost if lt_total_cost > 0 else 0
+
+    lt_rebalance_cursor = db.lt_rebalance_log.find({}, {"_id": 0}).sort("timestamp", -1).limit(50)
+    lt_actions = await lt_rebalance_cursor.to_list(length=50)
+
+    # --- Manual/External Positions ---
+    manual_positions = []
+    try:
+        all_positions = await api_client.alpaca_positions()
+        if all_positions:
+            bot_symbols = set()
+            cursor_bot = db.auto_trade_log.find(
+                {"ownership": "bot", "action": "BUY"},
+                {"_id": 0, "symbol": 1}
+            )
+            async for doc in cursor_bot:
+                bot_symbols.add(doc.get("symbol", ""))
+            lt_held = {p["symbol"] for p in lt_positions}
+
+            for p in all_positions:
+                sym = p.get("symbol", "")
+                if sym not in bot_symbols and sym not in lt_held:
+                    manual_positions.append({
+                        "symbol": sym,
+                        "qty": p.get("qty", 0),
+                        "avg_entry_price": float(p.get("avg_entry_price", 0)),
+                        "market_value": float(p.get("market_value", 0)),
+                        "unrealized_pl": float(p.get("unrealized_pl", 0)),
+                        "unrealized_plpc": round(float(p.get("unrealized_plpc", 0)) * 100, 2),
+                        "classification": "manual",
+                    })
+    except Exception as e:
+        logger.warning(f"Manual positions check failed: {e}")
+
+    # --- Current open DT positions ---
+    dt_open_positions = []
+    try:
+        all_pos = await api_client.alpaca_positions()
+        if all_pos:
+            for p in all_pos:
+                sym = p.get("symbol", "")
+                log = await db.auto_trade_log.find_one(
+                    {"symbol": sym, "ownership": "bot", "strategy_type": "day_trade"},
+                    sort=[("timestamp", -1)]
+                )
+                if log:
+                    dt_open_positions.append({
+                        "symbol": sym,
+                        "qty": p.get("qty", 0),
+                        "avg_entry_price": float(p.get("avg_entry_price", 0)),
+                        "market_value": float(p.get("market_value", 0)),
+                        "unrealized_pl": float(p.get("unrealized_pl", 0)),
+                        "unrealized_plpc": round(float(p.get("unrealized_plpc", 0)) * 100, 2),
+                        "confidence": log.get("confidence", 0),
+                    })
+    except Exception:
+        pass
+
+    return {
+        "day_trading": {
+            "total_trades": len(dt_round_trips) + len(dt_open_positions),
+            "closed_trades": len(dt_round_trips),
+            "open_positions": dt_open_positions,
+            "win_rate": round(len(dt_wins) / len(dt_round_trips) * 100, 1) if dt_round_trips else 0,
+            "total_pnl": round(dt_total_pnl, 2),
+            "average_win_pct": round(dt_avg_win, 2),
+            "average_loss_pct": round(dt_avg_loss, 2),
+            "best_trade": {"symbol": dt_best.get("symbol"), "pnl_pct": dt_best.get("pnl_pct", 0), "pnl_dollars": dt_best.get("pnl_dollars", 0)} if dt_best else {},
+            "worst_trade": {"symbol": dt_worst.get("symbol"), "pnl_pct": dt_worst.get("pnl_pct", 0), "pnl_dollars": dt_worst.get("pnl_dollars", 0)} if dt_worst else {},
+            "round_trips": dt_round_trips,
+        },
+        "long_term": {
+            "active_positions": len(lt_positions),
+            "closed_positions": len(lt_closed),
+            "total_value": round(lt_total_value, 2),
+            "total_cost": round(lt_total_cost, 2),
+            "unrealized_pnl": round(lt_pnl, 2),
+            "positions": [{
+                "symbol": p.get("symbol"), "bucket": p.get("bucket"),
+                "shares": p.get("shares"), "avg_cost": p.get("avg_cost"),
+                "current_value": p.get("current_value", 0),
+                "pnl_pct": p.get("pnl_pct", 0),
+                "stage": p.get("stage", 0),
+            } for p in lt_positions],
+            "recent_actions": lt_actions[:10],
+        },
+        "manual_external": {
+            "position_count": len(manual_positions),
+            "positions": manual_positions,
+            "total_value": round(sum(p.get("market_value", 0) for p in manual_positions), 2),
+            "total_unrealized_pnl": round(sum(p.get("unrealized_pl", 0) for p in manual_positions), 2),
+            "note": "These positions are PROTECTED — bot will never touch them",
+        },
+    }
+
 
 # ===================== LONG-TERM INVESTING ROUTES =====================
 
