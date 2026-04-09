@@ -526,61 +526,178 @@ class ConfidenceScoringEngine:
     """Weighted confidence scoring for trade decisions"""
     
     @staticmethod
-    def score_day_trade(signal: Dict, market_regime: Dict) -> int:
-        """Score day trade confidence (0-100)"""
+    def score_day_trade(signal: Dict, market_regime: Dict, return_breakdown: bool = False) -> int:
+        """Score day trade confidence (0-100).
+        Uses actual fields available in stored trading signals:
+        indicators: confluence_score, volume_ratio, atr_pct, change_pct,
+                    price_vs_50ma, price_vs_200ma, 52_week_position, structure_type
+        signal-level: news_sentiment (str or dict), stop_loss, take_profit, price, confidence
+        """
+        breakdown = {}
         score = 0
         indicators = signal.get("indicators", {})
         
-        # Technical setup: 30%
+        # === Technical Setup: 25% ===
         structure = indicators.get("structure_type", "")
-        confluence = indicators.get("confluence_factors", 0)
+        # Handle both field names: confluence_factors (count 0-5) or confluence_score (0-100)
+        confluence = _safe_float(indicators.get("confluence_factors", 0))
+        if confluence == 0:
+            confluence_raw = _safe_float(indicators.get("confluence_score", 0))
+            # confluence_score is 0-100, normalize to 0-5 range
+            confluence = confluence_raw / 20.0 if confluence_raw > 10 else confluence_raw
+        
+        tech_pts = 0
         if structure and confluence >= 3:
-            score += 30
+            tech_pts = 25
         elif structure and confluence >= 2:
-            score += 25
+            tech_pts = 20
         elif confluence >= 2:
-            score += 20
+            tech_pts = 17
         elif structure or confluence >= 1:
-            score += 12
+            tech_pts = 12
+        elif structure:
+            tech_pts = 8
         else:
-            score += 5
+            tech_pts = 3
+        score += tech_pts
+        breakdown["technical_setup"] = {"pts": tech_pts, "max": 25, "structure": structure, "confluence": round(confluence, 1)}
         
-        # Volume/Liquidity: 20%
-        vol_ratio = indicators.get("volume_ratio", 0)
+        # === Volume/Liquidity: 18% ===
+        vol_ratio = _safe_float(indicators.get("volume_ratio", 0)) or _safe_float(indicators.get("rel_vol", 0))
+        vol_pts = 0
         if vol_ratio >= 2.5:
-            score += 20
-        elif vol_ratio >= 1.5:
-            score += 14
+            vol_pts = 18
+        elif vol_ratio >= 1.8:
+            vol_pts = 14
+        elif vol_ratio >= 1.3:
+            vol_pts = 10
         elif vol_ratio >= 1.0:
-            score += 8
+            vol_pts = 7
+        elif vol_ratio >= 0.7:
+            vol_pts = 3
+        score += vol_pts
+        breakdown["volume"] = {"pts": vol_pts, "max": 18, "vol_ratio": round(vol_ratio, 2)}
         
-        # Sentiment/Catalyst: 20%
+        # === Sentiment/Catalyst: 12% ===
         news = signal.get("news_sentiment")
+        sent_pts = 0
+        sent_detail = "none"
         if news and isinstance(news, dict):
             sent_score = _safe_float(news.get("composite_score", 0.5), 0.5)
             if sent_score >= 0.7:
-                score += 20
+                sent_pts = 12
+                sent_detail = f"strong_positive({sent_score:.2f})"
             elif sent_score >= 0.55:
-                score += 12
+                sent_pts = 8
+                sent_detail = f"moderate_positive({sent_score:.2f})"
+            elif sent_score >= 0.4:
+                sent_pts = 5
+                sent_detail = f"neutral({sent_score:.2f})"
             else:
-                score += 4
+                sent_pts = 2
+                sent_detail = f"negative({sent_score:.2f})"
+        elif isinstance(news, str):
+            news_lower = news.lower()
+            if news_lower in ("positive", "bullish", "strong positive"):
+                sent_pts = 10
+                sent_detail = f"str:{news}"
+            elif news_lower in ("neutral",):
+                sent_pts = 5
+                sent_detail = f"str:{news}"
+            elif news_lower in ("negative", "bearish"):
+                sent_pts = 2
+                sent_detail = f"str:{news}"
+            else:
+                sent_pts = 5
+                sent_detail = f"str:{news}(default)"
         else:
-            score += 6  # Neutral if no news
+            sent_pts = 5  # No news = neutral baseline
+            sent_detail = "no_data(neutral)"
+        score += sent_pts
+        breakdown["sentiment"] = {"pts": sent_pts, "max": 12, "detail": sent_detail}
         
-        # Risk-Reward: 15%
-        rr = indicators.get("rr_ratio", 0)
+        # === Risk-Reward: 12% ===
+        rr = _safe_float(indicators.get("rr_ratio", 0))
+        if not rr:
+            # Calculate from signal-level stop_loss/take_profit/price
+            price = _safe_float(signal.get("price", 0))
+            sl = _safe_float(signal.get("stop_loss", 0))
+            tp = _safe_float(signal.get("take_profit", 0))
+            if price > 0 and sl > 0 and tp > 0:
+                risk = abs(price - sl)
+                reward = abs(tp - price)
+                rr = round(reward / risk, 2) if risk > 0 else 0
+        rr_pts = 0
         if rr >= 3:
-            score += 15
+            rr_pts = 12
         elif rr >= 2:
-            score += 11
+            rr_pts = 9
         elif rr >= 1.5:
-            score += 7
+            rr_pts = 7
+        elif rr >= 1.0:
+            rr_pts = 4
+        elif rr > 0:
+            rr_pts = 2
+        score += rr_pts
+        breakdown["risk_reward"] = {"pts": rr_pts, "max": 12, "rr_ratio": round(rr, 2)}
         
-        # Market regime: 15%
-        regime_score = market_regime.get("score", 50)
-        score += int(regime_score * 0.15)
+        # === Trend Alignment: 13% (uses price_vs_50ma, price_vs_200ma, 52_week_position) ===
+        price_vs_50 = _safe_float(indicators.get("price_vs_50ma", 0))
+        price_vs_200 = _safe_float(indicators.get("price_vs_200ma", 0))
+        week52_pos = _safe_float(indicators.get("52_week_position", 50))
         
-        return min(score, 100)
+        trend_pts = 0
+        # MA alignment: price above both MAs = strong uptrend
+        if price_vs_50 > 0 and price_vs_200 > 0:
+            trend_pts += 6
+        elif price_vs_50 > 0 or price_vs_200 > 0:
+            trend_pts += 3
+        # 52-week position: higher = more bullish
+        if week52_pos >= 70:
+            trend_pts += 5
+        elif week52_pos >= 50:
+            trend_pts += 3
+        elif week52_pos >= 30:
+            trend_pts += 1
+        # Both MAs negative = bearish, give minimal
+        trend_pts = min(trend_pts, 13)
+        score += trend_pts
+        breakdown["trend_alignment"] = {"pts": trend_pts, "max": 13, "vs_50ma": round(price_vs_50, 1), "vs_200ma": round(price_vs_200, 1), "52w_pos": round(week52_pos, 1)}
+        
+        # === Volatility/ATR: 10% (day trading needs sufficient volatility) ===
+        atr_pct = _safe_float(indicators.get("atr_pct", 0))
+        change_pct = abs(_safe_float(indicators.get("change_pct", 0)))
+        
+        atr_pts = 0
+        if atr_pct >= 4.0:
+            atr_pts = 7
+        elif atr_pct >= 2.5:
+            atr_pts = 5
+        elif atr_pct >= 1.5:
+            atr_pts = 3
+        # Intraday movement bonus
+        if change_pct >= 3.0:
+            atr_pts += 3
+        elif change_pct >= 1.5:
+            atr_pts += 2
+        elif change_pct >= 0.5:
+            atr_pts += 1
+        atr_pts = min(atr_pts, 10)
+        score += atr_pts
+        breakdown["volatility"] = {"pts": atr_pts, "max": 10, "atr_pct": round(atr_pct, 2), "change_pct": round(change_pct, 2)}
+        
+        # === Market Regime: 10% ===
+        regime_score = _safe_float(market_regime.get("score", 50))
+        regime_pts = min(int(regime_score * 0.10), 10)
+        score += regime_pts
+        breakdown["market_regime"] = {"pts": regime_pts, "max": 10, "regime_score": regime_score, "regime": market_regime.get("regime", "unknown")}
+        
+        final_score = min(score, 100)
+        breakdown["total"] = final_score
+        
+        if return_breakdown:
+            return final_score, breakdown
+        return final_score
     
     @staticmethod
     def score_long_term(signal: Dict, market_regime: Dict) -> int:

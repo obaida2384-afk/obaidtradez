@@ -16,6 +16,15 @@ from execution_transparency import ExecutionTransparencyTracker
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(val, default=0):
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 class MarketSession(str, Enum):
     PRE_MARKET = "pre_market"
     REGULAR = "regular"
@@ -409,7 +418,9 @@ class AutoTradeScheduler:
         logger.info("Scheduler loop ended")
 
     async def _run_day_trade_cycle(self, session: MarketSession):
-        """Run one day trading scan + execution cycle with enhanced safety"""
+        """Run one day trading scan + execution cycle with enhanced safety.
+        Uses the full TA pipeline (scan_opportunities) for enriched signals,
+        then applies the scheduler's 7-gate execution pipeline."""
         safe, reasons = await self._check_safety("DAY_TRADE", session)
         if not safe:
             await self._log_execution("day_trade_skipped", {"reasons": reasons})
@@ -424,10 +435,9 @@ class AutoTradeScheduler:
 
             market_regime = await self.orchestrator.regime_detector.detect()
 
-            # Use dynamic thresholds from the enhanced system
             from ai_trading_system import (
                 DynamicThresholdManager, ConfidenceScoringEngine,
-                DayTradingEngine, PositionSizer, TradeFrequencyController,
+                PositionSizer, TradeFrequencyController,
                 TradePipelineFunnel, ZeroTradeDiagnostics
             )
 
@@ -445,91 +455,80 @@ class AutoTradeScheduler:
                 await self._log_execution("day_trade_freq_limited", {"reason": freq_reason})
                 return
 
-            trading_signals = await self.db.trading_signals.find(
-                {"dead_ticker": {"$ne": True}}, {"_id": 0}
-            ).to_list(2000)
-            if not trading_signals:
-                return
+            # === CORE FIX: Use the full TA pipeline for enriched signals ===
+            # scan_opportunities runs: prefilter → Tier1 fast TA → Tier2 deep TA → DayTradingEngine.evaluate_buy
+            # This produces candidates with proper direction, structure, setup, MTF data
+            scan_result = await self.orchestrator.scan_opportunities()
 
-            from ai_trading_system import StockClassifier
-
-            account = await self.orchestrator.get_account()
-            positions = await self.orchestrator.get_positions()
-            equity = float(account.get("equity", 0))
-
-            inv_signals = await self.db.investment_signals.find(
-                {"dead_ticker": {"$ne": True}}, {"_id": 0}
-            ).to_list(2000)
-            inv_lookup = {s["symbol"]: s for s in inv_signals if s.get("symbol")}
+            # Extract TA-evaluated candidates from scan
+            # These already passed DayTradingEngine.evaluate_buy with action=BUY/SELL
+            candidates = scan_result.get("day_trades", [])
+            scan_stats = scan_result.get("stats", {})
 
             # Dynamic max positions
             max_pos = DynamicThresholdManager.get_max_positions("DAY_TRADE", settings, market_regime)
 
             funnel = TradePipelineFunnel()
             diagnostics = ZeroTradeDiagnostics()
-            funnel.record("universe_scanned", len(trading_signals))
+            funnel.record("universe_scanned", scan_stats.get("total_scanned", 0))
+            funnel.record("prefilter_passed", scan_stats.get("prefilter_passed", 0))
+            funnel.record("ta_analyzed", scan_stats.get("ta_analyzed", 0))
+            funnel.record("setup_found", scan_stats.get("setups_found", 0))
 
-            candidates = []
-            # Confidence distribution tracking
-            conf_distribution = {"above_65": 0, "above_70": 0, "above_80": 0, "blocked_by_threshold": []}
+            # Also score stored signals for confidence distribution tracking
+            conf_distribution = scan_stats.get("confidence_distribution", {
+                "elite_80_plus": 0, "strong_70_80": 0, "acceptable_60_70": 0, "below_60": 0
+            })
 
-            for sig in trading_signals:
-                symbol = sig.get("symbol", "")
-                if not symbol:
-                    continue
+            # Build score breakdowns for diagnostics from top candidates
+            score_breakdowns = []
+            for c in candidates[:15]:
+                sig = c.get("signal", {})
+                confidence = c.get("confidence", 0)
+                _, breakdown = ConfidenceScoringEngine.score_day_trade(sig, market_regime, return_breakdown=True)
+                score_breakdowns.append({
+                    "symbol": c.get("symbol", ""),
+                    "confidence": confidence,
+                    "breakdown": breakdown,
+                    "direction": c.get("direction", "NONE"),
+                    "best_setup": c.get("best_setup", "none"),
+                })
 
-                cls_result = StockClassifier.classify(sig, inv_lookup.get(symbol))
-                if cls_result["classification"] != "DAY_TRADE":
-                    continue
+            top_breakdowns = score_breakdowns[:10]
+            if top_breakdowns:
+                logger.info(f"DT SCAN CANDIDATES ({len(candidates)} from TA pipeline):")
+                for sb in top_breakdowns[:5]:
+                    bd = sb["breakdown"]
+                    logger.info(
+                        f"  {sb['symbol']}: conf={sb['confidence']} dir={sb['direction']} setup={sb['best_setup']} | "
+                        f"tech:{bd.get('technical_setup',{}).get('pts',0)} "
+                        f"vol:{bd.get('volume',{}).get('pts',0)} "
+                        f"rr:{bd.get('risk_reward',{}).get('pts',0)} "
+                        f"trend:{bd.get('trend_alignment',{}).get('pts',0)} "
+                        f"atr:{bd.get('volatility',{}).get('pts',0)}"
+                    )
 
-                confidence = ConfidenceScoringEngine.score_day_trade(sig, market_regime)
+            # Filter candidates by scheduler threshold (scan may use a different one)
+            qualified_candidates = []
+            for c in candidates:
+                confidence = c.get("confidence", 0)
+                if confidence >= threshold:
+                    qualified_candidates.append(c)
+                    funnel.record("confidence_passed")
+                elif confidence >= threshold - 5:
+                    diagnostics.add_near_miss(
+                        c.get("symbol", ""), "DAY_TRADE", confidence, "NEAR_MISS",
+                        [f"Confidence {confidence} < scheduler threshold {threshold}"])
 
-                # Track distribution
-                if confidence >= 65:
-                    conf_distribution["above_65"] += 1
-                if confidence >= 70:
-                    conf_distribution["above_70"] += 1
-                if confidence >= 80:
-                    conf_distribution["above_80"] += 1
-
-                if confidence < threshold:
-                    # Track what was blocked ONLY by threshold
-                    if confidence >= 65:
-                        conf_distribution["blocked_by_threshold"].append({
-                            "symbol": symbol,
-                            "confidence": confidence,
-                            "threshold": threshold,
-                            "would_pass_at": 65 if confidence >= 65 else None,
-                        })
-                    if confidence >= threshold - 12:
-                        diagnostics.add_near_miss(symbol, "DAY_TRADE", confidence, "NEAR_MISS",
-                            [f"Confidence {confidence} < {threshold}"])
-                    funnel.reject("below_confidence")
-                    continue
-
-                funnel.record("confidence_passed")
-                explanation = DayTradingEngine.evaluate_buy(sig, market_regime, settings)
-                explanation.confidence_score = confidence
-
-                if explanation.action == "BUY":
-                    candidates.append({
-                        "symbol": symbol,
-                        "confidence": confidence,
-                        "explanation": explanation.dict(),
-                        "signal": sig
-                    })
-                else:
-                    tags = explanation.key_indicators.get("diagnostic_tags", [])
-                    for tag in tags:
-                        funnel.reject(tag)
-
-            candidates.sort(key=lambda x: x["confidence"], reverse=True)
+            account = await self.orchestrator.get_account()
+            positions = await self.orchestrator.get_positions()
+            equity = float(account.get("equity", 0))
 
             executed = []
             skipped = []
             scan_cycle_id = f"dt_{_now_utc().strftime('%Y%m%d_%H%M%S')}_{self._cycle_count}"
 
-            # === TRANSPARENCY: Log every candidate's journey ===
+            # === TRANSPARENCY: Log every candidate's journey through execution gates ===
             if not can_exec:
                 # All candidates blocked by timing/session/mode
                 block_reason = "timing_block"
@@ -547,18 +546,18 @@ class AutoTradeScheduler:
                     block_reason = "session_phase"
                     block_detail = f"Session={session.value}, pre/after hours execution disabled"
 
-                for c in candidates:
+                for c in qualified_candidates:
                     exp = c.get("explanation", {})
                     ki = exp.get("key_indicators", {})
                     await self.transparency.log_candidate_journey({
-                        "symbol": c["symbol"], "engine": "day_trade",
+                        "symbol": c.get("symbol", ""), "engine": "day_trade",
                         "scan_cycle_id": scan_cycle_id,
-                        "confidence": c["confidence"],
+                        "confidence": c.get("confidence", 0),
                         "signal_count": ki.get("signal_count", 0),
-                        "direction": ki.get("direction", ""),
-                        "best_setup": ki.get("best_setup", ""),
+                        "direction": c.get("direction", ""),
+                        "best_setup": c.get("best_setup", ""),
                         "is_top_mover": c.get("is_top_mover", False),
-                        "price": c["signal"].get("price", 0),
+                        "price": c.get("signal", {}).get("price", 0),
                         "entry_reasons": exp.get("entry_reasons", []),
                         "stage_reached": "timing_blocked",
                         "outcome": "blocked",
@@ -571,17 +570,17 @@ class AutoTradeScheduler:
                     })
 
             elif self._deployment_mode in (DeploymentMode.SHADOW,):
-                for c in candidates:
+                for c in qualified_candidates:
                     exp = c.get("explanation", {})
                     ki = exp.get("key_indicators", {})
                     await self.transparency.log_candidate_journey({
-                        "symbol": c["symbol"], "engine": "day_trade",
+                        "symbol": c.get("symbol", ""), "engine": "day_trade",
                         "scan_cycle_id": scan_cycle_id,
-                        "confidence": c["confidence"],
+                        "confidence": c.get("confidence", 0),
                         "signal_count": ki.get("signal_count", 0),
-                        "direction": ki.get("direction", ""),
-                        "best_setup": ki.get("best_setup", ""),
-                        "price": c["signal"].get("price", 0),
+                        "direction": c.get("direction", ""),
+                        "best_setup": c.get("best_setup", ""),
+                        "price": c.get("signal", {}).get("price", 0),
                         "entry_reasons": exp.get("entry_reasons", []),
                         "stage_reached": "not_reached",
                         "outcome": "blocked",
@@ -615,24 +614,27 @@ class AutoTradeScheduler:
                     pass
 
                 exec_count = 0
-                for i, c in enumerate(candidates):
+                for i, c in enumerate(qualified_candidates):
                     exp = c.get("explanation", {})
                     ki = exp.get("key_indicators", {})
+                    sig = c.get("signal", {})
                     base_entry = {
-                        "symbol": c["symbol"], "engine": "day_trade",
+                        "symbol": c.get("symbol", ""), "engine": "day_trade",
                         "scan_cycle_id": scan_cycle_id,
-                        "confidence": c["confidence"],
+                        "confidence": c.get("confidence", 0),
                         "signal_count": ki.get("signal_count", 0),
-                        "direction": ki.get("direction", ""),
-                        "best_setup": ki.get("best_setup", ""),
+                        "direction": c.get("direction", ""),
+                        "best_setup": c.get("best_setup", ""),
                         "is_top_mover": c.get("is_top_mover", False),
-                        "price": c["signal"].get("price", 0),
+                        "price": sig.get("price", 0),
                         "entry_reasons": exp.get("entry_reasons", []),
                         "market_session": session.value,
                         "market_regime": market_regime.get("regime", ""),
                         "risk_mode": dynamic["risk_mode"],
                         "threshold_used": threshold,
                     }
+
+                    symbol = c.get("symbol", "")
 
                     # Gate 1: Max trades per cycle
                     if exec_count >= max_to_exec:
@@ -643,7 +645,7 @@ class AutoTradeScheduler:
                             "rejection_category": "max_trades_reached",
                             "rejection_reason": f"Max {max_to_exec} trades per cycle reached (executed {exec_count})",
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": f"max_trades_reached ({max_to_exec})"})
+                        skipped.append({"symbol": symbol, "reason": f"max_trades_reached ({max_to_exec})"})
                         continue
 
                     # Gate 2: Cooldown
@@ -655,19 +657,19 @@ class AutoTradeScheduler:
                             "rejection_category": "cooldown_active",
                             "rejection_reason": f"Post-loss cooldown until {self._cooldown_until.isoformat()}",
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": "cooldown_active"})
+                        skipped.append({"symbol": symbol, "reason": "cooldown_active"})
                         continue
 
                     # Gate 3: Duplicate position
-                    if c["symbol"] in existing_bot_positions:
+                    if symbol in existing_bot_positions:
                         await self.transparency.log_candidate_journey({
                             **base_entry,
                             "stage_reached": "candidate",
                             "outcome": "rejected",
                             "rejection_category": "duplicate_position",
-                            "rejection_reason": f"Already holding {c['symbol']}",
+                            "rejection_reason": f"Already holding {symbol}",
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": "duplicate_position"})
+                        skipped.append({"symbol": symbol, "reason": "duplicate_position"})
                         continue
 
                     # Gate 4: Soft lock
@@ -679,12 +681,12 @@ class AutoTradeScheduler:
                             "rejection_category": "soft_lock_block",
                             "rejection_reason": f"Near daily loss limit ({self._daily_loss_pct_of_max:.0f}% of max)",
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": "soft_lock_block"})
+                        skipped.append({"symbol": symbol, "reason": "soft_lock_block"})
                         continue
 
                     # Gate 5: Risk manager
                     approved, checks = await self.orchestrator.risk_manager.check_all(
-                        c["signal"], c["confidence"], "DAY_TRADE",
+                        sig, c.get("confidence", 0), "DAY_TRADE",
                         settings, account, positions, market_regime
                     )
                     if not approved:
@@ -697,15 +699,20 @@ class AutoTradeScheduler:
                             "rejection_reason": "; ".join(violations) if violations else "Risk check failed",
                             "rejection_details": {"risk_checks": checks},
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": "; ".join(violations)})
+                        skipped.append({"symbol": symbol, "reason": "; ".join(violations)})
                         continue
 
                     # Gate 6: Position sizing
                     funnel.record("risk_approved")
-                    stop_pct = abs(c["signal"].get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
+                    stop_pct = abs(sig.get("indicators", {}).get("atr_pct", settings.dt_stop_loss_pct))
+                    # Use TA-computed stop loss if available
+                    ta_price = sig.get("price", 0)
+                    ta_stop = sig.get("stop_loss", 0)
+                    if ta_price > 0 and ta_stop > 0:
+                        stop_pct = abs((ta_price - ta_stop) / ta_price * 100)
                     size = PositionSizer.calculate(
-                        "DAY_TRADE", c["confidence"], settings, equity, stop_pct,
-                        c["signal"], market_regime, dynamic
+                        "DAY_TRADE", c.get("confidence", 0), settings, equity, stop_pct,
+                        sig, market_regime, dynamic
                     )
                     shares = max(1, int(size["shares"] * risk_mult * self._get_size_multiplier() * soft_lock_mult))
 
@@ -717,19 +724,22 @@ class AutoTradeScheduler:
                             "rejection_category": "safety_check_failed",
                             "rejection_reason": "Position sizing resulted in 0 shares",
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": "zero_shares"})
+                        skipped.append({"symbol": symbol, "reason": "zero_shares"})
                         continue
 
                     # Gate 7: Execute — with ownership + strategy tagging
+                    # Determine order side from direction
+                    direction = c.get("direction", "LONG")
+                    order_side = "buy" if direction == "LONG" else "sell"
                     result = await self.orchestrator._place_order(
-                        c["symbol"], shares, "buy", "DAY_TRADE", c,
+                        symbol, shares, order_side, "DAY_TRADE", c,
                         ownership="bot", strategy_type="day_trade"
                     )
 
                     if result.get("success"):
                         exec_count += 1
                         executed.append(result)
-                        existing_bot_positions.add(c["symbol"])
+                        existing_bot_positions.add(symbol)
                         funnel.record("executed")
                         self._post_cooldown_active = False
 
@@ -738,35 +748,36 @@ class AutoTradeScheduler:
                             "stage_reached": "executed",
                             "outcome": "executed",
                             "shares_executed": shares,
-                            "execution_price": c["signal"].get("price", 0),
+                            "execution_price": sig.get("price", 0),
                         })
 
                         await self._notify("trade_opened",
-                            f"BUY {c['symbol']} x{shares} (DT, conf={c['confidence']}, regime={dynamic['risk_mode']})", "info")
+                            f"{'BUY' if order_side == 'buy' else 'SELL'} {symbol} x{shares} "
+                            f"(DT, conf={c.get('confidence',0)}, setup={c.get('best_setup','')}, regime={dynamic['risk_mode']})", "info")
 
                         # Performance tracker logging
                         tracker = getattr(self.orchestrator, 'performance_tracker', None)
                         if tracker:
                             exit_plan = exp.get("exit_plan", {})
                             await tracker.log_trade_entry({
-                                "symbol": c["symbol"],
+                                "symbol": symbol,
                                 "classification": "DAY_TRADE",
                                 "ownership": "bot",
                                 "strategy_type": "day_trade",
                                 "shares": shares,
-                                "entry_price": c["signal"].get("price", 0),
+                                "entry_price": sig.get("price", 0),
                                 "position_value": size.get("value", 0),
                                 "position_pct": size.get("pct_of_equity", 0),
-                                "confidence": c["confidence"],
+                                "confidence": c.get("confidence", 0),
                                 "stop_loss": exit_plan.get("stop_loss", 0),
                                 "take_profit": exit_plan.get("take_profit", 0),
                                 "partial_target": exit_plan.get("partial_target", 0),
                                 "entry_reasons": exp.get("entry_reasons", []),
                                 "signal_count": ki.get("signal_count", 0),
                                 "signals_aligned": ki.get("signals_aligned", ""),
-                                "best_setup": ki.get("best_setup", ""),
-                                "direction": ki.get("direction", ""),
-                                "momentum_mode": ki.get("momentum_mode", False),
+                                "best_setup": c.get("best_setup", ""),
+                                "direction": direction,
+                                "momentum_mode": c.get("momentum_mode", False),
                                 "is_top_mover": c.get("is_top_mover", False),
                                 "source": c.get("source", "universe"),
                                 "market_regime": market_regime,
@@ -782,43 +793,46 @@ class AutoTradeScheduler:
                             "rejection_category": "order_failed",
                             "rejection_reason": result.get("error", "Order submission failed"),
                         })
-                        skipped.append({"symbol": c["symbol"], "reason": result.get("error")})
+                        skipped.append({"symbol": symbol, "reason": result.get("error")})
 
             # Zero-trade diagnostics
             no_trade_summary = diagnostics.build_no_trade_summary(
-                len(candidates), 0, market_regime)
+                len(qualified_candidates), 0, market_regime)
 
             cycle_result = {
                 "engine": "day_trade",
                 "session": session.value,
-                "candidates": len(candidates),
+                "scan_candidates_from_ta": len(candidates),
+                "qualified_candidates": len(qualified_candidates),
                 "executed": len(executed),
                 "skipped": len(skipped),
                 "mode": self._deployment_mode.value,
                 "risk_mode": dynamic["risk_mode"],
                 "threshold_used": threshold,
-                "near_misses": len(no_trade_summary.get("near_misses", [])),
+                "near_misses": len(diagnostics._near_misses) if hasattr(diagnostics, '_near_misses') else 0,
                 "opportunity_quality": no_trade_summary.get("opportunity_quality", "LOW_OPPORTUNITY"),
                 "funnel": funnel.to_dict(),
-                "confidence_distribution": {
-                    "above_65": conf_distribution["above_65"],
-                    "above_70": conf_distribution["above_70"],
-                    "above_80": conf_distribution["above_80"],
-                    "blocked_only_by_threshold": len(conf_distribution["blocked_by_threshold"]),
-                    "blocked_details": conf_distribution["blocked_by_threshold"][:10],
-                },
+                "scan_stats": scan_stats,
+                "confidence_distribution": conf_distribution,
+                "top_score_breakdowns": [
+                    {"symbol": sb["symbol"], "confidence": sb["confidence"],
+                     "direction": sb.get("direction", ""), "best_setup": sb.get("best_setup", ""),
+                     "breakdown": sb["breakdown"]}
+                    for sb in top_breakdowns[:5]
+                ],
                 "details": {"executed": executed, "skipped": skipped, "top_candidates": [
-                    {"symbol": c["symbol"], "confidence": c["confidence"]} for c in candidates[:10]
+                    {"symbol": c.get("symbol",""), "confidence": c.get("confidence",0),
+                     "direction": c.get("direction",""), "best_setup": c.get("best_setup","")}
+                    for c in qualified_candidates[:10]
                 ]}
             }
 
-            # Log confidence distribution
-            cd = conf_distribution
+            # Log results
             logger.info(
-                f"DT CONFIDENCE DIST | >=65: {cd['above_65']} | >=70: {cd['above_70']} | "
-                f">=80: {cd['above_80']} | threshold={threshold} | "
-                f"blocked_by_threshold: {len(cd['blocked_by_threshold'])} | "
-                f"candidates_passed: {len(candidates)} | executed: {len(executed)}"
+                f"DT CYCLE | TA candidates: {len(candidates)} | qualified (>={threshold}): {len(qualified_candidates)} | "
+                f"executed: {len(executed)} | skipped: {len(skipped)} | "
+                f"conf_dist: elite={conf_distribution.get('elite_80_plus',0)} strong={conf_distribution.get('strong_70_80',0)} "
+                f"accept={conf_distribution.get('acceptable_60_70',0)}"
             )
             self._last_cycle_result = cycle_result
             self._cycle_count += 1
@@ -828,14 +842,14 @@ class AutoTradeScheduler:
             tracker = getattr(self.orchestrator, 'performance_tracker', None)
             if tracker:
                 await tracker.log_scan_cycle({
-                    "total_scanned": funnel.to_dict().get("funnel", {}).get("universe_scanned", 0),
-                    "top_movers_injected": funnel.to_dict().get("funnel", {}).get("top_mover_accepted", 0),
-                    "prefilter_passed": funnel.to_dict().get("funnel", {}).get("prefilter_passed", len(trading_signals)),
-                    "ta_analyzed": funnel.to_dict().get("funnel", {}).get("ta_analyzed", 0),
-                    "setups_found": funnel.to_dict().get("funnel", {}).get("setup_found", 0),
-                    "filters_passed": funnel.to_dict().get("funnel", {}).get("filters_passed", 0),
-                    "confidence_passed": funnel.to_dict().get("funnel", {}).get("confidence_passed", 0),
-                    "candidates": len(candidates),
+                    "total_scanned": scan_stats.get("total_scanned", 0),
+                    "top_movers_injected": scan_stats.get("top_movers_injected", 0),
+                    "prefilter_passed": scan_stats.get("prefilter_passed", 0),
+                    "ta_analyzed": scan_stats.get("ta_analyzed", 0),
+                    "setups_found": scan_stats.get("setups_found", 0),
+                    "filters_passed": scan_stats.get("filters_passed", 0),
+                    "confidence_passed": scan_stats.get("day_trade_candidates", 0),
+                    "candidates": len(qualified_candidates),
                     "executed": len(executed),
                     "top_rejections": funnel.to_dict().get("top_rejections", {}),
                     "market_regime": market_regime.get("regime", "unknown"),
@@ -849,18 +863,15 @@ class AutoTradeScheduler:
                 "timestamp": _now_utc().isoformat(),
                 "session": session.value,
                 "threshold_used": threshold,
-                "above_65": conf_distribution["above_65"],
-                "above_70": conf_distribution["above_70"],
-                "above_80": conf_distribution["above_80"],
-                "blocked_only_by_threshold": len(conf_distribution["blocked_by_threshold"]),
-                "blocked_details": conf_distribution["blocked_by_threshold"][:20],
-                "candidates_passed": len(candidates),
+                "scan_candidates": len(candidates),
+                "qualified_candidates": len(qualified_candidates),
+                "distribution": conf_distribution,
                 "executed": len(executed),
                 "regime": market_regime,
             })
 
             # Full-day zero-trade alert
-            if len(candidates) == 0 and session == MarketSession.REGULAR:
+            if len(qualified_candidates) == 0 and session == MarketSession.REGULAR:
                 await self._notify("no_trades",
                     f"No day trades: {'; '.join(no_trade_summary.get('top_reasons', [])[:3])}", "info")
 

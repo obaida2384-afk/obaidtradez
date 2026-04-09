@@ -5179,6 +5179,113 @@ async def get_pipeline_stages(date: str = None, auth: bool = Depends(verify_acce
     return stages
 
 
+@api_router.get("/execution/diagnostics")
+async def get_execution_diagnostics(auth: bool = Depends(verify_access)):
+    """Live execution diagnostics — score breakdowns, pipeline health, confidence distribution.
+    Shows exactly why signals pass or fail, with per-component scoring detail."""
+    from ai_trading_system import (
+        ConfidenceScoringEngine, StockClassifier, DynamicThresholdManager
+    )
+
+    # Get current settings and regime
+    settings = await auto_orchestrator.get_settings()
+    market_regime = await auto_orchestrator.regime_detector.detect()
+    dynamic = DynamicThresholdManager.get_thresholds(market_regime, settings)
+    threshold = dynamic["dt_threshold"]
+
+    # Get current trading signals
+    trading_signals = await db.trading_signals.find(
+        {"dead_ticker": {"$ne": True}}, {"_id": 0}
+    ).to_list(2000)
+    investment_signals = await db.investment_signals.find(
+        {"dead_ticker": {"$ne": True}}, {"_id": 0}
+    ).to_list(2000)
+    inv_lookup = {s["symbol"]: s for s in investment_signals if s.get("symbol")}
+
+    # Score every signal with full breakdown
+    all_breakdowns = []
+    classification_counts = {"DAY_TRADE": 0, "LONG_TERM": 0, "WATCHLIST": 0, "NO_TRADE": 0}
+    for sig in trading_signals:
+        symbol = sig.get("symbol", "")
+        if not symbol:
+            continue
+        cls_result = StockClassifier.classify(sig, inv_lookup.get(symbol))
+        cls = cls_result["classification"]
+        classification_counts[cls] = classification_counts.get(cls, 0) + 1
+
+        if cls != "DAY_TRADE":
+            continue
+
+        confidence, breakdown = ConfidenceScoringEngine.score_day_trade(sig, market_regime, return_breakdown=True)
+        all_breakdowns.append({
+            "symbol": symbol,
+            "confidence": confidence,
+            "passes_threshold": confidence >= threshold,
+            "gap_to_threshold": confidence - threshold,
+            "breakdown": breakdown,
+            "price": sig.get("price", 0),
+            "signal_type": sig.get("signal", ""),
+            "structure_type": sig.get("indicators", {}).get("structure_type", ""),
+        })
+
+    all_breakdowns.sort(key=lambda x: x["confidence"], reverse=True)
+
+    # Distribution analysis
+    passing = [b for b in all_breakdowns if b["passes_threshold"]]
+    near_miss = [b for b in all_breakdowns if -12 <= b["gap_to_threshold"] < 0]
+
+    # Component weakness analysis: which scoring categories are weakest across all signals?
+    component_totals = {}
+    for b in all_breakdowns:
+        bd = b["breakdown"]
+        for comp_name, comp_data in bd.items():
+            if isinstance(comp_data, dict) and "pts" in comp_data and "max" in comp_data:
+                if comp_name not in component_totals:
+                    component_totals[comp_name] = {"total_pts": 0, "total_max": 0, "count": 0}
+                component_totals[comp_name]["total_pts"] += comp_data["pts"]
+                component_totals[comp_name]["total_max"] += comp_data["max"]
+                component_totals[comp_name]["count"] += 1
+
+    component_avg = {}
+    for comp, data in component_totals.items():
+        avg_pts = data["total_pts"] / data["count"] if data["count"] > 0 else 0
+        max_pts = data["total_max"] / data["count"] if data["count"] > 0 else 0
+        pct = (avg_pts / max_pts * 100) if max_pts > 0 else 0
+        component_avg[comp] = {
+            "avg_pts": round(avg_pts, 1),
+            "max_pts": round(max_pts, 1),
+            "utilization_pct": round(pct, 1),
+        }
+
+    # Recent scheduler cycles
+    recent_cycles = await db.scheduler_execution_log.find(
+        {"action": "day_trade_cycle"}, {"_id": 0}
+    ).sort("timestamp", -1).limit(5).to_list(5)
+
+    # Recent confidence distributions
+    recent_conf = await db.confidence_distribution.find(
+        {}, {"_id": 0}
+    ).sort("timestamp", -1).limit(5).to_list(5)
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "market_regime": market_regime,
+        "dynamic_thresholds": dynamic,
+        "threshold_used": threshold,
+        "total_signals": len(trading_signals),
+        "classification_counts": classification_counts,
+        "dt_classified": len(all_breakdowns),
+        "passing_threshold": len(passing),
+        "near_miss_count": len(near_miss),
+        "top_signals": all_breakdowns[:15],
+        "near_misses": near_miss[:10],
+        "component_utilization": component_avg,
+        "recent_cycles": recent_cycles,
+        "recent_confidence_distributions": recent_conf,
+        "scheduler_status": (await auto_scheduler.get_status()),
+    }
+
+
 # ===================== SEPARATED ANALYTICS ROUTES =====================
 
 @api_router.get("/analytics/by-strategy")
@@ -5790,7 +5897,7 @@ async def _periodic_price_sync():
 
 async def _market_open_verifier_watcher():
     """Background task: auto-starts the re-eval verifier at market open, stops after 30 min."""
-    from auto_trade_scheduler import MarketSessionManager, MarketSession
+    from auto_trade_scheduler import MarketSessionManager, MarketSession, _now_et
     from reeval_verifier import VERIFICATION_WINDOW_SECONDS
     started_today = False
     last_date = None
@@ -5798,7 +5905,7 @@ async def _market_open_verifier_watcher():
     while True:
         try:
             await asyncio.sleep(30)
-            now_et = MarketSessionManager._now_et()
+            now_et = _now_et()
             session = MarketSessionManager.get_session()
             today = now_et.date()
 
