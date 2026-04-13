@@ -28,6 +28,7 @@ REJECTION_CATEGORIES = {
     "classifier_mismatch": "Stock classified for different strategy (not DAY_TRADE)",
     "safety_check_failed": "Pre-execution safety check failed",
     "soft_lock_block": "Near daily loss limit — reduced or blocked execution",
+    "reentry_cooldown": "Re-entry cooldown — symbol was recently sold, waiting before re-buying",
     "unknown": "Unknown blocker",
 }
 

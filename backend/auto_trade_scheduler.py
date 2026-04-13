@@ -672,6 +672,27 @@ class AutoTradeScheduler:
                         skipped.append({"symbol": symbol, "reason": "duplicate_position"})
                         continue
 
+                    # Gate 3.5: Re-entry cooldown (prevent buying same symbol too soon after selling)
+                    reentry_cooldown_min = self._scheduler_settings.get("reentry_cooldown_minutes", 30)
+                    if reentry_cooldown_min > 0:
+                        cutoff = _now_utc() - timedelta(minutes=reentry_cooldown_min)
+                        recent_exit = await self.db.auto_trade_log.find_one({
+                            "symbol": symbol,
+                            "confidence": 0,  # exits are logged with confidence=0
+                            "timestamp": {"$gte": cutoff.isoformat()},
+                        })
+                        if recent_exit:
+                            exit_time = recent_exit.get("timestamp", "?")
+                            await self.transparency.log_candidate_journey({
+                                **base_entry,
+                                "stage_reached": "candidate",
+                                "outcome": "blocked",
+                                "rejection_category": "reentry_cooldown",
+                                "rejection_reason": f"Sold {symbol} at {str(exit_time)[:19]}, cooldown {reentry_cooldown_min}min",
+                            })
+                            skipped.append({"symbol": symbol, "reason": f"reentry_cooldown ({reentry_cooldown_min}min)"})
+                            continue
+
                     # Gate 4: Soft lock
                     if self._daily_loss_pct_of_max >= 95:
                         await self.transparency.log_candidate_journey({

@@ -2509,9 +2509,85 @@ async def get_account(auth: bool = Depends(verify_access)):
 
 @api_router.get("/positions")
 async def get_positions(auth: bool = Depends(verify_access)):
-    """Get current positions"""
+    """Get current positions enriched with ownership/strategy labels."""
     positions = await api_client.alpaca_positions()
-    return positions or []
+    if not positions:
+        return []
+
+    # Enrich with ownership + strategy_type from trade log
+    symbols = [p.get("symbol", "") for p in positions if p.get("symbol")]
+    ownership_map = {}
+    if symbols:
+        # Get the most recent trade log entry for each symbol to determine ownership
+        pipeline = [
+            {"$match": {"symbol": {"$in": symbols}}},
+            {"$sort": {"timestamp": -1}},
+            {"$group": {
+                "_id": "$symbol",
+                "ownership": {"$first": "$ownership"},
+                "strategy_type": {"$first": "$strategy_type"},
+                "confidence": {"$first": "$confidence"},
+                "best_setup": {"$first": "$best_setup"},
+                "direction": {"$first": "$direction"},
+                "entry_reasons": {"$first": "$entry_reasons"},
+            }}
+        ]
+        try:
+            cursor = db.auto_trade_log.aggregate(pipeline)
+            async for doc in cursor:
+                sym = doc["_id"]
+                ownership_map[sym] = {
+                    "ownership": doc.get("ownership", "unknown"),
+                    "strategy_type": doc.get("strategy_type", "unknown"),
+                    "confidence": doc.get("confidence", 0),
+                    "best_setup": doc.get("best_setup", ""),
+                    "direction": doc.get("direction", ""),
+                    "entry_reasons": doc.get("entry_reasons", []),
+                }
+        except Exception:
+            pass
+
+        # Also check LT portfolio for long-term positions
+        lt_positions = await db.lt_portfolio.find(
+            {"symbol": {"$in": symbols}, "status": {"$ne": "closed"}},
+            {"_id": 0, "symbol": 1, "bucket": 1, "stage": 1}
+        ).to_list(100)
+        for ltp in lt_positions:
+            sym = ltp["symbol"]
+            if sym not in ownership_map or ownership_map[sym].get("ownership") == "unknown":
+                ownership_map[sym] = {
+                    "ownership": "bot",
+                    "strategy_type": "long_term",
+                    "bucket": ltp.get("bucket", ""),
+                    "stage": ltp.get("stage", 0),
+                }
+
+    # Merge into positions
+    for p in positions:
+        sym = p.get("symbol", "")
+        meta = ownership_map.get(sym, {})
+        p["ownership"] = meta.get("ownership", "manual")
+        p["strategy_type"] = meta.get("strategy_type", "manual")
+        p["confidence"] = meta.get("confidence", 0)
+        p["best_setup"] = meta.get("best_setup", "")
+        p["entry_reasons"] = meta.get("entry_reasons", [])
+        # Compose display label
+        own = p["ownership"]
+        strat = p["strategy_type"]
+        if own == "bot" and strat == "day_trade":
+            p["position_label"] = "Day Trade (Bot)"
+            p["label_color"] = "amber"
+        elif own == "bot" and strat == "long_term":
+            p["position_label"] = "Long-Term (Bot)"
+            p["label_color"] = "blue"
+        elif own == "manual" or strat == "manual":
+            p["position_label"] = "Manual / Protected"
+            p["label_color"] = "emerald"
+        else:
+            p["position_label"] = "Unknown"
+            p["label_color"] = "slate"
+
+    return positions
 
 @api_router.get("/orders")
 async def get_orders(status: str = "open", auth: bool = Depends(verify_access)):
@@ -4459,8 +4535,42 @@ async def get_auto_trade_history(limit: int = Query(default=50, ge=1, le=200), a
 
 @api_router.get("/auto-trade/trade-log")
 async def get_trade_log(limit: int = Query(default=50, ge=1, le=200), auth: bool = Depends(verify_access)):
-    """Get comprehensive trade log with full details (direction, SL, TP, P&L, setup, MTF status)"""
-    return await auto_orchestrator.get_trade_log(limit)
+    """Get comprehensive trade log from auto_trade_log collection.
+    Includes entry reasons, confidence, setup, direction, P&L, ownership, strategy_type."""
+    from ai_trading_system import ConfidenceScoringEngine
+
+    trades = await db.auto_trade_log.find(
+        {}, {"_id": 0}
+    ).sort("timestamp", -1).limit(limit).to_list(limit)
+
+    # Enrich each trade with confidence breakdown if it has signal data
+    for t in trades:
+        confidence = t.get("confidence", 0)
+        if confidence > 0:
+            # Try to get signal from explanation
+            sig = t.get("explanation", {}).get("signal", {})
+            if not sig:
+                sig = t.get("signal_data", {})
+            if sig:
+                try:
+                    _, breakdown = ConfidenceScoringEngine.score_day_trade(
+                        sig, {"regime": "neutral", "score": 50}, return_breakdown=True
+                    )
+                    t["confidence_breakdown"] = breakdown
+                except Exception:
+                    pass
+
+        # Extract key fields from explanation for easy frontend access
+        exp = t.get("explanation", {})
+        if isinstance(exp, dict):
+            t["entry_reasons"] = exp.get("entry_reasons", [])
+            t["exit_plan"] = exp.get("exit_plan", {})
+            ki = exp.get("key_indicators", {})
+            t["best_setup"] = ki.get("best_setup", t.get("best_setup", ""))
+            t["direction"] = ki.get("direction", t.get("direction", ""))
+            t["signal_count"] = ki.get("signal_count", 0)
+
+    return {"trades": trades, "total": len(trades)}
 
 
 @api_router.get("/auto-trade/analytics")

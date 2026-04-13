@@ -804,6 +804,16 @@ const Portfolio = () => {
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-white">{pos.symbol}</span>
                         {livePrice && <LiveIndicator active={true} />}
+                        {pos.position_label && (
+                          <Badge variant="outline" className={`text-[10px] ${
+                            pos.label_color === "amber" ? "border-amber-500/30 text-amber-400" :
+                            pos.label_color === "blue" ? "border-blue-500/30 text-blue-400" :
+                            pos.label_color === "emerald" ? "border-emerald-500/30 text-emerald-400" :
+                            "border-slate-600 text-slate-400"
+                          }`} data-testid={`position-label-${pos.symbol}`}>
+                            {pos.position_label}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500">
                         {qty.toFixed(2)} shares @ ${entryPrice.toFixed(2)}

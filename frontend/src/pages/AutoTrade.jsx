@@ -678,7 +678,26 @@ const AutoTrade = () => {
   const fetchTradeLog = useCallback(async () => {
     try {
       const resp = await fetch(`${API}/auto-trade/trade-log?limit=50`, { headers });
-      if (resp.ok) setTradeLog(await resp.json());
+      if (resp.ok) {
+        const data = await resp.json();
+        setTradeLog(data.trades || data || []);
+      }
+    } catch (e) { console.error(e); }
+  }, [token]);
+
+  const [rejectionReport, setRejectionReport] = useState(null);
+  const fetchRejectionReport = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API}/execution/rejection-report`, { headers });
+      if (resp.ok) setRejectionReport(await resp.json());
+    } catch (e) { console.error(e); }
+  }, [token]);
+
+  const [executionDiag, setExecutionDiag] = useState(null);
+  const fetchExecutionDiag = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API}/execution/diagnostics`, { headers });
+      if (resp.ok) setExecutionDiag(await resp.json());
     } catch (e) { console.error(e); }
   }, [token]);
 
@@ -917,6 +936,7 @@ const AutoTrade = () => {
         if (v === "history") fetchHistory();
         if (v === "trade-log") fetchTradeLog();
         if (v === "analytics") fetchAnalytics();
+        if (v === "diagnostics") { fetchOpportunities(); fetchRejectionReport(); fetchExecutionDiag(); }
       }}>
         <TabsList className="w-full justify-start bg-slate-900 border border-slate-800 p-1 h-auto flex-wrap">
           <TabsTrigger value="scheduler" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400"><Timer className="w-4 h-4 mr-1" /> Scheduler</TabsTrigger>
@@ -1186,6 +1206,9 @@ const AutoTrade = () => {
                 <Slider value={[schSettings.max_consecutive_losses || 2]} min={1} max={10} step={1} onValueChange={([v]) => updateSchedulerSetting("max_consecutive_losses", v)} /></div>
               <div><label className="text-xs text-slate-500 block mb-1">Cooldown: {schSettings.cooldown_minutes || 30} min</label>
                 <Slider value={[schSettings.cooldown_minutes || 30]} min={5} max={120} step={5} onValueChange={([v]) => updateSchedulerSetting("cooldown_minutes", v)} /></div>
+              <div><label className="text-xs text-slate-500 block mb-1">Re-Entry Cooldown: {schSettings.reentry_cooldown_minutes || 30} min</label>
+                <Slider value={[schSettings.reentry_cooldown_minutes || 30]} min={0} max={120} step={5} onValueChange={([v]) => updateSchedulerSetting("reentry_cooldown_minutes", v)} />
+                <p className="text-[9px] text-slate-600 mt-1">Prevents re-buying a symbol within N minutes of selling it. 0 = disabled.</p></div>
             </div>
           </Card>
           <Card className="terminal-card p-4">
@@ -1341,6 +1364,159 @@ const AutoTrade = () => {
               </div>
             </Card>
           )}
+
+          {/* === WHY DIDN'T IT TRADE? — Execution Gate Breakdown === */}
+          {executionDiag && (
+            <Card className="terminal-card p-4" data-testid="execution-gate-breakdown">
+              <h3 className="text-xs text-red-400 mb-3 flex items-center gap-2"><Shield className="w-4 h-4" /> Execution Gate Breakdown (Live)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                <div className="text-center p-2 rounded bg-slate-800 border border-slate-700">
+                  <p className="text-slate-500">Signals Scanned</p>
+                  <p className="text-white font-mono text-xl">{executionDiag.total_signals || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-amber-400">DT Classified</p>
+                  <p className="text-amber-400 font-mono text-xl">{executionDiag.dt_classified || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                  <p className="text-emerald-400">Pass Threshold ({executionDiag.threshold_used})</p>
+                  <p className="text-emerald-400 font-mono text-xl">{executionDiag.passing_threshold || 0}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-blue-500/10 border border-blue-500/20">
+                  <p className="text-blue-400">Near Misses</p>
+                  <p className="text-blue-400 font-mono text-xl">{executionDiag.near_miss_count || 0}</p>
+                </div>
+              </div>
+
+              {/* Component Utilization */}
+              {executionDiag.component_utilization && (
+                <div className="mb-3">
+                  <p className="text-[10px] text-slate-500 mb-2">Component Scoring Utilization</p>
+                  <div className="space-y-1">
+                    {Object.entries(executionDiag.component_utilization).map(([comp, data]) => (
+                      <div key={comp} className="flex items-center gap-2 text-[11px]">
+                        <span className="text-slate-400 w-28 truncate">{comp.replace(/_/g, " ")}</span>
+                        <div className="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${data.utilization_pct >= 70 ? "bg-emerald-500" : data.utilization_pct >= 40 ? "bg-amber-500" : "bg-red-500"}`}
+                            style={{ width: `${Math.min(data.utilization_pct, 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-slate-500 font-mono w-20 text-right">{data.avg_pts}/{data.max_pts} ({data.utilization_pct}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* === TOP SIGNALS WITH SCORE BREAKDOWN === */}
+          {executionDiag?.top_signals?.length > 0 && (
+            <Card className="terminal-card p-4" data-testid="top-signals-breakdown">
+              <h3 className="text-xs text-amber-400 mb-3 flex items-center gap-2"><Target className="w-4 h-4" /> Top Signals — Score Breakdown</h3>
+              <div className="space-y-2">
+                {executionDiag.top_signals.slice(0, 8).map((s, i) => (
+                  <div key={i} className={`p-3 rounded border text-xs ${s.passes_threshold ? "border-emerald-500/20 bg-emerald-500/5" : "border-slate-700 bg-slate-800/50"}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-bold">{s.symbol}</span>
+                        <Badge variant="outline" className={`text-[10px] ${s.passes_threshold ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
+                          {s.confidence} {s.passes_threshold ? "PASS" : `FAIL (${s.gap_to_threshold > 0 ? "+" : ""}${s.gap_to_threshold})`}
+                        </Badge>
+                        {s.structure_type && <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">{s.structure_type}</Badge>}
+                      </div>
+                      <span className="text-slate-500">${Number(s.price || 0).toFixed(2)}</span>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {["technical_setup", "volume", "sentiment", "risk_reward", "trend_alignment", "volatility", "market_regime"].map(comp => {
+                        const cd = s.breakdown?.[comp] || {};
+                        const pct = cd.max > 0 ? (cd.pts / cd.max * 100) : 0;
+                        return (
+                          <div key={comp} className="text-center">
+                            <p className="text-[9px] text-slate-500 truncate">{comp.replace(/_/g, " ").replace("technical ", "tech ").replace("alignment", "align")}</p>
+                            <p className={`font-mono text-[11px] ${pct >= 70 ? "text-emerald-400" : pct >= 40 ? "text-amber-400" : "text-red-400"}`}>{cd.pts || 0}/{cd.max || 0}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* === REJECTION REPORT — Why Didn't It Trade? === */}
+          {rejectionReport && rejectionReport.total_candidates > 0 && (
+            <Card className="terminal-card p-4" data-testid="rejection-report">
+              <h3 className="text-xs text-red-400 mb-3 flex items-center gap-2"><Ban className="w-4 h-4" /> Why Didn't It Trade? — Rejection Report</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-3">
+                <div className="text-center p-2 rounded bg-slate-800">
+                  <p className="text-slate-500">Total Candidates</p>
+                  <p className="text-white font-mono text-lg">{rejectionReport.total_candidates}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                  <p className="text-emerald-400">Executed</p>
+                  <p className="text-emerald-400 font-mono text-lg">{rejectionReport.executed}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-red-500/10 border border-red-500/20">
+                  <p className="text-red-400">Rejected</p>
+                  <p className="text-red-400 font-mono text-lg">{rejectionReport.rejected}</p>
+                </div>
+                <div className="text-center p-2 rounded bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-amber-400">Strong Missed</p>
+                  <p className="text-amber-400 font-mono text-lg">{rejectionReport.strong_candidates_missed}</p>
+                </div>
+              </div>
+
+              {/* Rejection Breakdown by Gate */}
+              {rejectionReport.rejection_breakdown && Object.keys(rejectionReport.rejection_breakdown).length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[10px] text-slate-500 mb-2">Blocking Gate Distribution</p>
+                  <div className="space-y-1">
+                    {Object.entries(rejectionReport.rejection_breakdown).sort((a, b) => b[1] - a[1]).map(([gate, count]) => {
+                      const maxCount = Math.max(...Object.values(rejectionReport.rejection_breakdown));
+                      const gateLabels = {
+                        timing_block: "Timing / Session", session_phase: "Market Phase", duplicate_position: "Duplicate Position",
+                        risk_violation: "Risk Manager", max_trades_reached: "Max Trades", cooldown_active: "Post-Loss Cooldown",
+                        soft_lock_block: "Soft Lock", reentry_cooldown: "Re-Entry Cooldown", shadow_mode: "Shadow Mode",
+                        order_failed: "Order Failed", safety_check_failed: "Safety Check",
+                      };
+                      return (
+                        <div key={gate} className="flex items-center gap-2 text-[11px]">
+                          <span className="text-slate-400 w-32 truncate">{gateLabels[gate] || gate.replace(/_/g, " ")}</span>
+                          <div className="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div className="h-full rounded-full bg-red-500" style={{ width: `${(count / maxCount) * 100}%` }} />
+                          </div>
+                          <span className="text-red-400 font-mono w-8 text-right">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Individual Rejection Cards */}
+              {rejectionReport.candidates?.slice(0, 6).map((c, i) => (
+                <div key={i} className={`p-2 mb-1 rounded text-xs border ${c.outcome === "executed" ? "border-emerald-500/20 bg-emerald-500/5" : "border-red-500/10 bg-slate-800/50"}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white font-bold">{c.symbol}</span>
+                      <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-300">conf={c.confidence}</Badge>
+                      {c.direction && <Badge variant="outline" className={`text-[10px] ${c.direction === "LONG" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>{c.direction}</Badge>}
+                      {c.best_setup && <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">{c.best_setup}</Badge>}
+                    </div>
+                    <Badge variant="outline" className={`text-[10px] ${c.outcome === "executed" ? "border-emerald-500/30 text-emerald-400" : c.outcome === "blocked" ? "border-amber-500/30 text-amber-400" : "border-red-500/30 text-red-400"}`}>
+                      {c.outcome?.toUpperCase()}
+                    </Badge>
+                  </div>
+                  {c.rejection_reason && (
+                    <p className="text-[10px] text-red-400 mt-1 flex items-center gap-1"><Shield className="w-3 h-3" /> {c.rejection_reason}</p>
+                  )}
+                </div>
+              ))}
+            </Card>
+          )}
         </TabsContent>
 
         {/* CANDIDATES TAB */}
@@ -1446,62 +1622,69 @@ const AutoTrade = () => {
             <Button variant="outline" size="sm" onClick={fetchTradeLog} className="border-slate-700"><RefreshCw className="w-3 h-3 mr-1" /> Refresh</Button>
           </div>
           {tradeLog.length > 0 ? tradeLog.map((t, i) => (
-            <Card key={i} className={`terminal-card p-4 border ${t.status === "SKIPPED" ? "border-slate-700" : t.status === "OPEN" ? "border-emerald-500/20" : t.pnl_dollars >= 0 ? "border-blue-500/20" : "border-red-500/20"}`} data-testid={`trade-log-${i}`}>
+            <Card key={i} className={`terminal-card p-4 border ${t.action === "SELL" && t.pnl >= 0 ? "border-emerald-500/20" : t.action === "SELL" && t.pnl < 0 ? "border-red-500/20" : "border-blue-500/20"}`} data-testid={`trade-log-${i}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="text-white font-bold text-sm">{t.symbol}</span>
-                  <Badge variant="outline" className={`text-[10px] ${t.direction === "LONG" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
-                    {t.direction}
-                  </Badge>
                   <Badge variant="outline" className={`text-[10px] ${t.action === "BUY" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>
                     {t.action}
                   </Badge>
-                  <Badge variant="outline" className={`text-[10px] ${t.status === "OPEN" ? "border-amber-500/30 text-amber-400" : t.status === "SKIPPED" ? "border-slate-600 text-slate-400" : "border-slate-700 text-slate-400"}`}>
-                    {t.status}
-                  </Badge>
-                  {t.executed === false && <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400"><SkipForward className="w-3 h-3 mr-0.5" />SKIP</Badge>}
-                  {t.momentum_mode && <Badge variant="outline" className="text-[10px] border-orange-500/30 text-orange-400">MOMENTUM</Badge>}
-                  {t.mtf_aligned && <Badge variant="outline" className="text-[10px] border-cyan-500/30 text-cyan-400">MTF OK</Badge>}
+                  {t.direction && <Badge variant="outline" className={`text-[10px] ${t.direction === "LONG" ? "border-emerald-500/30 text-emerald-400" : "border-red-500/30 text-red-400"}`}>{t.direction}</Badge>}
+                  {t.ownership && (
+                    <Badge variant="outline" className={`text-[10px] ${
+                      t.ownership === "bot" && t.strategy_type === "day_trade" ? "border-amber-500/30 text-amber-400" :
+                      t.ownership === "bot" && t.strategy_type === "long_term" ? "border-blue-500/30 text-blue-400" :
+                      "border-emerald-500/30 text-emerald-400"
+                    }`}>
+                      {t.ownership === "bot" && t.strategy_type === "day_trade" ? "DT Bot" :
+                       t.ownership === "bot" && t.strategy_type === "long_term" ? "LT Bot" : "Manual"}
+                    </Badge>
+                  )}
                 </div>
-                <span className="text-xs text-slate-500">{t.opened_at ? new Date(t.opened_at).toLocaleString() : t.date || ""}</span>
+                <span className="text-xs text-slate-500">{t.timestamp ? new Date(t.timestamp).toLocaleString() : t.date || ""}</span>
               </div>
-              <div className="grid grid-cols-3 md:grid-cols-8 gap-2 text-xs">
-                <div><p className="text-slate-500">Entry</p><p className="text-white font-mono">${t.entry_price}</p></div>
-                <div><p className="text-slate-500">SL</p><p className="text-red-400 font-mono">${t.stop_loss}</p></div>
-                <div><p className="text-slate-500">TP</p><p className="text-emerald-400 font-mono">${t.take_profit}</p></div>
-                <div><p className="text-slate-500">Setup</p><p className="text-blue-400">{t.setup_type || "?"}</p></div>
-                <div><p className="text-slate-500">Conf</p><p className="text-amber-400 font-mono">{t.confidence_score}</p></div>
-                <div><p className="text-slate-500">R:R</p><p className="text-white font-mono">{t.rr_ratio}:1</p></div>
-                <div><p className="text-slate-500">Slippage</p><p className={`font-mono ${t.slippage_pct > 0.1 ? "text-red-400" : "text-slate-400"}`}>{t.slippage_pct != null ? `${t.slippage_pct}%` : "—"}</p></div>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs">
+                <div><p className="text-slate-500">Shares</p><p className="text-white font-mono">{t.shares || t.qty || "?"}</p></div>
+                <div><p className="text-slate-500">Confidence</p><p className="text-amber-400 font-mono">{t.confidence || "—"}</p></div>
+                <div><p className="text-slate-500">Setup</p><p className="text-blue-400">{t.best_setup || t.setup_type || "—"}</p></div>
+                <div><p className="text-slate-500">Signals</p><p className="text-cyan-400 font-mono">{t.signal_count || "—"}</p></div>
+                <div><p className="text-slate-500">Strategy</p><p className="text-white capitalize">{(t.strategy_type || t.classification || "").replace(/_/g, " ")}</p></div>
                 <div>
                   <p className="text-slate-500">P&L</p>
-                  <p className={`font-mono ${t.pnl_dollars == null ? "text-slate-500" : t.pnl_dollars >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {t.pnl_dollars != null ? `$${t.pnl_dollars} (${t.pnl_percent}%)` : "—"}
+                  <p className={`font-mono ${t.pnl == null ? "text-slate-500" : t.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {t.pnl != null ? `$${Number(t.pnl).toFixed(2)}` : "—"}
                   </p>
                 </div>
               </div>
-              {t.time_elapsed_ms != null && (
-                <div className="mt-1 text-[10px] text-slate-500">Signal-to-Exec: {t.time_elapsed_ms}ms</div>
-              )}
-              {t.skip_reason && (
-                <div className="mt-2 pt-2 border-t border-slate-800">
-                  <p className="text-[10px] text-red-400 flex items-center gap-1"><Ban className="w-3 h-3" /> Skip Reason: {t.skip_reason}</p>
-                </div>
-              )}
+              {/* Entry Reasons */}
               {t.entry_reasons?.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-slate-800">
                   <p className="text-[10px] text-emerald-400 mb-1">Entry Reasons:</p>
                   <p className="text-[10px] text-slate-400">{t.entry_reasons.slice(0, 4).join(" | ")}</p>
                 </div>
               )}
-              {t.actual_exit_reason && (
-                <div className="mt-1">
-                  <p className="text-[10px] text-amber-400">Exit: {t.actual_exit_reason}</p>
+              {/* Exit Plan */}
+              {t.exit_plan && (t.exit_plan.stop_loss || t.exit_plan.take_profit) && (
+                <div className="mt-1 text-[10px] text-slate-500">
+                  Exit Plan: SL ${Number(t.exit_plan.stop_loss || 0).toFixed(2)} | TP ${Number(t.exit_plan.take_profit || 0).toFixed(2)} {t.exit_plan.partial_target ? `| Partial $${Number(t.exit_plan.partial_target).toFixed(2)}` : ""}
                 </div>
               )}
-              {t.exit_reasons?.length > 0 && !t.actual_exit_reason && (
-                <div className="mt-1">
-                  <p className="text-[10px] text-red-400">Exit: {t.exit_reasons.join(", ")}</p>
+              {/* Confidence Breakdown */}
+              {t.confidence_breakdown && (
+                <div className="mt-2 pt-2 border-t border-slate-800">
+                  <p className="text-[10px] text-amber-400 mb-1">Confidence Breakdown (Total: {t.confidence_breakdown.total})</p>
+                  <div className="grid grid-cols-7 gap-1">
+                    {["technical_setup", "volume", "sentiment", "risk_reward", "trend_alignment", "volatility", "market_regime"].map(comp => {
+                      const cd = t.confidence_breakdown[comp] || {};
+                      const pct = cd.max > 0 ? (cd.pts / cd.max * 100) : 0;
+                      return (
+                        <div key={comp} className="text-center">
+                          <p className="text-[9px] text-slate-500 truncate">{comp.replace(/_/g, " ").replace("technical ", "tech ")}</p>
+                          <p className={`font-mono text-[10px] ${pct >= 70 ? "text-emerald-400" : pct >= 40 ? "text-amber-400" : "text-red-400"}`}>{cd.pts || 0}/{cd.max || 0}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </Card>

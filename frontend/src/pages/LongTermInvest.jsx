@@ -557,6 +557,14 @@ export default function LongTermInvest() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // Auto-refresh portfolio prices every 60s during market hours
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchPortfolio();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [fetchPortfolio]);
+
   const handleViewThesis = async (symbol) => {
     try {
       const res = await fetch(`${API}/lt-invest/thesis/${symbol}`, { headers });
