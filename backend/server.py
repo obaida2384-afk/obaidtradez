@@ -53,6 +53,7 @@ class Config:
     MONGO_URL = os.environ['MONGO_URL']
     DB_NAME = os.environ.get('DB_NAME', 'obaidtradez')
     ACCESS_CODE = os.environ.get('ACCESS_CODE_HASH', '')
+    ACCESS_USERNAME = os.environ.get('ACCESS_USERNAME', '')
     ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
     
     # Financial APIs
@@ -105,6 +106,7 @@ def set_cached(key: str, data: Any, ttl: int = None):
 # ===================== MODELS =====================
 
 class AccessRequest(BaseModel):
+    username: Optional[str] = None
     code: str
 
 class AccessResponse(BaseModel):
@@ -213,8 +215,11 @@ _valid_tokens: Dict[str, datetime] = {}
 def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
-def validate_access_code(code: str) -> bool:
-    return code == config.ACCESS_CODE
+def validate_access_code(code: str, username: str = None) -> bool:
+    password_ok = code == config.ACCESS_CODE
+    if config.ACCESS_USERNAME:
+        return password_ok and username == config.ACCESS_USERNAME
+    return password_ok
 
 def validate_token(token: str) -> bool:
     if token in _valid_tokens:
@@ -2051,7 +2056,7 @@ Be direct, practical, and educational. Reference specific numbers when possible.
 @api_router.post("/auth/access", response_model=AccessResponse)
 async def verify_access_code(request: AccessRequest):
     """Verify access code and return session token"""
-    if validate_access_code(request.code):
+    if validate_access_code(request.code, request.username):
         token = generate_token()
         _valid_tokens[token] = datetime.now() + timedelta(hours=24)
         

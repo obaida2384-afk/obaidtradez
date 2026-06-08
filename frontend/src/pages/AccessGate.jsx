@@ -3,19 +3,20 @@ import { useAuth, API } from "../App";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Lock, TrendingUp, Shield, AlertTriangle, Loader2 } from "lucide-react";
+import { Lock, TrendingUp, Shield, AlertTriangle, Loader2, User } from "lucide-react";
 import { toast } from "sonner";
 
 const AccessGate = () => {
-  const [code, setCode] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!code.trim()) {
-      setError("Please enter the access code");
+    if (!username.trim() || !password.trim()) {
+      setError("Please enter your username and password");
       return;
     }
 
@@ -26,7 +27,7 @@ const AccessGate = () => {
       const response = await fetch(`${API}/auth/access`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: code.trim() })
+        body: JSON.stringify({ username: username.trim(), code: password.trim() })
       });
 
       const data = await response.json();
@@ -35,8 +36,8 @@ const AccessGate = () => {
         login(data.token);
         toast.success("Access granted! Welcome to ObaidTradez");
       } else {
-        setError(data.message || "Invalid access code");
-        toast.error("Invalid access code");
+        setError(data.message || "Invalid username or password");
+        toast.error("Invalid credentials");
       }
     } catch (err) {
       setError("Connection error. Please try again.");
@@ -48,15 +49,12 @@ const AccessGate = () => {
 
   return (
     <div className="access-gate" data-testid="access-gate">
-      {/* Scan line effect */}
       <div className="scan-line opacity-30"></div>
-      
+
       <Card className="w-full max-w-md mx-4 bg-[#0d1117] border-slate-800 p-8 relative overflow-hidden">
-        {/* Glow effect */}
         <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-red-500/5 pointer-events-none"></div>
-        
+
         <div className="relative z-10">
-          {/* Logo */}
           <div className="flex justify-center mb-8">
             <div className="flex items-center gap-3">
               <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-red-500 flex items-center justify-center animate-pulse-glow">
@@ -72,18 +70,30 @@ const AccessGate = () => {
             <p className="text-slate-500 text-sm">AI Trading & Investing Platform</p>
           </div>
 
-          {/* Access Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Username"
+                className="pl-10 h-12 bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus-visible:ring-blue-500"
+                disabled={loading}
+                autoComplete="username"
+              />
+            </div>
+
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <Input
                 type="password"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Enter access code"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
                 className="pl-10 h-12 bg-slate-900 border-slate-700 text-white placeholder:text-slate-500 focus-visible:ring-blue-500"
                 disabled={loading}
-                data-testid="access-code-input"
+                autoComplete="current-password"
               />
             </div>
 
@@ -114,7 +124,6 @@ const AccessGate = () => {
             </Button>
           </form>
 
-          {/* Security Notice */}
           <div className="mt-6 pt-6 border-t border-slate-800">
             <div className="flex items-start gap-2 text-xs text-slate-500">
               <Shield className="w-4 h-4 shrink-0 mt-0.5" />
@@ -124,7 +133,6 @@ const AccessGate = () => {
             </div>
           </div>
 
-          {/* Features Preview */}
           <div className="mt-6 grid grid-cols-2 gap-3">
             {[
               { label: "Trading", desc: "Short-term signals" },
@@ -141,7 +149,6 @@ const AccessGate = () => {
         </div>
       </Card>
 
-      {/* Version */}
       <p className="absolute bottom-4 text-[10px] text-slate-600 font-mono">
         v1.0.0 | Secure Access Only
       </p>
