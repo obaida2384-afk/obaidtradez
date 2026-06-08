@@ -216,9 +216,9 @@ def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
 def validate_access_code(code: str, username: str = None) -> bool:
-    password_ok = code == config.ACCESS_CODE
-    if config.ACCESS_USERNAME:
-        return password_ok and username == config.ACCESS_USERNAME
+    password_ok = code.strip() == config.ACCESS_CODE.strip()
+    if config.ACCESS_USERNAME.strip():
+        return password_ok and (username or '').strip() == config.ACCESS_USERNAME.strip()
     return password_ok
 
 def validate_token(token: str) -> bool:
