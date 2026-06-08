@@ -2059,19 +2059,22 @@ async def verify_access_code(request: AccessRequest):
     if validate_access_code(request.code, request.username):
         token = generate_token()
         _valid_tokens[token] = datetime.now() + timedelta(hours=24)
-        
+        try:
+            await db.access_logs.insert_one({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "success": True
+            })
+        except Exception:
+            pass
+        return AccessResponse(success=True, token=token, message="Access granted")
+
+    try:
         await db.access_logs.insert_one({
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "success": True
+            "success": False
         })
-        
-        return AccessResponse(success=True, token=token, message="Access granted")
-    
-    await db.access_logs.insert_one({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "success": False
-    })
-    
+    except Exception:
+        pass
     return AccessResponse(success=False, message="Invalid access code")
 
 @api_router.get("/auth/debug")
