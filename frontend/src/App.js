@@ -45,7 +45,8 @@ export const useAuth = () => useContext(AuthContext);
 const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(() => localStorage.getItem('obaidtradez_token'));
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // Only show loading spinner if there's a token to verify — no token means show password prompt immediately
+  const [loading, setLoading] = useState(() => !!localStorage.getItem('obaidtradez_token'));
 
   useEffect(() => {
     verifyToken();
@@ -59,13 +60,22 @@ const AuthProvider = ({ children }) => {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       const response = await fetch(`${API}/auth/verify`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await response.json();
       setIsAuthenticated(data.valid);
+      if (!data.valid) {
+        localStorage.removeItem('obaidtradez_token');
+      }
     } catch {
       setIsAuthenticated(false);
+      localStorage.removeItem('obaidtradez_token');
     }
     setLoading(false);
   };

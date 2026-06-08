@@ -53,7 +53,7 @@ class Config:
     MONGO_URL = os.environ['MONGO_URL']
     DB_NAME = os.environ.get('DB_NAME', 'obaidtradez')
     ACCESS_CODE = os.environ.get('ACCESS_CODE_HASH', '')
-    EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+    ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
     
     # Financial APIs
     FMP_API_KEY = os.environ.get('FMP_API_KEY')
@@ -1994,8 +1994,8 @@ news_engine = NewsSentimentEngine()
 
 async def get_chatbot_response(message: str, session_id: str, mode: str = "general") -> str:
     """AI-powered financial assistant"""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
+    import anthropic
+
     system_prompts = {
         "trading": """You are ObaidTradez Trading Assistant - an expert short-term trading advisor.
 
@@ -2021,19 +2021,26 @@ You can help with:
 
 Be direct, practical, and educational. Reference specific numbers when possible."""
     }
-    
+
     system_message = system_prompts.get(mode, system_prompts["general"])
-    
+
     try:
-        chat = LlmChat(
-            api_key=config.EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=system_message
-        ).with_model("openai", "gpt-5.2")
-        
-        user_message = UserMessage(text=message)
-        response = await chat.send_message(user_message)
-        return response
+        # Load conversation history from MongoDB (current user message already saved by route handler)
+        history = await db.chat_history.find(
+            {"session_id": session_id},
+            {"role": 1, "content": 1, "timestamp": 1}
+        ).sort("timestamp", 1).limit(50).to_list(50)
+
+        messages = [{"role": h["role"], "content": h["content"]} for h in history]
+
+        client = anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+        response = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system_message,
+            messages=messages
+        )
+        return response.content[0].text
     except Exception as e:
         logger.error(f"Chatbot error: {e}")
         return f"I apologize, but I encountered an error. Please try again. Error: {str(e)}"

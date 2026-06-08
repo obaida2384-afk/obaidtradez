@@ -22,7 +22,7 @@ FMP_KEY = os.environ.get("FMP_API_KEY", "")
 FINNHUB_KEY = os.environ.get("FINNHUB_API_KEY", "")
 ALPHA_VANTAGE_KEY = os.environ.get("ALPHA_VANTAGE_KEY", "")
 MARKETAUX_KEY = os.environ.get("MARKETAUX_API_KEY", "")
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # Source credibility weights (0-1)
 SOURCE_CREDIBILITY = {
@@ -448,33 +448,18 @@ class CatalystScorer:
 # ===================== AI NEWS ANALYZER =====================
 
 class AINewsAnalyzer:
-    """GPT-5.2 powered news sentiment analysis and catalyst detection"""
+    """Claude-powered news sentiment analysis and catalyst detection"""
 
     def __init__(self):
-        self._chat = None
-
-    def _get_chat(self, session_id: str):
-        from emergentintegrations.llm.chat import LlmChat
-        chat = LlmChat(
-            api_key=EMERGENT_KEY,
-            session_id=session_id,
-            system_message=(
-                "You are a professional financial trading analyst. Analyze news articles for actionable trading signals. "
-                "Be direct and decisive. DO NOT use vague language like 'modestly bullish'. "
-                "Use clear labels: STRONG BULLISH, MODERATE BEARISH, NOT TRADEABLE, etc. "
-                "Return ONLY valid JSON with no markdown formatting."
-            )
-        )
-        chat.with_model("openai", "gpt-5.2")
-        return chat
+        pass
 
     async def analyze_batch(self, symbol: str, articles: List[Dict]) -> Dict:
-        """Analyze articles using GPT-5.2 for actionable trading signals"""
-        if not EMERGENT_KEY or not articles:
+        """Analyze articles using Claude for actionable trading signals"""
+        if not ANTHROPIC_API_KEY or not articles:
             return self._fallback_analysis(articles)
 
         try:
-            from emergentintegrations.llm.chat import UserMessage
+            import anthropic
 
             # Use top articles (by credibility and signal quality)
             top_articles = sorted(articles, key=lambda x: x.get("signal_quality", 0.5), reverse=True)[:12]
@@ -521,9 +506,19 @@ RULES:
 - catalyst_strength should reflect actual impact potential (0=noise, 100=major event)
 - is_tradeable = true ONLY if catalyst_strength >= 70 AND clear directional signal"""
 
-            chat = self._get_chat(f"news_{symbol}_{datetime.now().strftime('%H%M')}")
-            msg = UserMessage(text=prompt)
-            response = await chat.send_message(msg)
+            client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+            result_msg = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                system=(
+                    "You are a professional financial trading analyst. Analyze news articles for actionable trading signals. "
+                    "Be direct and decisive. DO NOT use vague language like 'modestly bullish'. "
+                    "Use clear labels: STRONG BULLISH, MODERATE BEARISH, NOT TRADEABLE, etc. "
+                    "Return ONLY valid JSON with no markdown formatting."
+                ),
+                messages=[{"role": "user", "content": prompt}]
+            )
+            response = result_msg.content[0].text
 
             json_str = response.strip()
             if json_str.startswith("```"):
