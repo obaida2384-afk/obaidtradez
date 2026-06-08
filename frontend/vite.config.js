@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react({ include: '**/*.{jsx,js}' })],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -12,6 +12,15 @@ export default defineConfig({
   define: {
     'process.env.REACT_APP_BACKEND_URL': JSON.stringify(process.env.REACT_APP_BACKEND_URL || ''),
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      loader: { '.js': 'jsx' },
+    },
+  },
+  esbuild: {
+    loader: 'jsx',
+    include: /src\/.*\.js$/,
   },
   build: {
     outDir: 'dist',
