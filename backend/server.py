@@ -83,6 +83,15 @@ enhanced_news_engine = EnhancedNewsSentimentEngine(db)
 app = FastAPI(title="ObaidTradez API", description="AI Trading & Investing Platform")
 api_router = APIRouter(prefix="/api")
 
+# CORS must be registered before routers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+)
+
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -5939,13 +5948,6 @@ async def root():
 # Include router
 app.include_router(api_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Startup event to initialize universe
 @app.on_event("startup")
