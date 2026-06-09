@@ -1338,19 +1338,17 @@ class TradingEngine:
             stocks_scanned = len(universe_manager.CORE_UNIVERSE)
             source = "cached"
         else:
-            # Fallback: quick scan of core stocks
-            quick_universe = [
-                "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
-                "AMD", "NFLX", "CRM", "SHOP", "SQ", "COIN", "PLTR", "SNOW",
-                "ROKU", "SNAP", "UBER", "ABNB", "RIVN", "LCID", "NIO",
-                "MARA", "RIOT", "HOOD", "SOFI", "AFRM", "UPST",
-                "XOM", "CVX", "JPM", "GS", "BA", "CAT", "DE"
-            ]
-            included, excluded = await self.batch_analyze_trading(quick_universe, batch_size=10)
-            included.sort(key=self._quality_score, reverse=True)
-            all_signals = [s.dict() if hasattr(s, 'dict') else s for s in included]
-            stocks_scanned = len(quick_universe)
-            source = "live"
+            # No cache yet — return empty immediately, user can click Refresh to populate
+            return {
+                "top_trades": [], "hot": [], "breakout": [], "momentum": [],
+                "high_volume": [], "watch": [], "all": [],
+                "diagnostics": {
+                    "stocks_scanned": 0, "signals_generated": 0,
+                    "source": "no_cache",
+                    "excluded_count": 0, "excluded_reasons": [],
+                    "filters_applied": []
+                }
+            }
         
         # Categorize
         hot = [s for s in all_signals if s.get("category") == "Hot"]
@@ -2227,20 +2225,16 @@ async def scan_investments(auth: bool = Depends(verify_access)):
         
         signals = all_signals
     else:
-        # Analyze on demand - use larger universe
-        universe = universe_manager.CORE_UNIVERSE[:500]
-        logger.info(f"No cache, analyzing {len(universe)} stocks on demand...")
-        
-        analyzed = await enhanced_investment_engine.batch_analyze(universe, batch_size=10)
-        signals = [convert_to_legacy_format(s) for s in analyzed]
-        
-        # Store in cache
-        for signal in signals:
-            await db.investment_signals.update_one(
-                {"symbol": signal["symbol"]},
-                {"$set": signal},
-                upsert=True
-            )
+        # No cache yet — return empty immediately
+        return {
+            "hot": [], "bullish": [], "undervalued": [], "watch": [],
+            "bearish": [], "overpriced": [], "avoid": [], "all": [],
+            "total_analyzed": 0,
+            "category_counts": {
+                "hot": 0, "bullish": 0, "undervalued": 0, "watch": 0,
+                "bearish": 0, "overpriced": 0, "avoid": 0
+            }
+        }
     
     # Categorize results - return ALL stocks in each category
     hot = [s for s in signals if s.get("category") == "Hot"]
