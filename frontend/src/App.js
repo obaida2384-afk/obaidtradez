@@ -1,8 +1,7 @@
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
-import AccessGate from "./pages/AccessGate";
 import Dashboard from "./pages/Dashboard";
 import Trading from "./pages/Trading";
 import Investments from "./pages/Investments";
@@ -37,67 +36,8 @@ import {
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-// Auth Context
-const AuthContext = createContext(null);
-
-export const useAuth = () => useContext(AuthContext);
-
-const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(() => localStorage.getItem('obaidtradez_token'));
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  // Only show loading spinner if there's a token to verify — no token means show password prompt immediately
-  const [loading, setLoading] = useState(() => !!localStorage.getItem('obaidtradez_token'));
-
-  useEffect(() => {
-    verifyToken();
-  }, [token]);
-
-  const verifyToken = async () => {
-    if (!token) {
-      setIsAuthenticated(false);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(`${API}/auth/verify`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      const data = await response.json();
-      setIsAuthenticated(data.valid);
-      if (!data.valid) {
-        localStorage.removeItem('obaidtradez_token');
-      }
-    } catch {
-      setIsAuthenticated(false);
-      localStorage.removeItem('obaidtradez_token');
-    }
-    setLoading(false);
-  };
-
-  const login = (newToken) => {
-    localStorage.setItem('obaidtradez_token', newToken);
-    setToken(newToken);
-    setIsAuthenticated(true);
-  };
-
-  const logout = () => {
-    localStorage.removeItem('obaidtradez_token');
-    setToken(null);
-    setIsAuthenticated(false);
-  };
-
-  return (
-    <AuthContext.Provider value={{ token, isAuthenticated, loading, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
+// Auth removed — stub keeps existing page imports working
+export const useAuth = () => ({ token: null });
 
 // Sidebar
 const Sidebar = () => {
@@ -241,25 +181,8 @@ const Header = () => {
   );
 };
 
-// Protected Layout
-const ProtectedLayout = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
-  
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-500 text-sm">Loading ObaidTradez...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  if (!isAuthenticated) {
-    return <AccessGate />;
-  }
-  
+// App Layout
+const AppLayout = ({ children }) => {
   return (
     <div className="min-h-screen bg-[#0a0a0f]">
       <Sidebar />
@@ -277,30 +200,24 @@ function App() {
   return (
     <div className="App">
       <BrowserRouter>
-        <AuthProvider>
+        <AppLayout>
           <Routes>
-            <Route path="/*" element={
-              <ProtectedLayout>
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/trading" element={<Trading />} />
-                  <Route path="/investments" element={<Investments />} />
-                  <Route path="/long-term" element={<LongTermInvest />} />
-                  <Route path="/watchlist" element={<Watchlist />} />
-                  <Route path="/chatbot" element={<Chatbot />} />
-                  <Route path="/screener" element={<Screener />} />
-                  <Route path="/news" element={<News />} />
-                  <Route path="/backtesting" element={<Backtesting />} />
-                  <Route path="/portfolio" element={<Portfolio />} />
-                  <Route path="/alerts" element={<Alerts />} />
-                  <Route path="/auto" element={<AutoTrade />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Routes>
-              </ProtectedLayout>
-            } />
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/trading" element={<Trading />} />
+            <Route path="/investments" element={<Investments />} />
+            <Route path="/long-term" element={<LongTermInvest />} />
+            <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/chatbot" element={<Chatbot />} />
+            <Route path="/screener" element={<Screener />} />
+            <Route path="/news" element={<News />} />
+            <Route path="/backtesting" element={<Backtesting />} />
+            <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/auto" element={<AutoTrade />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
-          <Toaster position="bottom-right" theme="dark" />
-        </AuthProvider>
+        </AppLayout>
+        <Toaster position="bottom-right" theme="dark" />
       </BrowserRouter>
     </div>
   );
