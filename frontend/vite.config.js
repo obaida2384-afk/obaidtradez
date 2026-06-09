@@ -19,7 +19,7 @@ export default defineConfig({
     },
   },
   define: {
-    'process.env.REACT_APP_BACKEND_URL': JSON.stringify(process.env.REACT_APP_BACKEND_URL || 'https://obaidtradez-backend-production.up.railway.app'),
+    'process.env.REACT_APP_BACKEND_URL': JSON.stringify(process.env.REACT_APP_BACKEND_URL || 'https://obaidtradez-backend-production-3df5.up.railway.app'),
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
   },
   optimizeDeps: {
