@@ -51,6 +51,13 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - Frontend: `companyUniverse.js` `fetchFutureGiants` (marketCap→millions); `FutureGiants.jsx` wired to live screen with mock fallback, added "Why It Could Become Much Larger" block, data-testids, live note.
 - Verified: 12 live giants (CRMD, NUTX, RDDT/Reddit, XPEV/XPeng, biotech/tech names), 338 ranked, secular sectors dominate, all fields render. No guaranteed returns; speculative framing + disclaimers intact.
 
+### 2026-06-22 — Phase 5: DCF Modeling Engine (DONE)
+- New `backend/dcf_engine.py` — `DCFEngine.build_dcf(ticker)`: pulls FMP income/balance/cash-flow (5yr), analyst-estimates, treasury-rates, ratios, peers, grades, price-target. Builds: real historicals, forward revenue growth (analyst consensus → tapered CAGR), margin forecast, D&A/CapEx/NWC % (historical avgs), CAPM WACC (10Y treasury + levered beta + ERP + after-tax cost of debt, real weights), cash/debt/shares from balance sheet. Every assumption carries source/reasoning/confidence; missing → ESTIMATED. Also returns comps (peer multiples from universe), analyst recs, macro (yield curve), industry, risk factors, investment memo.
+- `server.py`: `GET /api/modeling/dcf/{ticker}`.
+- Frontend `Modeling.jsx`: kept existing client-side `computeDCF` + tabs, now fed REAL company + sourced assumptions from backend. CompanySelector searches live 3,000 universe. Added tabs: Historicals, Comparables (peers+analyst+macro+industry), Sources (assumption provenance+confidence). `fetchDcf` in companyUniverse.js. data-testids added.
+- Verified (NVDA): real 5yr financials, analyst-driven forecast, WACC 16.6%, full UFCF/TV/valuation, comps (AAPL/ADI…), sources tab. DCF implied differs from price (legit conservative output; assumptions editable).
+- Spec sections covered: Company Overview, Historical Financials, Revenue Build, Margin Forecast, Working Capital, CapEx, D&A, UFCF, WACC, Terminal Value, DCF Summary, Sensitivity, Trading Comps, Analyst Recs, Macro, Industry, Bull/Base/Bear, Risk Factors, Investment Memo. NOT in DCF view: News & Catalysts (separate News page exists) — deferred.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).

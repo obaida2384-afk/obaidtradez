@@ -48,6 +48,7 @@ from performance_tracker import PerformanceTracker
 from long_term_engine import LongTermInvestingEngine
 from execution_transparency import ExecutionTransparencyTracker
 from company_universe import CompanyUniverseService
+from dcf_engine import DCFEngine
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -907,6 +908,7 @@ universe_manager = UniverseManager()
 
 # API-driven, scalable company universe (1k-5k companies sourced dynamically)
 company_universe_service = CompanyUniverseService(api_client, db, lambda: config.FMP_API_KEY)
+dcf_engine = DCFEngine(api_client, db, lambda: config.FMP_API_KEY)
 
 # ===================== TRADING SIGNAL ENGINE (Quality-Focused) =====================
 
@@ -2167,6 +2169,16 @@ async def universe_future_giants(
 ):
     """Long-term 'future giants' ranking — smaller secular-growth names with runway to compound."""
     return await company_universe_service.rank_future_giants(limit=limit)
+
+@api_router.get("/modeling/dcf/{ticker}")
+async def modeling_dcf(ticker: str, auth: bool = Depends(verify_access)):
+    """Full institutional DCF model built from API data, with sourced assumptions."""
+    if not config.FMP_API_KEY:
+        raise HTTPException(status_code=503, detail="No FMP_API_KEY configured")
+    model = await dcf_engine.build_dcf(ticker)
+    if not model:
+        raise HTTPException(status_code=404, detail=f"Insufficient financial data for {ticker.upper()}")
+    return model
 
 @api_router.post("/universe/build")
 async def build_universe(

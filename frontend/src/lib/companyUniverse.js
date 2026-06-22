@@ -64,6 +64,12 @@ export async function fetchCompanies({
   };
 }
 
+export async function fetchDcf(ticker) {
+  const res = await fetch(`${API}/modeling/dcf/${ticker}`);
+  if (!res.ok) throw new Error(`DCF request failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchCompany(ticker) {
   const res = await fetch(`${API}/universe/company/${ticker}`);
   if (!res.ok) return null;

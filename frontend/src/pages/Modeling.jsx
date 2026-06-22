@@ -1,11 +1,12 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { COMPANY_UNIVERSE } from "@/lib/mockData";
+import { fetchCompanies, fetchDcf } from "@/lib/companyUniverse";
 import { generateExcelModel } from "@/lib/excelExporter";
 import { toast } from "sonner";
 import {
   Search, FileSpreadsheet, Calculator, Edit3, RotateCcw,
   BarChart2, BookOpen, Target, ChevronRight, AlertTriangle,
-  Info, CheckCircle,
+  Info, CheckCircle, History, Users, FileText,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -950,6 +951,146 @@ function MemoTab({ c, model, assumptions: a }) {
   );
 }
 
+// ─── TAB: Historical Financials ───────────────────────────────────────────────
+function HistoricalsTab({ payload }) {
+  const h = payload?.historicals;
+  if (!h?.rows?.length) return <Section title="Historical Financials"><p className="text-sm text-slate-500">No historical data available.</p></Section>;
+  const rows = [
+    ["Revenue", (r) => fmtComma(r.revenue)],
+    ["Gross Profit", (r) => fmtComma(r.grossProfit)],
+    ["Gross Margin", (r) => fmtP(r.grossMargin)],
+    ["Operating Income", (r) => fmtComma(r.operatingIncome)],
+    ["EBITDA", (r) => fmtComma(r.ebitda)],
+    ["EBITDA Margin", (r) => fmtP(r.ebitdaMargin)],
+    ["Net Income", (r) => fmtComma(r.netIncome)],
+    ["Diluted EPS", (r) => r.eps == null ? "—" : `$${r.eps.toFixed(2)}`],
+    ["Free Cash Flow", (r) => fmtComma(r.freeCashFlow)],
+  ];
+  return (
+    <Section title="Historical Financials (reported)">
+      <div className="overflow-x-auto">
+        <table className="w-full" data-testid="dcf-historicals-table">
+          <thead><tr><TH>Line Item</TH>{h.rows.map((r) => <TH key={r.year} right>FY{r.year}</TH>)}</tr></thead>
+          <tbody>
+            {rows.map(([label, fn]) => (
+              <tr key={label}>
+                <TD>{label}</TD>
+                {h.rows.map((r) => <TD key={r.year} right mono>{fn(r)}</TD>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-slate-600 mt-3">Source: {h.source}</p>
+    </Section>
+  );
+}
+
+// ─── TAB: Comparables, Analyst, Macro ─────────────────────────────────────────
+function CompsTab({ payload, c }) {
+  const comps = payload?.comps, analyst = payload?.analyst, macro = payload?.macro, industry = payload?.industry;
+  return (
+    <div className="space-y-4">
+      <Section title="Trading Comparables">
+        <div className="overflow-x-auto">
+          <table className="w-full" data-testid="dcf-comps-table">
+            <thead><tr><TH>Ticker</TH><TH>Company</TH><TH right>Mkt Cap</TH><TH right>P/E</TH><TH right>EV/EBITDA</TH><TH right>P/S</TH><TH right>Rev Gr.</TH><TH right>EBITDA M.</TH></tr></thead>
+            <tbody>
+              {(comps?.rows || []).map((r) => (
+                <tr key={r.ticker} className={r.isTarget ? "bg-blue-500/10" : ""}>
+                  <TD mono bold>{r.ticker}{r.isTarget ? " ★" : ""}</TD>
+                  <TD>{r.name}</TD>
+                  <TD right mono>{fmtB(r.marketCap)}</TD>
+                  <TD right mono>{r.pe ?? "—"}</TD>
+                  <TD right mono>{r.evEbitda ?? "—"}</TD>
+                  <TD right mono>{r.ps ?? "—"}</TD>
+                  <TD right mono>{r.revenueGrowth != null ? `${r.revenueGrowth}%` : "—"}</TD>
+                  <TD right mono>{r.ebitdaMargin != null ? `${r.ebitdaMargin}%` : "—"}</TD>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-slate-400 mt-3">Peer median: P/E <span className="text-white font-mono">{comps?.medianPe ?? "—"}x</span> · EV/EBITDA <span className="text-white font-mono">{comps?.medianEvEbitda ?? "—"}x</span></p>
+        <p className="text-[10px] text-slate-600 mt-1">Source: {comps?.source}</p>
+      </Section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Section title="Analyst Recommendations">
+          {analyst?.consensus ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl font-bold text-emerald-400">{analyst.consensus}</span>
+                <span className="text-xs text-slate-500">consensus</span>
+              </div>
+              <div className="grid grid-cols-5 gap-1 text-center">
+                {[["Strong Buy", analyst.strongBuy], ["Buy", analyst.buy], ["Hold", analyst.hold], ["Sell", analyst.sell], ["Strong Sell", analyst.strongSell]].map(([l, v]) => (
+                  <div key={l} className="p-2 bg-white/[0.03] rounded"><p className="text-sm font-bold text-white">{v ?? 0}</p><p className="text-[9px] text-slate-500 mt-0.5">{l}</p></div>
+                ))}
+              </div>
+              <div className="flex items-center gap-4 text-xs pt-2 border-t border-white/[0.06]">
+                <span className="text-slate-500">Target: <span className="text-white font-mono">{analyst.targetConsensus ? `$${analyst.targetConsensus}` : "—"}</span></span>
+                <span className="text-slate-500">Range: <span className="text-slate-300 font-mono">${analyst.targetLow}–${analyst.targetHigh}</span></span>
+                {analyst.impliedUpside != null && <span className={clr(analyst.impliedUpside)}>{sign(analyst.impliedUpside)}{analyst.impliedUpside}%</span>}
+              </div>
+            </div>
+          ) : <p className="text-sm text-slate-500">No analyst coverage available.</p>}
+          <p className="text-[10px] text-slate-600 mt-3">Source: {analyst?.source}</p>
+        </Section>
+
+        <Section title="Macro & Industry">
+          <div className="space-y-2 text-xs">
+            <p className="text-slate-400">Risk-free rate (10Y UST): <span className="text-white font-mono">{macro?.riskFreeRate10y}%</span> <span className="text-slate-600">as of {macro?.asOf}</span></p>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {Object.entries(macro?.yieldCurve || {}).map(([k, v]) => (
+                <span key={k} className="text-[10px] bg-white/[0.03] border border-white/[0.06] rounded px-2 py-1 text-slate-400">{k}: <span className="text-slate-200 font-mono">{v}%</span></span>
+              ))}
+            </div>
+            <p className="text-slate-500 mt-2">{macro?.note}</p>
+            <div className="pt-2 border-t border-white/[0.06] mt-2">
+              <p className="text-slate-400">Sector: <span className="text-white">{industry?.sector}</span> · {industry?.industry}</p>
+              <p className="text-slate-500 mt-1">{industry?.note}</p>
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-600 mt-3">Source: {macro?.source}</p>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+// ─── TAB: Assumption Sources & Confidence ─────────────────────────────────────
+function SourcesTab({ assumptions }) {
+  const meta = assumptions?.meta || {};
+  const labels = {
+    revGrowth: "Revenue Growth", ebitdaMargin: "EBITDA Margin", wacc: "WACC",
+    taxRate: "Tax Rate", daPercent: "D&A % of Revenue", capexPercent: "CapEx % of Revenue",
+    nwcPercent: "ΔNWC % of Revenue", tgr: "Terminal Growth", exitMultiple: "Exit Multiple",
+    cash: "Cash & Equivalents", debt: "Total Debt", sharesOut: "Diluted Shares",
+  };
+  const confColor = (c) => c === "High" ? "text-emerald-400 bg-emerald-500/10" : c === "Medium" ? "text-blue-400 bg-blue-500/10" : "text-amber-400 bg-amber-500/10";
+  return (
+    <Section title="Assumption Sources & Confidence">
+      <div className="overflow-x-auto">
+        <table className="w-full" data-testid="dcf-sources-table">
+          <thead><tr><TH>Assumption</TH><TH>Source</TH><TH>Reasoning</TH><TH>Confidence</TH></tr></thead>
+          <tbody>
+            {Object.entries(meta).map(([k, m]) => (
+              <tr key={k}>
+                <TD bold>{labels[k] || k}</TD>
+                <TD>{m.source}</TD>
+                <TD><span className="text-slate-400">{m.reasoning}</span></TD>
+                <TD><span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${confColor(m.confidence)}`}>{m.confidence}</span></TD>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-slate-600 mt-3">Every forward assumption is derived from reported financials, consensus estimates or clearly-flagged estimates. Edit the yellow inputs in the Assumptions tab to stress-test.</p>
+    </Section>
+  );
+}
+
 function Section({ title, children }) {
   return (
     <div className="glass-card p-5">
@@ -960,37 +1101,55 @@ function Section({ title, children }) {
 }
 
 // ─── Company selector ─────────────────────────────────────────────────────────
-function CompanySelector({ onSelect }) {
+function CompanySelector({ onSelect, loading }) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
-  const filtered = COMPANY_UNIVERSE.filter(c =>
-    !search || c.ticker.includes(search.toUpperCase()) || c.name.toLowerCase().includes(search.toLowerCase())
-  ).slice(0, 15);
+  const [results, setResults] = useState([]);
+  const [defaults, setDefaults] = useState([]);
+
+  useEffect(() => {
+    fetchCompanies({ limit: 9, sortBy: "marketCap", order: -1 })
+      .then((d) => setDefaults(d.companies || []))
+      .catch(() => setDefaults(COMPANY_UNIVERSE.slice(0, 9)));
+  }, []);
+
+  useEffect(() => {
+    if (!search) { setResults([]); return; }
+    const t = setTimeout(() => {
+      fetchCompanies({ limit: 15, search })
+        .then((d) => setResults(d.companies || []))
+        .catch(() => setResults(
+          COMPANY_UNIVERSE.filter((c) => c.ticker.includes(search.toUpperCase()) || c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 15)
+        ));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-white">DCF Financial Model</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Professional discounted cash flow model with editable assumptions, sensitivity analysis, and investment memo. Select a company to begin.
+          Institutional discounted cash flow built from reported financials, consensus estimates and a CAPM-derived WACC — with editable assumptions, sensitivity analysis, comparables and an investment memo. Select a company to begin.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="glass-card p-6">
-          <p className="text-xs text-slate-400 uppercase tracking-wider mb-3">Search Company</p>
+          <p className="text-xs text-slate-400 uppercase tracking-wider mb-3">Search Company {loading && <span className="text-blue-400 normal-case">· building model…</span>}</p>
           <div className="relative">
             <div className="flex items-center gap-2 bg-white/[0.03] border border-white/[0.1] rounded-xl px-3 py-2.5">
               <Search className="w-4 h-4 text-slate-500" />
               <input value={search}
                 onChange={e=>{setSearch(e.target.value);setOpen(true)}}
                 onFocus={()=>setOpen(true)}
-                placeholder="Ticker or company name…"
+                data-testid="dcf-company-search"
+                placeholder="Search 3,000+ companies by ticker or name…"
                 className="bg-transparent text-sm text-white placeholder:text-slate-600 outline-none flex-1" />
             </div>
-            {open && filtered.length > 0 && (
+            {open && results.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 glass-card border border-white/[0.1] z-20 max-h-60 overflow-y-auto rounded-xl">
-                {filtered.map(c=>(
+                {results.map(c=>(
                   <button key={c.ticker} onClick={()=>onSelect(c.ticker)}
                     className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.05] text-left transition-colors">
                     <span className="font-mono font-bold text-blue-400 text-sm w-14">{c.ticker}</span>
@@ -1002,9 +1161,9 @@ function CompanySelector({ onSelect }) {
             )}
           </div>
 
-          <p className="text-[10px] text-slate-600 uppercase tracking-wider mt-5 mb-3">Quick Select</p>
+          <p className="text-[10px] text-slate-600 uppercase tracking-wider mt-5 mb-3">Largest Companies</p>
           <div className="grid grid-cols-3 gap-2">
-            {COMPANY_UNIVERSE.slice(0,9).map(c=>(
+            {defaults.map(c=>(
               <button key={c.ticker} onClick={()=>onSelect(c.ticker)}
                 className="p-3 border border-white/[0.06] rounded-xl hover:border-blue-500/30 hover:bg-blue-500/5 text-left transition-all">
                 <p className="font-mono font-bold text-blue-400 text-sm">{c.ticker}</p>
@@ -1022,8 +1181,9 @@ function CompanySelector({ onSelect }) {
                 ["Summary", "Valuation bridge, revenue chart, bull/base/bear scenarios"],
                 ["Assumptions", "Editable WACC, revenue growth, margins, terminal value"],
                 ["DCF Model", "Full UFCF build: NOPAT + D&A − CapEx − ΔNWC"],
-                ["Sensitivity", "WACC vs TGR and Revenue vs Margin tables — 35+ scenarios each"],
-                ["Investment Memo", "Thesis, valuation, scenarios, risks — exportable"],
+                ["Historicals", "5 years of reported income & cash-flow statements"],
+                ["Comparables", "Peer trading multiples, analyst consensus, macro & industry"],
+                ["Sources", "Every assumption with source, reasoning & confidence"],
               ].map(([tab,desc])=>(
                 <div key={tab} className="flex items-start gap-3">
                   <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
@@ -1036,8 +1196,8 @@ function CompanySelector({ onSelect }) {
             </div>
           </div>
           <div className="glass-card p-4 border-blue-500/20">
-            <p className="text-xs font-semibold text-blue-300 mb-1">Professional Excel Export</p>
-            <p className="text-xs text-slate-500">Download a fully formatted Excel workbook with Cover, Historical Financials, Revenue Build, DCF, Sensitivity Tables, and Investment Memo — ready for institutional distribution.</p>
+            <p className="text-xs font-semibold text-blue-300 mb-1">Built from live API data</p>
+            <p className="text-xs text-slate-500">Financials, consensus estimates and treasury rates via Financial Modeling Prep. Every forward assumption is sourced; missing data is flagged, never fabricated.</p>
           </div>
         </div>
       </div>
@@ -1051,6 +1211,9 @@ const TABS = [
   { id:"assumptions", label:"Assumptions",     Icon: Edit3 },
   { id:"dcf",         label:"DCF Model",       Icon: Calculator },
   { id:"sensitivity", label:"Sensitivity",     Icon: BarChart2 },
+  { id:"historicals", label:"Historicals",     Icon: History },
+  { id:"comps",       label:"Comparables",     Icon: Users },
+  { id:"sources",     label:"Sources",         Icon: FileText },
   { id:"memo",        label:"Investment Memo", Icon: BookOpen },
 ];
 
@@ -1058,21 +1221,32 @@ export default function Modeling() {
   const [ticker, setTicker]   = useState(null);
   const [tab, setTab]         = useState("summary");
   const [assumptions, setAss] = useState(null);
+  const [company, setCompany] = useState(null);
+  const [payload, setPayload] = useState(null);
   const [generating, setGen]  = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const c = COMPANY_UNIVERSE.find(co => co.ticker === ticker) || null;
+  const c = company;
 
-  const selectCompany = useCallback((t) => {
-    const co = COMPANY_UNIVERSE.find(x => x.ticker === t);
-    if (!co) return;
-    setTicker(t);
-    setAss(buildDefaults(co));
-    setTab("summary");
+  const selectCompany = useCallback(async (t) => {
+    setLoading(true);
+    try {
+      const data = await fetchDcf(t);
+      setCompany(data.company);
+      setAss(JSON.parse(JSON.stringify(data.assumptions)));
+      setPayload(data);
+      setTicker(t);
+      setTab("summary");
+    } catch (err) {
+      toast.error(`Could not build model for ${t}: insufficient financial data`);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const setAssKey   = (key, val) => setAss(prev => ({ ...prev, [key]: val }));
   const setAssArr   = (key, i, val) => setAss(prev => { const a=[...prev[key]]; a[i]=val; return {...prev,[key]:a}; });
-  const resetAss    = () => { if (c) setAss(buildDefaults(c)); };
+  const resetAss    = () => { if (payload?.assumptions) setAss(JSON.parse(JSON.stringify(payload.assumptions))); };
 
   const model = useMemo(() => {
     if (!c || !assumptions) return null;
@@ -1084,8 +1258,8 @@ export default function Modeling() {
     setGen(true);
     try {
       toast.loading(`Building Excel model for ${c.ticker}…`, { id:"model" });
-      await new Promise(r => setTimeout(r, 1800));
-      await generateExcelModel(c);
+      await new Promise(r => setTimeout(r, 800));
+      await generateExcelModel({ ...c, ...(payload || {}) });
       toast.success(`${c.ticker} Excel model downloaded`, { id:"model" });
     } catch (err) {
       toast.error(`Export failed: ${err.message}`, { id:"model" });
@@ -1093,7 +1267,7 @@ export default function Modeling() {
   };
 
   if (!c || !model || !assumptions) {
-    return <CompanySelector onSelect={selectCompany} />;
+    return <CompanySelector onSelect={selectCompany} loading={loading} />;
   }
 
   const isUp = model.implied >= c.price;
@@ -1104,7 +1278,7 @@ export default function Modeling() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <button onClick={()=>{setTicker(null);setAss(null);}}
+            <button onClick={()=>{setTicker(null);setAss(null);setCompany(null);setPayload(null);}}
               className="text-xs text-slate-500 hover:text-slate-300 transition-colors">← All Companies</button>
             <ChevronRight className="w-3 h-3 text-slate-600" />
             <span className="text-xs text-slate-400">{c.name}</span>
@@ -1112,14 +1286,14 @@ export default function Modeling() {
           <h1 className="text-xl font-bold text-white">
             {c.name} <span className="text-slate-500 font-mono text-base">({c.ticker})</span>
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">{c.sector} · {c.industry} · {c.marketCapCategory||"Large-Cap"}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{c.sector} · {c.industry}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={resetAss}
             className="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-400 hover:text-white border border-white/[0.08] hover:border-white/[0.15] rounded-lg transition-colors">
             <RotateCcw className="w-3 h-3" /> Reset
           </button>
-          <button onClick={handleExport} disabled={generating}
+          <button onClick={handleExport} disabled={generating} data-testid="dcf-export-button"
             className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50">
             <FileSpreadsheet className="w-3.5 h-3.5" />
             {generating ? "Building…" : "Export Excel"}
@@ -1128,7 +1302,7 @@ export default function Modeling() {
       </div>
 
       {/* Key stat bar */}
-      <div className={`glass-card px-5 py-3 border ${isUp?"border-emerald-500/20":"border-red-500/20"} flex items-center gap-6 flex-wrap`}>
+      <div className={`glass-card px-5 py-3 border ${isUp?"border-emerald-500/20":"border-red-500/20"} flex items-center gap-6 flex-wrap`} data-testid="dcf-stat-bar">
         {[
           { l:"Current Price",    v: `$${c.price.toFixed(2)}` },
           { l:"DCF Implied",      v: `$${model.implied.toFixed(2)}`, c: isUp?"text-emerald-400":"text-red-400" },
@@ -1147,9 +1321,9 @@ export default function Modeling() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center border-b border-white/[0.06] gap-0">
+      <div className="flex items-center border-b border-white/[0.06] gap-0 overflow-x-auto">
         {TABS.map(({id,label,Icon}) => (
-          <button key={id} onClick={()=>setTab(id)}
+          <button key={id} onClick={()=>setTab(id)} data-testid={`dcf-tab-${id}`}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${
               tab===id ? "border-blue-500 text-white" : "border-transparent text-slate-500 hover:text-slate-300"
             }`}>
@@ -1163,6 +1337,9 @@ export default function Modeling() {
       {tab==="assumptions" && <AssumptionsTab  assumptions={assumptions} setAss={setAssKey} setAssArr={setAssArr} model={model} c={c} />}
       {tab==="dcf"         && <DCFTab          c={c} model={model} assumptions={assumptions} />}
       {tab==="sensitivity" && <SensitivityTab  model={model} assumptions={assumptions} c={c} />}
+      {tab==="historicals" && <HistoricalsTab  payload={payload} />}
+      {tab==="comps"       && <CompsTab        payload={payload} c={c} />}
+      {tab==="sources"     && <SourcesTab      assumptions={assumptions} />}
       {tab==="memo"        && <MemoTab         c={c} model={model} assumptions={assumptions} />}
     </div>
   );
