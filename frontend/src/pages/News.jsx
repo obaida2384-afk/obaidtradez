@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchMarketNews, fetchNewsSuggestions } from "@/lib/companyUniverse";
+import { getRating } from "@/lib/rating";
 import { Newspaper, Filter, TrendingUp, TrendingDown, Minus, ArrowUpRight, Sparkles } from "lucide-react";
 
 const SENTIMENT_STYLE = {
@@ -101,6 +102,7 @@ function NewsCard({ n, onClick }) {
 function SuggestionCard({ s, onClick }) {
   const sent = SENTIMENT_STYLE[String(s.newsSentiment || "neutral").toLowerCase()] || SENTIMENT_STYLE.neutral;
   const up = s.analystUpsidePct;
+  const rec = getRating({ upsidePct: s.analystUpsidePct, opportunityScore: s.opportunityScore, newsSentiment: s.newsSentiment });
   return (
     <div onClick={onClick} data-testid="news-suggestion-card" className="glass-card p-4 hover:border-white/[0.1] cursor-pointer transition-all group min-w-[220px]">
       <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -109,6 +111,9 @@ function SuggestionCard({ s, onClick }) {
       </div>
       <p className="text-xs font-semibold text-slate-200 truncate">{s.name}</p>
       <p className="text-[11px] text-slate-500 mb-2">{s.sector}</p>
+      <div className="mb-2">
+        <span data-testid="news-suggestion-rating" className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${rec.className}`}>{rec.label}</span>
+      </div>
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-slate-400">{s.price != null ? `$${s.price}` : "—"}</span>
         {up != null && (

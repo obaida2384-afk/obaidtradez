@@ -5,6 +5,7 @@ import {
   EARNINGS_CALENDAR, ANALYST_ACTIONS, NEWS_FEED, DISCOVERY_RESULTS,
 } from "@/lib/mockData";
 import { fetchNewsSuggestions } from "@/lib/companyUniverse";
+import { getRating } from "@/lib/rating";
 import {
   TrendingUp, TrendingDown, Calendar, Sparkles,
   Telescope, Newspaper, AlertCircle, ChevronRight, Globe, Flame, ArrowUpRight,
@@ -132,24 +133,28 @@ function TrendingNow() {
   const rest = ideas.slice(1, 4);
   const up = (top.analystUpsidePct ?? 0) >= 0;
   const sentColor = top.newsSentiment === "Positive" ? "text-emerald-400" : top.newsSentiment === "Negative" ? "text-red-400" : "text-slate-400";
+  const topRec = getRating({ upsidePct: top.analystUpsidePct, opportunityScore: top.opportunityScore, newsSentiment: top.newsSentiment });
 
   return (
     <div data-testid="trending-now-banner" className="glass-card p-5 border border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.06] to-transparent">
       <div className="flex items-center gap-2 mb-3">
         <Flame className="w-4 h-4 text-emerald-400" />
         <h2 className="text-sm font-semibold text-white">Trending Now</h2>
-        <span className="text-[11px] text-slate-500">Top news-driven idea today</span>
+        <span className="text-[11px] text-slate-500">Top news-driven idea today · click for instant DCF</span>
         <button onClick={() => navigate("/news")} data-testid="trending-all-ideas" className="ml-auto text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
           All ideas <ChevronRight className="w-3 h-3" />
         </button>
       </div>
       <div className="flex items-center gap-4 flex-wrap">
-        <button onClick={() => navigate(`/research?ticker=${top.ticker}`)} data-testid="trending-top-idea" className="flex items-center gap-4 flex-1 min-w-[260px] text-left group">
+        <button onClick={() => navigate(`/modeling?ticker=${top.ticker}`)} title="Open DCF model" data-testid="trending-top-idea" className="flex items-center gap-4 flex-1 min-w-[260px] text-left group">
           <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
             <span className="font-mono font-bold text-emerald-400 text-sm">{top.ticker}</span>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-300 transition-colors">{top.name}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-semibold text-white truncate group-hover:text-emerald-300 transition-colors">{top.name}</p>
+              <span data-testid="trending-top-rating" className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${topRec.className}`}>{topRec.label}</span>
+            </div>
             <p className="text-[11px] text-slate-500">
               {top.sector} · {top.newsMentions} mentions (30d) · <span className={sentColor}>{top.newsSentiment} news</span>
             </p>
@@ -164,12 +169,15 @@ function TrendingNow() {
         </button>
         {rest.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
-            {rest.map((r) => (
-              <button key={r.ticker} onClick={() => navigate(`/research?ticker=${r.ticker}`)} className="flex items-center gap-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-2 transition-colors">
-                <span className="font-mono font-bold text-blue-400 text-xs">{r.ticker}</span>
-                <span className="text-[11px] text-slate-500">{r.newsMentions}×</span>
-              </button>
-            ))}
+            {rest.map((r) => {
+              const rRec = getRating({ upsidePct: r.analystUpsidePct, opportunityScore: r.opportunityScore, newsSentiment: r.newsSentiment });
+              return (
+                <button key={r.ticker} onClick={() => navigate(`/modeling?ticker=${r.ticker}`)} title="Open DCF model" className="flex items-center gap-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] rounded-lg px-3 py-2 transition-colors">
+                  <span className="font-mono font-bold text-blue-400 text-xs">{r.ticker}</span>
+                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${rRec.className}`}>{rRec.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

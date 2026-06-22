@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { COMPANY_UNIVERSE } from "@/lib/mockData";
 import { fetchCompanies, fetchDcf } from "@/lib/companyUniverse";
 import { generateExcelModel } from "@/lib/excelExporter";
+import { getRating, RATING_STYLE } from "@/lib/rating";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Search, FileSpreadsheet, Calculator, Edit3, RotateCcw,
@@ -1225,6 +1227,7 @@ export default function Modeling() {
   const [payload, setPayload] = useState(null);
   const [generating, setGen]  = useState(false);
   const [loading, setLoading] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const c = company;
 
@@ -1253,13 +1256,25 @@ export default function Modeling() {
     try { return computeDCF(c, assumptions); } catch { return null; }
   }, [c, assumptions]);
 
+  const rec = useMemo(
+    () => (model && c)
+      ? getRating({ upsidePct: model.upside, secondaryUpsidePct: payload?.analyst?.impliedUpside, opportunityScore: c.opportunityScore })
+      : { label: "Hold", className: RATING_STYLE.Hold },
+    [model, c, payload]
+  );
+
+  useEffect(() => {
+    const t = searchParams.get("ticker");
+    if (t && !ticker && !loading) selectCompany(t.toUpperCase());
+  }, [searchParams, ticker, loading, selectCompany]);
+
   const handleExport = async () => {
     if (!c) return;
     setGen(true);
     try {
       toast.loading(`Building Excel model for ${c.ticker}…`, { id:"model" });
       await new Promise(r => setTimeout(r, 800));
-      await generateExcelModel({ company: c, ...(payload || {}) });
+      await generateExcelModel({ company: c, ...(payload || {}), recommendation: rec.label });
       toast.success(`${c.ticker} Excel model downloaded`, { id:"model" });
     } catch (err) {
       toast.error(`Export failed: ${err.message}`, { id:"model" });
@@ -1278,7 +1293,7 @@ export default function Modeling() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <button onClick={()=>{setTicker(null);setAss(null);setCompany(null);setPayload(null);}}
+            <button onClick={()=>{setTicker(null);setAss(null);setCompany(null);setPayload(null);setSearchParams({});}}
               className="text-xs text-slate-500 hover:text-slate-300 transition-colors">← All Companies</button>
             <ChevronRight className="w-3 h-3 text-slate-600" />
             <span className="text-xs text-slate-400">{c.name}</span>
@@ -1287,6 +1302,9 @@ export default function Modeling() {
             {c.name} <span className="text-slate-500 font-mono text-base">({c.ticker})</span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">{c.sector} · {c.industry}</p>
+          <span data-testid="dcf-recommendation" className={`inline-flex items-center gap-1.5 mt-2 text-xs font-bold px-3 py-1 rounded-full border ${rec.className}`}>
+            Recommendation: {rec.label}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={resetAss}

@@ -70,6 +70,7 @@ export async function generateExcelModel(model) {
     ["Current Price", company.price != null ? `$${company.price}` : "—"],
     ["Analyst Consensus", analyst?.consensus || "—"],
     ["Consensus Target", analyst?.targetConsensus != null ? `$${analyst.targetConsensus}` : "—"],
+    ["Recommendation", model.recommendation || "—"],
     ["Model Date", new Date().toISOString().slice(0, 10)],
   ];
   coverRows.forEach(([k, v], i) => {
@@ -78,6 +79,8 @@ export async function generateExcelModel(model) {
     cover.getCell(`B${row}`).font = { bold: true, color: { argb: DARK } };
     cover.getCell(`C${row}`).value = v == null ? "—" : v;
   });
+  const recArgbCover = /Strong Buy|^Buy/.test(model.recommendation || "") ? GREEN : /Avoid|Not a Good/.test(model.recommendation || "") ? RED : DARK;
+  cover.getCell("C13").font = { bold: true, color: { argb: recArgbCover } };
   cover.getCell("B16").value = "Educational research only. Not investment advice. Outputs depend on assumptions, which are uncertain.";
   cover.getCell("B16").font = { italic: true, size: 9, color: { argb: "FF808080" } };
   cover.mergeCells("B16:D16");
@@ -240,6 +243,17 @@ export async function generateExcelModel(model) {
   const eq = set("(–) Debt (+) Cash → Equity ($M)", `C${ev}-$C$9+$C$10`, usd);
   const impl = set("Implied Value / Share", `C${eq}/$C$11`, ps, GREEN);
   set("Implied Upside / (Downside)", `C${impl}/$C$12-1`, pf);
+
+  v += 2;
+  ws.getCell(`A${v}`).value = "Recommendation";
+  ws.getCell(`A${v}`).font = { bold: true };
+  const recArgb = /Strong Buy|^Buy/.test(model.recommendation || "") ? GREEN : /Avoid|Not a Good/.test(model.recommendation || "") ? RED : DARK;
+  const recCell = ws.getCell(`C${v}`);
+  recCell.value = model.recommendation || "—";
+  recCell.font = { bold: true, color: { argb: recArgb } };
+  recCell.fill = fill(GRAY);
+  recCell.border = allBorders;
+  recCell.alignment = { horizontal: "right" };
 
   // ════════════════════════ HISTORICAL FINANCIALS ════════════════════════
   if (hist?.rows?.length) {
