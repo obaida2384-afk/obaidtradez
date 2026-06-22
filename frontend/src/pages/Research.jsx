@@ -150,7 +150,7 @@ export default function Research() {
   const [tab, setTab] = useState("overview");
 
   const featured = COMPANY_UNIVERSE.slice(0, 8);
-  const quotes = useQuotes([...featured.map((x) => x.ticker), ...(company ? [company.ticker] : [])]);
+  const { prices: quotes, asOf: quotesAsOf } = useQuotes([...featured.map((x) => x.ticker), ...(company ? [company.ticker] : [])]);
 
   const rating = company ? getImpliedRating(company) : null;
   const ratingStyle = rating ? RATINGS[rating] : null;
@@ -250,6 +250,12 @@ export default function Research() {
               {up ? "+" : ""}{fmt(c.change)} ({up ? "+" : ""}{fmt(c.pct)}%)
             </p>
             <p className="text-xs text-slate-500 mt-1">Market Cap: {fmtM(company.marketCap)}</p>
+            {quotesAsOf && quotes[company.ticker] && (
+              <p className="text-[10px] text-emerald-400/80 mt-1 flex items-center justify-end gap-1" data-testid="research-price-asof">
+                <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                Live · as of {new Date(quotesAsOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </p>
+            )}
           </div>
         </div>
 

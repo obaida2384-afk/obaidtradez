@@ -1227,6 +1227,7 @@ export default function Modeling() {
   const [payload, setPayload] = useState(null);
   const [generating, setGen]  = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadedAt, setLoadedAt] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const c = company;
@@ -1239,6 +1240,7 @@ export default function Modeling() {
       setAss(JSON.parse(JSON.stringify(data.assumptions)));
       setPayload(data);
       setTicker(t);
+      setLoadedAt(new Date().toISOString());
       setTab("summary");
     } catch (err) {
       toast.error(`Could not build model for ${t}: insufficient financial data`);
@@ -1274,7 +1276,7 @@ export default function Modeling() {
     try {
       toast.loading(`Building Excel model for ${c.ticker}…`, { id:"model" });
       await new Promise(r => setTimeout(r, 800));
-      await generateExcelModel({ company: c, ...(payload || {}), recommendation: rec.label });
+      await generateExcelModel({ company: c, ...(payload || {}), recommendation: rec.label, priceAsOf: loadedAt });
       toast.success(`${c.ticker} Excel model downloaded`, { id:"model" });
     } catch (err) {
       toast.error(`Export failed: ${err.message}`, { id:"model" });
@@ -1337,6 +1339,12 @@ export default function Modeling() {
           </div>
         ))}
       </div>
+      {loadedAt && (
+        <p className="text-[10px] text-emerald-400/80 -mt-3 flex items-center gap-1" data-testid="dcf-price-asof">
+          <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+          Live data as of {new Date(loadedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+        </p>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center border-b border-white/[0.06] gap-0 overflow-x-auto">

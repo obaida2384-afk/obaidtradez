@@ -72,6 +72,7 @@ export async function generateExcelModel(model) {
     ["Consensus Target", analyst?.targetConsensus != null ? `$${analyst.targetConsensus}` : "—"],
     ["Recommendation", model.recommendation || "—"],
     ["Model Date", new Date().toISOString().slice(0, 10)],
+    ["Live Price As Of", model.priceAsOf ? new Date(model.priceAsOf).toLocaleString() : "—"],
   ];
   coverRows.forEach(([k, v], i) => {
     const row = 6 + i;

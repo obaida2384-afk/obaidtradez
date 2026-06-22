@@ -148,7 +148,7 @@ export default function FutureGiants() {
     })();
   }, []);
 
-  const quotes = useQuotes(giants.map((g) => g.ticker));
+  const { prices: quotes } = useQuotes(giants.map((g) => g.ticker));
 
   return (
     <div className="space-y-6 animate-fade-in">

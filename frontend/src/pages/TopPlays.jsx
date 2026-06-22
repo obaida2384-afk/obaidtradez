@@ -211,7 +211,7 @@ export default function TopPlays() {
     })();
   }, []);
 
-  const quotes = useQuotes(plays.map((p) => p.ticker));
+  const { prices: quotes } = useQuotes(plays.map((p) => p.ticker));
 
   return (
     <div className="space-y-6 animate-fade-in">
