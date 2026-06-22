@@ -104,5 +104,10 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - P1 Phase 6: Excel export (multi-sheet, formula-driven, formatting/charts) + fast accurate live prices.
 
 ## Notes
-- Live data requires API keys (FMP/Polygon/Finnhub/etc.) — currently unset, app runs in Demo Mode.
-- Auth is client-side demo (localStorage, any credentials accepted) — see test_credentials.md.
+- Live data is active via backend keys (FMP + StockNewsAPI in backend/.env). A green "Live Data" indicator (Header/Dashboard/Settings, backed by GET /api/status) reflects real status + data freshness.
+- Auth is a single-owner gate: Username obaidtradez, validated server-side via /api/auth/access (ACCESS_USERNAME/ACCESS_CODE_HASH). Public signup disabled. See test_credentials.md.
+
+### 2026-06-22 — Price-accuracy fix + Live-Data indicator (DONE)
+- Bug (NVDA showed $120): Research.jsx rendered hardcoded MOCK prices (mockData NVDA $120.44); backend live price was always correct (FMP NVDA $208.72). Fixed Research to override displayed prices with live FMP batch quotes via useQuotes (selected company + 8 Featured cards). Scenario %, consensus-target % and AI-thesis assessment now use live price.
+- Smart Live-Data indicator: added backend GET /api/status + useLiveStatus hook + fetchStatus. Header (App.js), Dashboard, and Settings now show green "Live Data / Live Market Data Active" with universe count + "refreshed Xh ago" (amber "Data source offline" if backend unreachable). Replaces the misleading per-user-apiKey "Demo Mode" notices.
+- Verified testing_agent iteration_4.json — 100% (7/7): NVDA $208.62 live (mock gone), AAPL $299, Featured grid live, all Research tabs render, green indicators on Header/Dashboard/Settings.
