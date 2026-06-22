@@ -222,6 +222,8 @@ class CompanyUniverseService:
 
         # Analyst
         analyst_pt = _f(ptc0.get("targetConsensus") or ptc0.get("targetMedian")) if ptc0 else None
+        analyst_pt_high = _f(ptc0.get("targetHigh")) if ptc0 else None
+        analyst_pt_low = _f(ptc0.get("targetLow")) if ptc0 else None
         analyst_rating = (grades0.get("consensus") if grades0 else None)
         revisions = None
         if isinstance(estimates, list) and len(estimates) >= 2:
@@ -285,6 +287,8 @@ class CompanyUniverseService:
             "epsGrowth": eps_growth,
             "analystRating": analyst_rating,
             "analystPriceTarget": _round(analyst_pt),
+            "analystPriceTargetHigh": _round(analyst_pt_high),
+            "analystPriceTargetLow": _round(analyst_pt_low),
             "analystEstimateRevisions": revisions,
             "analystUpsidePct": upside_pct,
             "institutionalOwnershipTrend": institutional_trend,
@@ -478,6 +482,218 @@ class CompanyUniverseService:
 
     async def get_company(self, ticker: str) -> Optional[Dict]:
         return await self.db[self.COLLECTION].find_one({"ticker": ticker.upper()}, {"_id": 0})
+
+    # ---------- short-term growth ranking (Phase 3) ----------
+
+    def _size_tilt(self, market_cap: Optional[float]) -> float:
+        """Down-weight mega caps so they don't dominate; favour mid/small caps."""
+        mc = market_cap or 0
+        if mc >= 200e9:
+            return 0.85
+        if mc >= 10e9:
+            return 1.0
+        if mc >= 2e9:
+            return 1.12
+        if mc >= 300e6:
+            return 1.16
+        return 1.08  # micro: modest tilt (offset by liquidity risk)
+
+    def _short_term_score(self, c: Dict) -> Optional[float]:
+        score, weight = 0.0, 0.0
+        accel = c.get("revenueAcceleration")
+        if accel is not None:
+            score += max(0, min(100, 50 + accel * 3)) * 0.20; weight += 0.20
+        rg = c.get("revenueGrowth")
+        if rg is not None:
+            score += max(0, min(100, rg * 2)) * 0.15; weight += 0.15
+        eps = c.get("epsGrowth")
+        if eps is not None:
+            score += max(0, min(100, 50 + eps)) * 0.10; weight += 0.10
+        rev = c.get("analystEstimateRevisions")
+        if rev:
+            score += (75 if rev == "Rising" else 35 if rev == "Falling" else 55) * 0.10; weight += 0.10
+        up = c.get("analystUpsidePct")
+        if up is not None:
+            score += max(0, min(100, 50 + up)) * 0.15; weight += 0.15
+        fcf = c.get("fcfMargin")
+        if fcf is not None:
+            score += max(0, min(100, fcf * 3)) * 0.10; weight += 0.10
+        pe = (c.get("valuationMultiples") or {}).get("pe")
+        anchor = SECTOR_PE_ANCHOR.get(c.get("sector") or "default", SECTOR_PE_ANCHOR["default"])
+        if pe and pe > 0:
+            score += max(0, min(100, (anchor / pe) * 50)) * 0.10; weight += 0.10
+        rating = c.get("analystRating")
+        if rating:
+            score += (70 if "Buy" in str(rating) else 50 if "Hold" in str(rating) else 35) * 0.10; weight += 0.10
+        if weight < 0.4:
+            return None
+        base = score / weight
+        return round(min(100, base * self._size_tilt(c.get("marketCap"))), 1)
+
+    def _growth_view(self, c: Dict) -> Dict:
+        price = c.get("price")
+        pt = c.get("analystPriceTarget")
+        high = c.get("analystPriceTargetHigh")
+        low = c.get("analystPriceTargetLow")
+        rg = c.get("revenueGrowth")
+        accel = c.get("revenueAcceleration")
+        pe = (c.get("valuationMultiples") or {}).get("pe")
+        risk = c.get("riskScore") or 45
+        beta = c.get("beta")
+        rating = c.get("analystRating")
+
+        # Discard implausible analyst targets (bad/stale data on illiquid names).
+        def sane(t, lo=0.4, hi=2.5):
+            return t if (t and price and lo * price <= t <= hi * price) else None
+
+        pt_ok = sane(pt)
+        base_price = pt_ok or (round(price * (1 + (rg or 0) / 200), 2) if price else None)
+        if price and high and base_price and base_price <= high <= 3 * price:
+            bull_price = high
+        elif price:
+            bull_price = round(price * (1 + min(0.45, max(0.12, (rg or 12) / 100))), 2)
+        else:
+            bull_price = None
+        if price and low and 0.3 * price <= low <= price:
+            bear_price = low
+        elif price:
+            bear_price = round(price * (1 - min(0.4, risk / 200)), 2)
+        else:
+            bear_price = None
+        # Keep ordering bear <= base <= bull
+        if base_price and bull_price:
+            base_price = min(base_price, bull_price)
+        if base_price and bear_price:
+            base_price = max(base_price, bear_price)
+
+        up = round((pt_ok - price) / price * 100, 1) if (pt_ok and price) else None
+
+        def thesis(kind):
+            if kind == "bull":
+                return ("Growth re-accelerates and margins expand while the multiple holds; "
+                        "analyst high target is reached.")
+            if kind == "bear":
+                return ("Growth decelerates or margins compress and the multiple de-rates toward sector median.")
+            return "Company tracks consensus estimates with the multiple roughly unchanged."
+
+        # Why the market may be wrong
+        why_bits = []
+        if pe and accel is not None and accel > 0:
+            why_bits.append(f"trades at {pe}x earnings while revenue growth is accelerating (+{accel:.1f}pp YoY)")
+        elif pe and rg is not None:
+            why_bits.append(f"trades at {pe}x earnings on {rg:.1f}% revenue growth")
+        if up is not None and up > 0:
+            why_bits.append(f"consensus implies {up:.1f}% upside")
+        if c.get("analystEstimateRevisions") == "Rising":
+            why_bits.append("forward estimates are trending higher")
+        why_wrong = (f"{c.get('companyName')} " + ", ".join(why_bits) +
+                     " — the market may be underpricing the durability of the growth.") if why_bits else \
+                    "Limited disclosed data; treat as a watch-list candidate pending more coverage."
+
+        # What could invalidate
+        invalidate = []
+        if accel is not None and accel > 0:
+            invalidate.append("revenue growth re-decelerates")
+        invalidate.append("margins compress")
+        invalidate.append("the multiple de-rates toward sector median")
+        if beta is not None and beta >= 1.3:
+            invalidate.append(f"high beta ({beta}) amplifies drawdowns in risk-off markets")
+
+        # Catalysts & risks
+        catalysts = []
+        if c.get("analystEstimateRevisions") == "Rising":
+            catalysts.append("Rising analyst estimates")
+        if accel is not None and accel > 0:
+            catalysts.append("Accelerating revenue")
+        if rating and "Buy" in str(rating):
+            catalysts.append("Buy-rated consensus")
+        if up is not None and up > 15:
+            catalysts.append(f"{up:.0f}% to consensus target")
+        catalysts.append("Next earnings report")
+
+        risks = []
+        if pe and pe > SECTOR_PE_ANCHOR.get(c.get("sector") or "default", 20) * 1.3:
+            risks.append("Premium valuation vs sector")
+        if accel is not None and accel < 0:
+            risks.append("Decelerating growth")
+        if c.get("fcfMargin") is not None and c.get("fcfMargin") < 0:
+            risks.append("Negative free cash flow")
+        if beta is not None and beta >= 1.3:
+            risks.append(f"High volatility (beta {beta})")
+        if not risks:
+            risks.append("Execution and macro risk")
+
+        return {
+            "ticker": c.get("ticker"),
+            "name": c.get("companyName"),
+            "sector": c.get("sector"),
+            "marketCap": c.get("marketCap"),
+            "marketCapLabel": c.get("marketCapLabel"),
+            "price": price,
+            "opportunityScore": c.get("opportunityScore"),
+            "growthScore": c.get("growthScore"),
+            "riskScore": c.get("riskScore"),
+            "analystRating": rating,
+            "analystConsensusTarget": pt_ok,
+            "avgPt": pt_ok,
+            "analystUpsidePct": up,
+            "valuationMultiples": c.get("valuationMultiples"),
+            "revenueGrowth": rg,
+            "revenueAcceleration": accel,
+            "fcfMargin": c.get("fcfMargin"),
+            "ebitdaMargin": c.get("ebitdaMargin"),
+            "analystEstimateRevisions": c.get("analystEstimateRevisions"),
+            "shariah": c.get("shariahStatus") or "Unknown",
+            "whyMarketMayBeWrong": why_wrong,
+            "whatInvalidates": "Thesis breaks if " + ", ".join(invalidate) + ".",
+            "keyCatalysts": catalysts,
+            "keyRisks": risks,
+            "bullCase": {"price": bull_price, "thesis": thesis("bull")},
+            "baseCase": {"price": round(base_price, 2) if base_price else None, "thesis": thesis("base")},
+            "bearCase": {"price": bear_price, "thesis": thesis("bear")},
+            "source": c.get("source", {}),
+            "lastUpdated": c.get("lastUpdated"),
+        }
+
+    async def rank_short_term_growth(self, limit: int = 30, max_megacap: int = 6) -> Dict:
+        col = self.db[self.COLLECTION]
+        proj = {
+            "_id": 0, "ticker": 1, "companyName": 1, "sector": 1, "marketCap": 1,
+            "marketCapLabel": 1, "price": 1, "opportunityScore": 1, "riskScore": 1, "beta": 1,
+            "revenueGrowth": 1, "revenueAcceleration": 1, "epsGrowth": 1, "fcfMargin": 1,
+            "ebitdaMargin": 1, "analystRating": 1, "analystPriceTarget": 1,
+            "analystPriceTargetHigh": 1, "analystPriceTargetLow": 1, "analystUpsidePct": 1,
+            "analystEstimateRevisions": 1, "valuationMultiples": 1, "shariahStatus": 1,
+            "source": 1, "lastUpdated": 1,
+        }
+        docs = await col.find({"opportunityScore": {"$ne": None}}, proj).to_list(length=5000)
+        ranked = []
+        for c in docs:
+            s = self._short_term_score(c)
+            if s is None:
+                continue
+            c["growthScore"] = s
+            ranked.append(c)
+        ranked.sort(key=lambda x: x["growthScore"], reverse=True)
+
+        # Cap mega-cap presence so the list isn't dominated by the obvious names.
+        selected, megas = [], 0
+        for c in ranked:
+            is_mega = (c.get("marketCap") or 0) >= 200e9
+            if is_mega and megas >= max_megacap:
+                continue
+            if is_mega:
+                megas += 1
+            selected.append(c)
+            if len(selected) >= limit:
+                break
+
+        return {
+            "companies": [self._growth_view(c) for c in selected],
+            "total_ranked": len(ranked),
+            "megacap_in_list": megas,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     async def coverage(self) -> Dict:
         col = self.db[self.COLLECTION]

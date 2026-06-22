@@ -38,6 +38,13 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - KNOWN MINOR: Discovery card label "DCF upside" currently shows analyst-consensus upside (real DCF arrives in Phase 5). Global "Demo Mode" header banner is driven by user's own localStorage apiKeys (separate from server FMP key) — left as-is.
 - NOT YET (next): institutional ownership / insider endpoints (currently flagged Estimated); wiring Research/TopPlays/FutureGiants list views; Research/Modeling detail stay on mock until Phase 5 (need DCF fields).
 
+### 2026-06-22 — Phase 3: Short-Term Growth Opportunities (DONE)
+- `company_universe.py`: added `analystPriceTargetHigh/Low` to enrichment; `_short_term_score` (revenue accel, growth, EPS, est. revisions, analyst upside, FCF, valuation dislocation, rating) with a **size tilt that de-emphasises mega caps** (0.85x mega → 1.16x small); `_growth_view` builds bull/base/bear price scenarios, "why the market may be wrong", "what could invalidate", key catalysts & risks — all from real data. Sanity clamps discard implausible analyst targets (filters garbage on illiquid names/closed-end funds).
+- `rank_short_term_growth(limit, max_megacap)` ranks the 3,000 universe, caps mega-cap count in the list.
+- `server.py`: `GET /api/universe/short-term-growth`.
+- Frontend: `companyUniverse.js` `fetchShortTermGrowth` (rounds marketCap→millions); `TopPlays.jsx` wired to live ranking with graceful mock fallback — relabelled to "Why The Market May Be Wrong", added Key Catalysts / Key Risks chips + "What Could Invalidate The Thesis", null-safe scenarios, data-testids, live data note.
+- Verified: 25 live plays, 1,259 ranked, 0–5 mega caps, mid/small-cap names dominate (MAKO, DEC, CRMD, GPOR…), clean market caps, scenarios + narratives render. No fabricated numbers.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).

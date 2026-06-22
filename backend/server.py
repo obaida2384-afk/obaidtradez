@@ -2151,6 +2151,15 @@ async def universe_coverage(auth: bool = Depends(verify_access)):
     """Universe size, freshness, sector/market-cap breakdown, data-source status."""
     return await company_universe_service.coverage()
 
+@api_router.get("/universe/short-term-growth")
+async def universe_short_term_growth(
+    limit: int = Query(default=30, ge=5, le=100),
+    max_megacap: int = Query(default=6, ge=0, le=50),
+    auth: bool = Depends(verify_access),
+):
+    """Asymmetric short-term growth ranking (mega caps de-emphasised)."""
+    return await company_universe_service.rank_short_term_growth(limit=limit, max_megacap=max_megacap)
+
 @api_router.post("/universe/build")
 async def build_universe(
     background_tasks: BackgroundTasks,

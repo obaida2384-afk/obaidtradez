@@ -1,7 +1,7 @@
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Backend stores marketCap in absolute dollars; the UI helpers expect millions.
-const toMillions = (mc) => (mc == null ? null : mc / 1e6);
+const toMillions = (mc) => (mc == null ? null : Math.round(mc / 1e6));
 
 // Map an API universe record into the shape the existing UI components expect.
 export function normalizeCompany(r) {
@@ -74,4 +74,18 @@ export async function fetchCoverage() {
   const res = await fetch(`${API}/universe/coverage`);
   if (!res.ok) throw new Error(`Coverage request failed: ${res.status}`);
   return res.json();
+}
+
+export async function fetchShortTermGrowth({ limit = 30, maxMegacap = 6 } = {}) {
+  const params = new URLSearchParams({ limit, max_megacap: maxMegacap });
+  const res = await fetch(`${API}/universe/short-term-growth?${params.toString()}`);
+  if (!res.ok) throw new Error(`Short-term growth request failed: ${res.status}`);
+  const data = await res.json();
+  return {
+    ...data,
+    companies: (data.companies || []).map((c) => ({
+      ...c,
+      marketCap: c.marketCap == null ? null : Math.round(c.marketCap / 1e6),
+    })),
+  };
 }

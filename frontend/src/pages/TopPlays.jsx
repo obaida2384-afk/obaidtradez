@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { TOP_PLAYS, COMPANY_UNIVERSE } from "@/lib/mockData";
+import { fetchShortTermGrowth, fetchCoverage } from "@/lib/companyUniverse";
 import { TrendingUp, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Info } from "lucide-react";
 
 const fmt = (n, d = 1) => Number(n).toFixed(d);
@@ -10,9 +11,12 @@ const fmtM = (n) => {
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}B`;
   return `$${n}M`;
 };
+const pctOf = (target, price) =>
+  target != null && price ? (((target - price) / price) * 100).toFixed(1) : null;
+const isPositiveRating = (r) => r && (String(r).includes("Buy") || r === "Overweight");
 
-// Merge TOP_PLAYS with company universe data
-const PLAYS = TOP_PLAYS.map((p) => {
+// Demo fallback used only when the live ranking is empty.
+const DEMO_PLAYS = TOP_PLAYS.map((p) => {
   const c = COMPANY_UNIVERSE.find((co) => co.ticker === p.ticker) || {};
   return { ...c, ...p };
 });
@@ -21,11 +25,12 @@ function PlayCard({ play, rank }) {
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
 
-  const bullPct = (((play.bullCase.price - play.price) / play.price) * 100).toFixed(1);
-  const basePct = (((play.baseCase.price - play.price) / play.price) * 100).toFixed(1);
-  const bearPct = (((play.bearCase.price - play.price) / play.price) * 100).toFixed(1);
+  const bullPct = pctOf(play.bullCase?.price, play.price);
+  const basePct = pctOf(play.baseCase?.price, play.price);
+  const bearPct = pctOf(play.bearCase?.price, play.price);
 
   const scoreClass = play.opportunityScore >= 80 ? "score-high" : play.opportunityScore >= 65 ? "score-mid" : "score-low";
+  const whyText = play.whyMarketMayBeWrong || play.whyNow;
 
   return (
     <div className="glass-card overflow-hidden transition-all">
@@ -53,39 +58,39 @@ function PlayCard({ play, rank }) {
             </div>
             <div className="text-right shrink-0">
               <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
-                play.analystRating === "Overweight"
+                isPositiveRating(play.analystRating)
                   ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
                   : "text-slate-400 bg-slate-500/10 border-slate-500/20"
               }`}>
-                {play.analystRating}
+                {play.analystRating || "Not rated"}
               </span>
-              <p className="text-xs text-slate-500 mt-1">PT: ${play.avgPt}</p>
+              <p className="text-xs text-slate-500 mt-1">PT: {play.avgPt ? `$${play.avgPt}` : "—"}</p>
             </div>
           </div>
         </div>
 
-        {/* Why now */}
+        {/* Why the market may be wrong */}
         <div className="mt-4 p-3 bg-white/[0.03] rounded-lg border border-white/[0.04]">
-          <p className="text-[11px] font-semibold text-violet-400 uppercase tracking-wider mb-1">Why This Month</p>
-          <p className="text-sm text-slate-400 leading-relaxed">{play.whyNow}</p>
+          <p className="text-[11px] font-semibold text-violet-400 uppercase tracking-wider mb-1">Why The Market May Be Wrong</p>
+          <p className="text-sm text-slate-400 leading-relaxed">{whyText}</p>
         </div>
 
         {/* Scenarios row */}
         <div className="grid grid-cols-3 gap-2 mt-3">
           <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/15 text-center">
             <p className="text-[10px] text-emerald-500 font-semibold uppercase mb-1">Bull</p>
-            <p className="font-mono font-bold text-emerald-400 text-base">${play.bullCase.price}</p>
-            <p className="text-[11px] text-emerald-400/70">+{bullPct}%</p>
+            <p className="font-mono font-bold text-emerald-400 text-base">{play.bullCase?.price != null ? `$${play.bullCase.price}` : "—"}</p>
+            <p className="text-[11px] text-emerald-400/70">{bullPct != null ? `+${bullPct}%` : ""}</p>
           </div>
           <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/15 text-center">
             <p className="text-[10px] text-blue-400 font-semibold uppercase mb-1">Base</p>
-            <p className="font-mono font-bold text-blue-400 text-base">${play.baseCase.price}</p>
-            <p className="text-[11px] text-blue-400/70">{basePct > 0 ? "+" : ""}{basePct}%</p>
+            <p className="font-mono font-bold text-blue-400 text-base">{play.baseCase?.price != null ? `$${play.baseCase.price}` : "—"}</p>
+            <p className="text-[11px] text-blue-400/70">{basePct != null ? `${basePct > 0 ? "+" : ""}${basePct}%` : ""}</p>
           </div>
           <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/15 text-center">
             <p className="text-[10px] text-red-400 font-semibold uppercase mb-1">Bear</p>
-            <p className="font-mono font-bold text-red-400 text-base">${play.bearCase.price}</p>
-            <p className="text-[11px] text-red-400/70">{bearPct}%</p>
+            <p className="font-mono font-bold text-red-400 text-base">{play.bearCase?.price != null ? `$${play.bearCase.price}` : "—"}</p>
+            <p className="text-[11px] text-red-400/70">{bearPct != null ? `${bearPct}%` : ""}</p>
           </div>
         </div>
 
@@ -124,14 +129,36 @@ function PlayCard({ play, rank }) {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider mb-2">Upside Drivers</p>
-              <p className="text-xs text-slate-400 leading-relaxed">{play.upside}</p>
+              <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider mb-2">Key Catalysts</p>
+              {play.keyCatalysts?.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {play.keyCatalysts.map((cat) => (
+                    <span key={cat} className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/15 rounded-full px-2 py-0.5">{cat}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 leading-relaxed">{play.upside}</p>
+              )}
             </div>
             <div>
-              <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-2">Key Downside Risks</p>
-              <p className="text-xs text-slate-400 leading-relaxed">{play.downside}</p>
+              <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-2">Key Risks</p>
+              {play.keyRisks?.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {play.keyRisks.map((r) => (
+                    <span key={r} className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/15 rounded-full px-2 py-0.5">{r}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 leading-relaxed">{play.downside}</p>
+              )}
             </div>
           </div>
+          {play.whatInvalidates && (
+            <div>
+              <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-2">What Could Invalidate The Thesis</p>
+              <p className="text-xs text-slate-400 leading-relaxed">{play.whatInvalidates}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -139,6 +166,32 @@ function PlayCard({ play, rank }) {
 }
 
 export default function TopPlays() {
+  const [plays, setPlays] = useState([]);
+  const [isLive, setIsLive] = useState(false);
+  const [coverage, setCoverage] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cov, res] = await Promise.all([
+          fetchCoverage().catch(() => null),
+          fetchShortTermGrowth({ limit: 25, maxMegacap: 5 }),
+        ]);
+        setCoverage(cov);
+        if (res.companies && res.companies.length > 0) {
+          setPlays(res.companies);
+          setIsLive(true);
+        } else {
+          setPlays(DEMO_PLAYS);
+          setIsLive(false);
+        }
+      } catch (e) {
+        setPlays(DEMO_PLAYS);
+        setIsLive(false);
+      }
+    })();
+  }, []);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -196,15 +249,16 @@ export default function TopPlays() {
       </div>
 
       {/* Play cards */}
-      <div className="space-y-4">
-        {PLAYS.map((play, i) => (
+      <div className="space-y-4" data-testid="top-plays-list">
+        {plays.map((play, i) => (
           <PlayCard key={play.ticker} play={play} rank={i + 1} />
         ))}
       </div>
 
-      <p className="text-xs text-slate-700 pb-4">
-        Top Plays uses simulated data in demo mode. Connect Financial Modeling Prep, Polygon.io, and an AI API for live screening and reasoning.
-        This platform is not a trading system and does not execute trades.
+      <p className="text-xs text-slate-700 pb-4" data-testid="top-plays-data-note">
+        {isLive
+          ? `Live ranking via Financial Modeling Prep${coverage?.count ? ` across ${coverage.count.toLocaleString()} companies` : ""}, emphasising asymmetric upside in mid/small caps. Educational research only — not a trading system and no trades are executed.`
+          : "Top Plays uses simulated data in demo mode. Connect Financial Modeling Prep, Polygon.io, and an AI API for live screening and reasoning. This platform is not a trading system and does not execute trades."}
       </p>
     </div>
   );
