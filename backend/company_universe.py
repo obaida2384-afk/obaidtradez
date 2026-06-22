@@ -120,14 +120,22 @@ class CompanyUniverseService:
             return []
 
         rows = []
+        _excl = ("fund", "trust", "etf", " etn", "income fund", "acquisition corp", "spac")
         for r in data:
             symbol = r.get("symbol")
             if not symbol:
                 continue
+            name = (r.get("companyName") or "").lower()
+            sector = r.get("sector")
+            # Hard-exclude funds/ETFs/SPACs that slip past the screener flags.
+            if any(x in name for x in _excl):
+                continue
+            if not sector or sector in ("", "N/A"):
+                continue
             rows.append({
                 "ticker": symbol,
                 "companyName": r.get("companyName") or symbol,
-                "sector": r.get("sector"),
+                "sector": sector,
                 "industry": r.get("industry"),
                 "marketCap": _f(r.get("marketCap")),
                 "price": _f(r.get("price")),
@@ -140,7 +148,7 @@ class CompanyUniverseService:
     async def enrich_company(self, base: Dict) -> Dict:
         """Build a full CompanyRecord for one ticker from multiple API sources."""
         symbol = base["ticker"]
-        profile, quote, ratios, metrics, growth, estimates, ptc, grades, peers = await asyncio.gather(
+        profile, quote, ratios, metrics, growth, estimates, ptc, grades, peers, insider = await asyncio.gather(
             self.api.fmp_profile(symbol),
             self.api.fmp_quote(symbol),
             self.api.fmp_ratios(symbol),
@@ -150,6 +158,7 @@ class CompanyUniverseService:
             self._fmp("price-target-consensus", {"symbol": symbol}),
             self._fmp("grades-consensus", {"symbol": symbol}),
             self._fmp("stock-peers", {"symbol": symbol}),
+            self._fmp("insider-trading/search", {"symbol": symbol, "page": 0, "limit": 40}),
             return_exceptions=True,
         )
 
@@ -157,7 +166,7 @@ class CompanyUniverseService:
             return x if not isinstance(x, Exception) else None
 
         profile, quote, ratios, metrics = ok(profile), ok(quote), ok(ratios), ok(metrics)
-        growth, estimates, ptc, grades, peers = ok(growth), ok(estimates), ok(ptc), ok(grades), ok(peers)
+        growth, estimates, ptc, grades, peers, insider = ok(growth), ok(estimates), ok(ptc), ok(grades), ok(peers), ok(insider)
 
         g0 = growth[0] if isinstance(growth, list) and growth else {}
         g1 = growth[1] if isinstance(growth, list) and len(growth) > 1 else {}
@@ -244,11 +253,21 @@ class CompanyUniverseService:
                     peer_list.append(sym)
         sources["peerComparison"] = "FMP stock-peers" if peer_list else ESTIMATED
 
-        # Ownership / insider — best effort; marked estimated when unavailable
+        # Ownership / insider activity
         institutional_trend = None
-        insider_activity = None
         sources["institutionalOwnershipTrend"] = ESTIMATED
-        sources["insiderActivity"] = ESTIMATED
+        insider_activity = None
+        if isinstance(insider, list) and insider:
+            buys = sum(1 for t in insider if t.get("acquisitionOrDisposition") == "A")
+            sells = sum(1 for t in insider if t.get("acquisitionOrDisposition") == "D")
+            if buys or sells:
+                insider_activity = ("Net buying" if buys > sells else
+                                    "Net selling" if sells > buys else "Mixed")
+                sources["insiderActivity"] = f"FMP insider-trading ({buys} buys / {sells} sells, last 40 filings)"
+            else:
+                sources["insiderActivity"] = ESTIMATED
+        else:
+            sources["insiderActivity"] = ESTIMATED
 
         beta = _f((profile or {}).get("beta"))
 

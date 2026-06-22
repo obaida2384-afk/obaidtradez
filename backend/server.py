@@ -49,6 +49,7 @@ from long_term_engine import LongTermInvestingEngine
 from execution_transparency import ExecutionTransparencyTracker
 from company_universe import CompanyUniverseService
 from dcf_engine import DCFEngine
+from news_service import NewsService
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -64,6 +65,7 @@ class Config:
     NEWS_API_KEY = os.environ.get('NEWS_API_KEY')
     POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
     FINNHUB_API_KEY = os.environ.get('FINNHUB_API_KEY')
+    STOCKNEWS_API_KEY = os.environ.get('STOCKNEWS_API_KEY')
     
     # Alpaca
     ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
@@ -909,6 +911,7 @@ universe_manager = UniverseManager()
 # API-driven, scalable company universe (1k-5k companies sourced dynamically)
 company_universe_service = CompanyUniverseService(api_client, db, lambda: config.FMP_API_KEY)
 dcf_engine = DCFEngine(api_client, db, lambda: config.FMP_API_KEY)
+news_service = NewsService(api_client, db, lambda: config.STOCKNEWS_API_KEY)
 
 # ===================== TRADING SIGNAL ENGINE (Quality-Focused) =====================
 
@@ -2178,7 +2181,46 @@ async def modeling_dcf(ticker: str, auth: bool = Depends(verify_access)):
     model = await dcf_engine.build_dcf(ticker)
     if not model:
         raise HTTPException(status_code=404, detail=f"Insufficient financial data for {ticker.upper()}")
+    try:
+        model["news"] = await news_service.company_news(ticker, items=10)
+    except Exception:
+        model["news"] = {"articles": [], "sentiment": {"tone": "Neutral"}}
     return model
+
+@api_router.get("/news/market")
+async def news_market(items: int = Query(default=24, ge=4, le=50), auth: bool = Depends(verify_access)):
+    return await news_service.market_news(items=items)
+
+@api_router.get("/news/suggestions")
+async def news_suggestions(limit: int = Query(default=12, ge=4, le=30), auth: bool = Depends(verify_access)):
+    """News-driven stock ideas: most-mentioned tickers, backed by universe fundamentals."""
+    return await news_service.suggestions(limit=limit)
+
+@api_router.get("/news/company/{ticker}")
+async def news_company(ticker: str, items: int = Query(default=12, ge=4, le=50), auth: bool = Depends(verify_access)):
+    return await news_service.company_news(ticker, items=items)
+
+@api_router.get("/prices/quotes")
+async def prices_quotes(symbols: str = Query(...), auth: bool = Depends(verify_access)):
+    """Live batch quotes for a comma-separated list of tickers (for on-page price refresh)."""
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:100]
+    if not syms:
+        return {"prices": {}}
+    quotes = await api_client._request(
+        f"{api_client.fmp_url}/batch-quote",
+        headers={"apikey": config.FMP_API_KEY},
+        params={"symbols": ",".join(syms)},
+    )
+    out = {}
+    for q in quotes or []:
+        sym = q.get("symbol")
+        if sym:
+            out[sym] = {
+                "price": q.get("price"),
+                "change": q.get("change"),
+                "changePct": q.get("changesPercentage") or q.get("changePercentage"),
+            }
+    return {"prices": out, "count": len(out), "asOf": datetime.now(timezone.utc).isoformat()}
 
 @api_router.post("/universe/build")
 async def build_universe(

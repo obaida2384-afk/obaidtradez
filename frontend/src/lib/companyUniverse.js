@@ -64,6 +64,31 @@ export async function fetchCompanies({
   };
 }
 
+export async function fetchMarketNews(items = 24) {
+  const res = await fetch(`${API}/news/market?items=${items}`);
+  if (!res.ok) throw new Error(`Market news failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchNewsSuggestions(limit = 12) {
+  const res = await fetch(`${API}/news/suggestions?limit=${limit}`);
+  if (!res.ok) throw new Error(`News suggestions failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchCompanyNews(ticker, items = 12) {
+  const res = await fetch(`${API}/news/company/${ticker}?items=${items}`);
+  if (!res.ok) throw new Error(`Company news failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchQuotes(tickers) {
+  if (!tickers?.length) return { prices: {} };
+  const res = await fetch(`${API}/prices/quotes?symbols=${tickers.join(",")}`);
+  if (!res.ok) throw new Error(`Quotes failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchDcf(ticker) {
   const res = await fetch(`${API}/modeling/dcf/${ticker}`);
   if (!res.ok) throw new Error(`DCF request failed: ${res.status}`);
