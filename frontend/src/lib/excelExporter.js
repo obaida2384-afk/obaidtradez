@@ -367,6 +367,40 @@ export async function generateExcelModel(model) {
   mw.getCell(`A${dr}`).value = memo?.disclaimer || "Educational research only. Not investment advice.";
   mw.getCell(`A${dr}`).font = { italic: true, size: 9, color: { argb: "FF808080" } };
 
+  // ════════════════════════ NEWS & CATALYSTS ════════════════════════
+  const news = model.news;
+  if (news?.articles?.length) {
+    const nw = wb.addWorksheet("News & Catalysts", { properties: { tabColor: { argb: DARK } } });
+    nw.columns = [{ width: 20 }, { width: 66 }, { width: 20 }, { width: 12 }, { width: 16 }];
+    const sent = news.sentiment || {};
+    nw.mergeCells("A1:E1");
+    nw.getCell("A1").value = `${ticker} — News & Catalysts  (Tone: ${sent.tone || "Neutral"} · ${sent.positive || 0} positive / ${sent.negative || 0} negative)`;
+    nw.getCell("A1").font = { bold: true, size: 13, color: { argb: WHITE } };
+    nw.getCell("A1").fill = fill(DARK);
+    nw.getRow(1).height = 24;
+    headerRow(nw, 3, ["Date", "Headline", "Source", "Sentiment", "Tickers"], { sub: true });
+    news.articles.forEach((art, i) => {
+      const row = nw.getRow(4 + i);
+      row.getCell(1).value = art.date || "—";
+      if (art.url) {
+        row.getCell(2).value = { text: art.title || "", hyperlink: art.url };
+        row.getCell(2).font = { color: { argb: "FF1F3864" }, underline: true };
+      } else {
+        row.getCell(2).value = art.title || "";
+      }
+      row.getCell(3).value = art.source || "—";
+      const sc = row.getCell(4);
+      sc.value = art.sentiment || "Neutral";
+      sc.font = { bold: true, color: { argb: art.sentiment === "Positive" ? GREEN : art.sentiment === "Negative" ? RED : "FF808080" } };
+      row.getCell(5).value = (art.tickers || []).join(", ");
+      row.alignment = { vertical: "top", wrapText: true };
+      row.eachCell((cc) => { cc.border = allBorders; });
+    });
+    const srcRow = 5 + news.articles.length;
+    nw.getCell(`A${srcRow}`).value = `Source: ${news.source || "StockNewsAPI"}`;
+    nw.getCell(`A${srcRow}`).font = { italic: true, size: 9, color: { argb: "FF808080" } };
+  }
+
   // ── download ──
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FUTURE_GIANTS } from "@/lib/mockData";
 import { fetchFutureGiants, fetchCoverage } from "@/lib/companyUniverse";
+import { useQuotes } from "@/hooks/useQuotes";
 import { Telescope, TrendingUp, AlertTriangle, ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
 
 const fmtM = (n) => {
@@ -147,6 +148,8 @@ export default function FutureGiants() {
     })();
   }, []);
 
+  const quotes = useQuotes(giants.map((g) => g.ticker));
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
@@ -194,7 +197,10 @@ export default function FutureGiants() {
       </div>
 
       <div className="space-y-6" data-testid="future-giants-list">
-        {giants.map((g) => <GiantCard key={g.ticker} g={g} />)}
+        {giants.map((g) => {
+          const lp = quotes[g.ticker]?.price;
+          return <GiantCard key={g.ticker} g={lp != null ? { ...g, price: lp } : g} />;
+        })}
       </div>
 
       <p className="text-xs text-slate-700 pb-4" data-testid="future-giants-data-note">

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { TOP_PLAYS, COMPANY_UNIVERSE } from "@/lib/mockData";
 import { fetchShortTermGrowth, fetchCoverage } from "@/lib/companyUniverse";
+import { useQuotes } from "@/hooks/useQuotes";
 import { TrendingUp, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Info } from "lucide-react";
 
 const fmt = (n, d = 1) => Number(n).toFixed(d);
@@ -192,6 +193,8 @@ export default function TopPlays() {
     })();
   }, []);
 
+  const quotes = useQuotes(plays.map((p) => p.ticker));
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -250,9 +253,10 @@ export default function TopPlays() {
 
       {/* Play cards */}
       <div className="space-y-4" data-testid="top-plays-list">
-        {plays.map((play, i) => (
-          <PlayCard key={play.ticker} play={play} rank={i + 1} />
-        ))}
+        {plays.map((play, i) => {
+          const lp = quotes[play.ticker]?.price;
+          return <PlayCard key={play.ticker} play={lp != null ? { ...play, price: lp } : play} rank={i + 1} />;
+        })}
       </div>
 
       <p className="text-xs text-slate-700 pb-4" data-testid="top-plays-data-note">
