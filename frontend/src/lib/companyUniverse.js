@@ -109,6 +109,12 @@ export async function fetchCoverage() {
   return res.json();
 }
 
+export async function fetchStatus() {
+  const res = await fetch(`${API}/status`);
+  if (!res.ok) throw new Error(`Status request failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchFutureGiants({ limit = 12 } = {}) {
   const params = new URLSearchParams({ limit });
   const res = await fetch(`${API}/universe/future-giants?${params.toString()}`);

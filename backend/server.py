@@ -2213,6 +2213,27 @@ async def prices_quotes(symbols: str = Query(...), auth: bool = Depends(verify_a
             }
     return {"prices": out, "count": len(out), "asOf": datetime.now(timezone.utc).isoformat()}
 
+@api_router.get("/status")
+async def data_status():
+    """Reports whether the backend is serving live market data (keys configured + universe populated)."""
+    fmp = bool(config.FMP_API_KEY)
+    news = bool(os.environ.get("STOCKNEWS_API_KEY"))
+    count = 0
+    updated_at = None
+    try:
+        meta = await db[CompanyUniverseService.META_ID].find_one({"_id": CompanyUniverseService.META_ID})
+        count = (meta or {}).get("count") or 0
+        updated_at = (meta or {}).get("updated_at")
+    except Exception:
+        pass
+    return {
+        "live": fmp and count > 0,
+        "fmp": fmp,
+        "news": news,
+        "universeCount": count,
+        "universeUpdatedAt": updated_at,
+    }
+
 @api_router.post("/universe/build")
 async def build_universe(
     background_tasks: BackgroundTasks,

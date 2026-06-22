@@ -6,6 +6,7 @@ import {
 } from "@/lib/mockData";
 import { fetchNewsSuggestions } from "@/lib/companyUniverse";
 import { getRating } from "@/lib/rating";
+import { useLiveStatus } from "@/hooks/useLiveStatus";
 import {
   TrendingUp, TrendingDown, Calendar, Sparkles,
   Telescope, Newspaper, AlertCircle, ChevronRight, Globe, Flame, ArrowUpRight,
@@ -187,6 +188,7 @@ function TrendingNow() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const status = useLiveStatus();
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -198,10 +200,17 @@ export default function Dashboard() {
             {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1.5">
-          <AlertCircle className="w-3.5 h-3.5" />
-          Demo Mode — connect API keys for live data
-        </div>
+        {status.live ? (
+          <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-1.5" data-testid="dashboard-data-status">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Live market data active
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1.5" data-testid="dashboard-data-status">
+            <AlertCircle className="w-3.5 h-3.5" />
+            {status.loading ? "Checking data source…" : "Data source offline"}
+          </div>
+        )}
       </div>
 
       {/* Trending now — live news-driven idea */}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLiveStatus } from "@/hooks/useLiveStatus";
 import { toast } from "sonner";
 import {
   Settings as SettingsIcon, User, Key, Brain, Shield, LogOut,
@@ -149,6 +150,16 @@ export default function Settings() {
 
   const connectedCount = Object.values(user?.apiKeys || {}).filter(Boolean).length;
   const totalKeys = API_KEY_CONFIG.length;
+  const status = useLiveStatus();
+
+  const relAge = (iso) => {
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return "";
+    const h = Math.round((Date.now() - t) / 3600000);
+    if (h < 1) return "just now";
+    if (h < 24) return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+  };
 
   const saveProfile = () => {
     updateUser({ name: name.trim() });
@@ -176,23 +187,27 @@ export default function Settings() {
         <p className="text-sm text-slate-500">Manage your profile, investing preferences, and API connections.</p>
       </div>
 
-      {connectedCount === 0 ? (
-        <div className="glass-card p-4 border-amber-500/20 flex items-start gap-3">
-          <div className="w-2 h-2 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+      {status.live ? (
+        <div className="glass-card p-4 border-emerald-500/20 flex items-start gap-3" data-testid="settings-data-status">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mt-1.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-amber-400">Demo Mode Active</p>
+            <p className="text-sm font-semibold text-emerald-400">Live Market Data Active</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              All data shown is simulated. Connect at least one API key below to switch to live market data.
+              Prices, fundamentals and news are served live via Financial Modeling Prep{status.news ? " + StockNewsAPI" : ""}.
+              Universe: {status.universeCount.toLocaleString()} companies{status.universeUpdatedAt ? ` · refreshed ${relAge(status.universeUpdatedAt)}` : ""}.
+              The API keys below are optional personal overrides.
             </p>
           </div>
         </div>
       ) : (
-        <div className="glass-card p-4 border-emerald-500/20 flex items-start gap-3">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mt-1.5 shrink-0" />
+        <div className="glass-card p-4 border-amber-500/20 flex items-start gap-3" data-testid="settings-data-status">
+          <div className="w-2 h-2 rounded-full bg-amber-400 mt-1.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-emerald-400">Live Data Mode — {connectedCount}/{totalKeys} APIs Connected</p>
+            <p className="text-sm font-semibold text-amber-400">{status.loading ? "Checking data source…" : "Data Source Offline"}</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Real market data is active for connected providers. Unconfigured providers fall back to demo data.
+              {status.loading
+                ? "Verifying the live market-data connection."
+                : "The backend market-data service is not reachable or the company universe is empty. Some figures may be unavailable until it recovers."}
             </p>
           </div>
         </div>

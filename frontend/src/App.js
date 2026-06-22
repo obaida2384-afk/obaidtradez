@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PriceProvider } from "@/contexts/PriceContext";
+import { useLiveStatus } from "@/hooks/useLiveStatus";
 
 // Auth pages
 import Login from "@/pages/auth/Login";
@@ -199,6 +200,7 @@ function Header({ onMenuOpen }) {
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const { user } = useAuth();
+  const status = useLiveStatus();
 
   const handleSearch = (e) => {
     if (e.key === "Enter" && query.trim()) {
@@ -207,7 +209,7 @@ function Header({ onMenuOpen }) {
     }
   };
 
-  const hasApiKeys = user?.apiKeys && Object.values(user.apiKeys).some(Boolean);
+  const isLive = status.live;
 
   return (
     <header className="h-14 bg-[#07070d]/90 backdrop-blur-sm border-b border-white/[0.04] flex items-center justify-between px-4 md:px-5 sticky top-0 z-30">
@@ -233,17 +235,18 @@ function Header({ onMenuOpen }) {
       </div>
 
       <div className="flex items-center gap-3">
-        {!hasApiKeys && (
+        {!isLive && !status.loading && (
           <button
             onClick={() => navigate("/settings")}
+            data-testid="data-status-chip"
             className="hidden sm:flex items-center gap-1.5 text-[11px] bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full px-3 py-1 hover:bg-amber-500/15 transition-colors"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-            Demo Mode · Connect APIs
+            Data Source Offline
           </button>
         )}
-        {hasApiKeys && (
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+        {isLive && (
+          <div className="flex items-center gap-1.5 text-[11px] text-emerald-400" data-testid="data-status-chip" title="Live market data via Financial Modeling Prep">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="hidden sm:inline">Live Data</span>
           </div>

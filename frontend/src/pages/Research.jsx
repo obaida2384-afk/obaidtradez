@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuotes } from "@/hooks/useQuotes";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { COMPANY_UNIVERSE } from "@/lib/mockData";
 import {
@@ -148,6 +149,9 @@ export default function Research() {
   });
   const [tab, setTab] = useState("overview");
 
+  const featured = COMPANY_UNIVERSE.slice(0, 8);
+  const quotes = useQuotes([...featured.map((x) => x.ticker), ...(company ? [company.ticker] : [])]);
+
   const rating = company ? getImpliedRating(company) : null;
   const ratingStyle = rating ? RATINGS[rating] : null;
 
@@ -164,8 +168,11 @@ export default function Research() {
         <div>
           <p className="section-title mb-4">Featured Companies</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {COMPANY_UNIVERSE.slice(0, 8).map((c) => {
-              const up = c.pct >= 0;
+            {featured.map((c) => {
+              const lq = quotes[c.ticker];
+              const liveP = lq?.price ?? c.price;
+              const livePct = lq?.changePct ?? c.pct;
+              const up = (livePct ?? 0) >= 0;
               const r = getImpliedRating(c);
               const rs = RATINGS[r];
               return (
@@ -181,9 +188,9 @@ export default function Research() {
                     </div>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${rs.bg} ${rs.color}`}>{r}</span>
                   </div>
-                  <p className="text-lg font-bold font-mono text-white">${c.price}</p>
+                  <p className="text-lg font-bold font-mono text-white">${liveP}</p>
                   <p className={`text-xs font-mono ${up ? "text-emerald-400" : "text-red-400"}`}>
-                    {up ? "+" : ""}{fmt(c.pct)}% today
+                    {up ? "+" : ""}{fmt(livePct)}% today
                   </p>
                   <div className="flex items-center gap-2 mt-2">
                     <span className="text-[10px] text-slate-600">{c.sector}</span>
@@ -199,7 +206,11 @@ export default function Research() {
     );
   }
 
-  const up = company.pct >= 0;
+  const liveQ = quotes[company.ticker];
+  const c = liveQ
+    ? { ...company, price: liveQ.price ?? company.price, change: liveQ.change ?? company.change, pct: liveQ.changePct ?? company.pct }
+    : company;
+  const up = (c.pct ?? 0) >= 0;
 
   const TABS = ["overview", "financials", "valuation", "thesis"];
 
@@ -234,9 +245,9 @@ export default function Research() {
             <p className="text-sm text-slate-500 mt-1">{company.sector} · {company.industry}</p>
           </div>
           <div className="text-right">
-            <p className="text-3xl font-bold font-mono text-white">${company.price}</p>
+            <p className="text-3xl font-bold font-mono text-white">${c.price}</p>
             <p className={`text-sm font-mono font-semibold ${up ? "text-emerald-400" : "text-red-400"}`}>
-              {up ? "+" : ""}{fmt(company.change)} ({up ? "+" : ""}{fmt(company.pct)}%)
+              {up ? "+" : ""}{fmt(c.change)} ({up ? "+" : ""}{fmt(c.pct)}%)
             </p>
             <p className="text-xs text-slate-500 mt-1">Market Cap: {fmtM(company.marketCap)}</p>
           </div>
@@ -307,8 +318,8 @@ export default function Research() {
               </div>
               <p className="text-xl font-bold text-emerald-400">{company.analystRating}</p>
               <p className="text-sm text-slate-400 mt-1">Avg PT: <span className="text-white font-mono font-bold">${company.avgPt}</span></p>
-              <p className={`text-xs mt-1 ${(company.avgPt - company.price) > 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {(((company.avgPt - company.price) / company.price) * 100).toFixed(1)}% to consensus target
+              <p className={`text-xs mt-1 ${(company.avgPt - c.price) > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {(((company.avgPt - c.price) / c.price) * 100).toFixed(1)}% to consensus target
               </p>
             </div>
           </div>
@@ -427,7 +438,7 @@ export default function Research() {
               <ScenarioCard
                 label="Bull Case"
                 price={company.bullPrice}
-                current={company.price}
+                current={c.price}
                 color="text-emerald-400"
                 bgColor="border-emerald-500/20"
                 thesis={company.bullCase?.thesis}
@@ -435,7 +446,7 @@ export default function Research() {
               <ScenarioCard
                 label="Base Case"
                 price={company.baseprice}
-                current={company.price}
+                current={c.price}
                 color="text-blue-400"
                 bgColor="border-blue-500/20"
                 thesis={company.baseCase?.thesis}
@@ -443,7 +454,7 @@ export default function Research() {
               <ScenarioCard
                 label="Bear Case"
                 price={company.bearPrice}
-                current={company.price}
+                current={c.price}
                 color="text-red-400"
                 bgColor="border-red-500/20"
                 thesis={company.bearCase?.thesis}
@@ -478,7 +489,7 @@ export default function Research() {
                   {[
                     `Revenue acceleration driven by ${company.sector === "Technology" ? "AI adoption" : "market expansion"}`,
                     `Margin expansion toward ${fmt((company.ebitdaMargin || 20) + 3)}%+ EBITDA margin`,
-                    `Analyst consensus PT implies ${(((company.avgPt - company.price) / company.price) * 100).toFixed(1)}% upside`,
+                    `Analyst consensus PT implies ${(((company.avgPt - c.price) / c.price) * 100).toFixed(1)}% upside`,
                     company.moat?.split(",")[0] ? `${company.moat.split(",")[0]} drives pricing power` : "Strong competitive positioning",
                   ].map((b, i) => (
                     <li key={i} className="text-sm text-slate-400 flex items-start gap-2">
@@ -504,7 +515,7 @@ export default function Research() {
             <div className="mt-5 p-4 bg-white/[0.03] rounded-xl border border-white/[0.05]">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Final Assessment</p>
               <p className="text-sm text-slate-300 leading-relaxed">
-                At ${company.price} per share, {company.ticker} trades at {company.pe}x earnings and {company.evEbitda || "N/A"}x EV/EBITDA.
+                At ${c.price} per share, {company.ticker} trades at {company.pe}x earnings and {company.evEbitda || "N/A"}x EV/EBITDA.
                 Our DCF model implies a fair value of <strong className="text-white">${company.impliedPrice}</strong>, representing
                 <span className={company.dcfUpside > 0 ? " text-emerald-400" : " text-red-400"}> {company.dcfUpside > 0 ? "+" : ""}{fmt(company.dcfUpside)}% upside</span>.
                 Combined with analyst consensus of ${company.avgPt}, the risk/reward appears
