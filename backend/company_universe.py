@@ -108,14 +108,14 @@ class CompanyUniverseService:
     ) -> List[Dict]:
         """Pull a dynamic ticker list from the FMP screener, largest first."""
         target_size = max(1, min(int(target_size), MAX_UNIVERSE_SIZE))
-        data = await self.api.fmp_screener({
+        data = await self._fmp("company-screener", {
             "marketCapMoreThan": int(min_market_cap),
             "isActivelyTrading": "true",
             "isEtf": "false",
             "isFund": "false",
             "exchange": exchanges,
             "limit": target_size,
-        })
+        }, timeout=30.0)
         if not isinstance(data, list):
             return []
 
@@ -189,43 +189,49 @@ class CompanyUniverseService:
             sources["revenueGrowth"] = sources["epsGrowth"] = "FMP financial-growth"
             sources["revenueAcceleration"] = "Computed (YoY growth delta)" if rev_accel is not None else ESTIMATED
 
-        # Margins
-        ebitda_margin = _f((metrics or {}).get("ebitdaMargin") if metrics else None)
+        # Margins (FMP returns these ratios as decimals; convert to %)
+        ebitda_margin = _f((ratios or {}).get("ebitdaMarginTTM")) if ratios else None
         if ebitda_margin is None and ratios:
-            ebitda_margin = _f(ratios.get("ebitdaMarginTTM") or ratios.get("operatingProfitMarginTTM"))
+            ebitda_margin = _f(ratios.get("operatingProfitMarginTTM"))
         ebitda_margin = _round(ebitda_margin * 100) if (ebitda_margin is not None and abs(ebitda_margin) <= 5) else _round(ebitda_margin)
-        fcf_margin = None
-        if metrics:
-            fcf_margin = _f(metrics.get("freeCashFlowMargin"))
-        if fcf_margin is None and ratios:
-            fcf_margin = _f(ratios.get("freeCashFlowMarginTTM"))
+        # FCF margin: prefer direct ratio, else derive from EV/Sales ÷ EV/FCF
+        fcf_margin = _f((ratios or {}).get("freeCashFlowMarginTTM")) if ratios else None
+        if fcf_margin is None and metrics:
+            ev_sales = _f(metrics.get("evToSalesTTM"))
+            ev_fcf = _f(metrics.get("evToFreeCashFlowTTM"))
+            if ev_sales is not None and ev_fcf:
+                fcf_margin = ev_sales / ev_fcf
         fcf_margin = _round(fcf_margin * 100) if (fcf_margin is not None and abs(fcf_margin) <= 5) else _round(fcf_margin)
-        sources["ebitdaMargin"] = "FMP key-metrics/ratios" if ebitda_margin is not None else ESTIMATED
+        sources["ebitdaMargin"] = "FMP ratios-ttm" if ebitda_margin is not None else ESTIMATED
         sources["fcfMargin"] = "FMP key-metrics/ratios" if fcf_margin is not None else ESTIMATED
 
         # Valuation multiples
-        pe = _f((ratios or {}).get("priceToEarningsRatioTTM") or (ratios or {}).get("peRatioTTM")) if ratios else _f((quote or {}).get("pe"))
-        ev_ebitda = _f((ratios or {}).get("enterpriseValueMultipleTTM") or (ratios or {}).get("evToEBITDATTM")) if ratios else None
-        ps = _f((ratios or {}).get("priceToSalesRatioTTM")) if ratios else None
+        pe = _f((ratios or {}).get("priceToEarningsRatioTTM") or (ratios or {}).get("peRatioTTM")) if ratios else None
+        ev_ebitda = _f((metrics or {}).get("evToEBITDATTM")) if metrics else None
+        if ev_ebitda is None and ratios:
+            ev_ebitda = _f(ratios.get("enterpriseValueMultipleTTM"))
+        ps = _f((ratios or {}).get("priceToSalesRatioTTM")) if ratios else (_f((metrics or {}).get("evToSalesTTM")) if metrics else None)
         pfcf = _f((ratios or {}).get("priceToFreeCashFlowsRatioTTM")) if ratios else None
+        if pfcf is None and metrics:
+            pfcf = _f(metrics.get("evToFreeCashFlowTTM"))
         valuation_multiples = {
             "pe": _round(pe), "evEbitda": _round(ev_ebitda),
             "ps": _round(ps), "pFcf": _round(pfcf),
         }
-        sources["valuationMultiples"] = "FMP ratios-ttm" if ratios else "FMP quote"
+        sources["valuationMultiples"] = "FMP ratios-ttm / key-metrics-ttm" if (ratios or metrics) else ESTIMATED
 
         # Analyst
         analyst_pt = _f(ptc0.get("targetConsensus") or ptc0.get("targetMedian")) if ptc0 else None
         analyst_rating = (grades0.get("consensus") if grades0 else None)
         revisions = None
         if isinstance(estimates, list) and len(estimates) >= 2:
-            cur = _f(estimates[0].get("estimatedRevenueAvg"))
-            prev = _f(estimates[1].get("estimatedRevenueAvg"))
-            if cur is not None and prev is not None and prev != 0:
-                revisions = "Upward" if cur > prev else "Downward" if cur < prev else "Stable"
+            later = _f(estimates[0].get("revenueAvg"))
+            earlier = _f(estimates[1].get("revenueAvg"))
+            if later is not None and earlier is not None and earlier != 0:
+                revisions = "Rising" if later > earlier else "Falling" if later < earlier else "Stable"
         sources["analystPriceTarget"] = "FMP price-target-consensus" if analyst_pt is not None else ESTIMATED
         sources["analystRating"] = "FMP grades-consensus" if analyst_rating else ESTIMATED
-        sources["analystEstimateRevisions"] = "FMP analyst-estimates" if revisions else ESTIMATED
+        sources["analystEstimateRevisions"] = "FMP analyst-estimates (forward trajectory)" if revisions else ESTIMATED
 
         # Peers
         peer_list = []

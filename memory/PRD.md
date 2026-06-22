@@ -31,7 +31,12 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - 28-field schema: ticker, companyName, sector, industry, marketCap, price, revenueGrowth, revenueAcceleration, ebitdaMargin, fcfMargin, epsGrowth, analystRating, analystPriceTarget, analystEstimateRevisions, institutionalOwnershipTrend, insiderActivity, valuationMultiples, peerComparison, catalysts, macroSensitivity, shariahStatus, opportunityScore, riskScore, bullCase, baseCase, bearCase, thesis, source, lastUpdated.
 - `server.py`: import + `company_universe_service` instance + endpoints `GET /api/universe/companies` (filter/sort/paginate), `GET /api/universe/company/{ticker}`, `GET /api/universe/coverage`, `POST /api/universe/build`. Mongo collection `company_universe` (indexed).
 - Fixed a pre-existing syntax corruption at end of `server.py` (duplicate mis-indented `except` in `_market_open_verifier_watcher`) that blocked reload.
-- Verified endpoints return honest empty/`has_data_source:false` in demo mode. NOT YET: FMP key to populate, and frontend wiring (intersects Phase 5 DCF fields) — deferred for approval.
+- Verified endpoints return honest empty/`has_data_source:false` in demo mode.
+- FMP key added to backend/.env. Validated all 7 FMP stable endpoints; corrected field maps (ebitdaMarginTTM, evToEBITDATTM, revenueAvg; FCF margin derived from EV/Sales÷EV/FCF). Fixed screener endpoint (`/company-screener`, not legacy `/stock-screener`).
+- Built universe at target 3,000 (background). Verified NVDA record: full real data, computed scores, bull/bear from real metrics, provenance map.
+- FRONTEND WIRED: new `frontend/src/lib/companyUniverse.js` (fetch/normalize service). `Discovery.jsx` now renders the live API universe (ranked by opportunityScore), with graceful fallback to mock when empty. UI/layout preserved; added data-testids + live data-source note.
+- KNOWN MINOR: Discovery card label "DCF upside" currently shows analyst-consensus upside (real DCF arrives in Phase 5). Global "Demo Mode" header banner is driven by user's own localStorage apiKeys (separate from server FMP key) — left as-is.
+- NOT YET (next): institutional ownership / insider endpoints (currently flagged Estimated); wiring Research/TopPlays/FutureGiants list views; Research/Modeling detail stay on mock until Phase 5 (need DCF fields).
 
 
 ## Backlog (await user approval per phase)

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { DISCOVERY_RESULTS, COMPANY_UNIVERSE } from "@/lib/mockData";
+import { fetchCompanies, fetchCoverage } from "@/lib/companyUniverse";
 import { Sparkles, TrendingUp, Filter, ArrowUpRight, Brain, Zap } from "lucide-react";
 
 const fmt = (n, d = 1) => (n == null ? "—" : Number(n).toFixed(d));
@@ -11,8 +12,8 @@ const fmtM = (n) => {
   return `$${n}M`;
 };
 
-// Merge discovery with company universe to get more entries
-const ALL_OPPORTUNITIES = [
+// Demo fallback used only when the live universe is empty (no API key / not yet built).
+const DEMO_OPPORTUNITIES = [
   ...DISCOVERY_RESULTS,
   ...COMPANY_UNIVERSE.filter((c) => c.opportunityScore >= 70 && !DISCOVERY_RESULTS.find((d) => d.ticker === c.ticker))
     .map((c) => ({
@@ -33,7 +34,6 @@ const ALL_OPPORTUNITIES = [
     })),
 ].sort((a, b) => b.opportunityScore - a.opportunityScore);
 
-const SECTORS = ["All", ...new Set(ALL_OPPORTUNITIES.map((c) => c.sector))];
 const SHARIAH_OPTIONS = ["All", "Compliant", "Non-Compliant", "Questionable"];
 
 function OpportunityCard({ d, onClick }) {
@@ -103,19 +103,47 @@ export default function Discovery() {
   const [shariah, setShariah] = useState("All");
   const [minScore, setMinScore] = useState(0);
   const [scanning, setScanning] = useState(false);
+  const [opportunities, setOpportunities] = useState([]);
+  const [isLive, setIsLive] = useState(false);
+  const [coverage, setCoverage] = useState(null);
 
-  const filtered = ALL_OPPORTUNITIES.filter((d) => {
+  const load = useCallback(async () => {
+    setScanning(true);
+    try {
+      const [cov, res] = await Promise.all([
+        fetchCoverage().catch(() => null),
+        fetchCompanies({ limit: 120, sortBy: "opportunityScore", order: -1 }),
+      ]);
+      setCoverage(cov);
+      if (res.companies && res.companies.length > 0) {
+        setOpportunities(res.companies);
+        setIsLive(true);
+      } else {
+        setOpportunities(DEMO_OPPORTUNITIES);
+        setIsLive(false);
+      }
+    } catch (e) {
+      setOpportunities(DEMO_OPPORTUNITIES);
+      setIsLive(false);
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const SECTORS = ["All", ...Array.from(new Set(opportunities.map((c) => c.sector).filter(Boolean)))];
+
+  const filtered = opportunities.filter((d) => {
     const matchSector = sector === "All" || d.sector === sector;
     const matchShariah = shariah === "All" || d.shariah === shariah;
-    const matchScore = d.opportunityScore >= minScore;
+    const matchScore = (d.opportunityScore || 0) >= minScore;
     return matchSector && matchShariah && matchScore;
   });
 
-  const handleRescan = async () => {
-    setScanning(true);
-    await new Promise((r) => setTimeout(r, 2000));
-    setScanning(false);
-  };
+  const handleRescan = () => load();
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -133,6 +161,7 @@ export default function Discovery() {
         <button
           onClick={handleRescan}
           disabled={scanning}
+          data-testid="discovery-rescan-button"
           className="flex items-center gap-2 bg-violet-500/10 hover:bg-violet-500/15 text-violet-400 border border-violet-500/20 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
         >
           {scanning ? (
@@ -182,7 +211,7 @@ export default function Discovery() {
           <Filter className="w-4 h-4 text-slate-500" />
           <span className="text-xs text-slate-500">Filter:</span>
         </div>
-        <select value={sector} onChange={(e) => setSector(e.target.value)} className="glass-card px-3 py-2 text-sm text-slate-300 outline-none">
+        <select value={sector} onChange={(e) => setSector(e.target.value)} data-testid="discovery-sector-filter" className="glass-card px-3 py-2 text-sm text-slate-300 outline-none">
           {SECTORS.map((s) => <option key={s} value={s} className="bg-slate-900">{s}</option>)}
         </select>
         <select value={shariah} onChange={(e) => setShariah(e.target.value)} className="glass-card px-3 py-2 text-sm text-slate-300 outline-none">
@@ -201,7 +230,7 @@ export default function Discovery() {
       </div>
 
       {/* Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="discovery-opportunities-grid">
         {filtered.map((d) => (
           <OpportunityCard
             key={d.ticker}
@@ -221,8 +250,10 @@ export default function Discovery() {
         </div>
       )}
 
-      <p className="text-xs text-slate-700">
-        AI Discovery uses simulated data in demo mode. Connect Financial Modeling Prep and Polygon.io APIs for real-time screening across 5,000+ stocks.
+      <p className="text-xs text-slate-700" data-testid="discovery-data-source-note">
+        {isLive
+          ? `Live data via Financial Modeling Prep${coverage?.count ? ` — screening ${coverage.count.toLocaleString()} companies` : ""}${coverage?.updated_at ? `, updated ${new Date(coverage.updated_at).toLocaleString()}` : ""}.`
+          : "AI Discovery uses simulated data in demo mode. Connect Financial Modeling Prep and Polygon.io APIs for real-time screening across 5,000+ stocks."}
       </p>
     </div>
   );
