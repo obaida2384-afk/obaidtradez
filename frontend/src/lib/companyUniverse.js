@@ -76,6 +76,20 @@ export async function fetchCoverage() {
   return res.json();
 }
 
+export async function fetchFutureGiants({ limit = 12 } = {}) {
+  const params = new URLSearchParams({ limit });
+  const res = await fetch(`${API}/universe/future-giants?${params.toString()}`);
+  if (!res.ok) throw new Error(`Future giants request failed: ${res.status}`);
+  const data = await res.json();
+  return {
+    ...data,
+    companies: (data.companies || []).map((c) => ({
+      ...c,
+      marketCap: c.marketCap == null ? null : Math.round(c.marketCap / 1e6),
+    })),
+  };
+}
+
 export async function fetchShortTermGrowth({ limit = 30, maxMegacap = 6 } = {}) {
   const params = new URLSearchParams({ limit, max_megacap: maxMegacap });
   const res = await fetch(`${API}/universe/short-term-growth?${params.toString()}`);

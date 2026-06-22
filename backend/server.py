@@ -2160,6 +2160,14 @@ async def universe_short_term_growth(
     """Asymmetric short-term growth ranking (mega caps de-emphasised)."""
     return await company_universe_service.rank_short_term_growth(limit=limit, max_megacap=max_megacap)
 
+@api_router.get("/universe/future-giants")
+async def universe_future_giants(
+    limit: int = Query(default=12, ge=5, le=50),
+    auth: bool = Depends(verify_access),
+):
+    """Long-term 'future giants' ranking — smaller secular-growth names with runway to compound."""
+    return await company_universe_service.rank_future_giants(limit=limit)
+
 @api_router.post("/universe/build")
 async def build_universe(
     background_tasks: BackgroundTasks,

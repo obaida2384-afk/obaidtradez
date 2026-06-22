@@ -695,6 +695,182 @@ class CompanyUniverseService:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    # ---------- future giants ranking (Phase 4) ----------
+
+    SECULAR_SECTORS = {"Technology", "Healthcare", "Communication Services", "Consumer Cyclical"}
+    CYCLICAL_SECTORS = {"Energy", "Basic Materials", "Utilities", "Real Estate"}
+
+    def _giant_sector_tilt(self, sector: Optional[str]) -> float:
+        # Favour secular-growth sectors; demote cyclical/commodity names that
+        # show one-off, price-driven revenue spikes rather than durable growth.
+        if sector in self.SECULAR_SECTORS:
+            return 1.0
+        if sector in self.CYCLICAL_SECTORS:
+            return 0.6
+        return 0.8
+
+    def _future_giant_score(self, c: Dict) -> Optional[float]:
+        rg = c.get("revenueGrowth")
+        mc = c.get("marketCap") or 0
+        # Giants-in-waiting: meaningful secular growth and room to scale.
+        if rg is None or rg < 15 or mc >= 150e9:
+            return None
+        score, weight = 0.0, 0.0
+        # Cap growth contribution so commodity/small-base spikes don't dominate.
+        score += max(0, min(100, rg * 1.4)) * 0.28; weight += 0.28
+        # size runway: the smaller the company, the more room to compound
+        if mc < 2e9:
+            runway = 95
+        elif mc < 10e9:
+            runway = 80
+        elif mc < 50e9:
+            runway = 60
+        else:
+            runway = 40
+        score += runway * 0.18; weight += 0.18
+        fcf = c.get("fcfMargin")
+        if fcf is not None:
+            score += max(0, min(100, 50 + fcf * 2)) * 0.12; weight += 0.12
+        em = c.get("ebitdaMargin")
+        if em is not None:
+            score += max(0, min(100, em * 2)) * 0.10; weight += 0.10
+        eps = c.get("epsGrowth")
+        if eps is not None:
+            score += max(0, min(100, 50 + eps)) * 0.10; weight += 0.10
+        score += (100 if c.get("sector") in self.SECULAR_SECTORS else 40) * 0.14; weight += 0.14
+        up = c.get("analystUpsidePct")
+        if up is not None:
+            score += max(0, min(100, 50 + up)) * 0.08; weight += 0.08
+        if weight < 0.5:
+            return None
+        return round(min(100, (score / weight) * self._giant_sector_tilt(c.get("sector"))), 1)
+
+    def _giant_view(self, c: Dict) -> Dict:
+        rg = c.get("revenueGrowth")
+        mc = c.get("marketCap") or 0
+        fcf = c.get("fcfMargin")
+        em = c.get("ebitdaMargin")
+        ev = (c.get("valuationMultiples") or {}).get("evEbitda")
+        pe = (c.get("valuationMultiples") or {}).get("pe")
+        beta = c.get("beta")
+        sector = c.get("sector")
+        industry = c.get("industry")
+        score = c.get("giantScore") or 0
+        small = mc < 2e9
+
+        # Potential bucket (clearly speculative, framed as "potential" in the UI).
+        if score >= 85 and mc < 10e9:
+            upside = "5–10x"
+        elif score >= 78:
+            upside = "3–5x"
+        elif score >= 68:
+            upside = "2–3x"
+        else:
+            upside = "2x+"
+
+        def mc_str(v):
+            if v >= 1e12:
+                return f"${v / 1e12:.1f}T"
+            if v >= 1e9:
+                return f"${v / 1e9:.1f}B"
+            return f"${v / 1e6:.0f}M"
+
+        # Margin trajectory (qualitative, from current profitability profile)
+        if fcf is not None and fcf > 10 and em is not None and em > 20:
+            margin_traj = "Strong, profitable margins"
+        elif fcf is not None and fcf > 0:
+            margin_traj = "Profitable, expanding"
+        else:
+            margin_traj = "Pre-/early-profitability, scaling"
+
+        # Moat descriptor
+        if (em is not None and em >= 30) or (fcf is not None and fcf >= 20):
+            moat = "High margins point to pricing power and scale economics — a sign of a durable advantage."
+        elif sector in {"Technology", "Communication Services"}:
+            moat = "Software/platform economics suggest potential network effects and high switching costs."
+        else:
+            moat = "Competitive position still developing; moat durability is a key item to monitor."
+
+        tam = f"Large, secular TAM in {industry or sector or 'its end markets'} (qualitative estimate)."
+
+        thesis = (
+            f"{c.get('companyName')} is a {mc_str(mc)} {sector or ''} company growing revenue "
+            f"{rg:.0f}% with {'positive' if (fcf or 0) > 0 else 'improving'} free cash flow. "
+            f"At today's size it has substantial runway to compound into a far larger franchise "
+            f"if it sustains growth and expands margins"
+            + (f"; consensus already implies {c['analystUpsidePct']:.0f}% upside." if c.get("analystUpsidePct") else ".")
+        )
+        why_larger = (
+            f"Small base × durable secular demand × {('improving ' if (fcf or 0) <= 0 else '')}margin leverage. "
+            f"A {mc_str(mc)} company sustaining ~{rg:.0f}% growth can multiply in value over many years as it scales."
+        )
+
+        risks = ["Multi-year execution risk — growth may not be sustained"]
+        if fcf is not None and fcf < 0:
+            risks.append("Not yet consistently free-cash-flow positive")
+        if (pe and pe > SECTOR_PE_ANCHOR.get(sector or "default", 20) * 1.3) or (ev and ev > 25):
+            risks.append("Premium valuation leaves little room for execution error")
+        if beta is not None and beta >= 1.3:
+            risks.append(f"High volatility (beta {beta}) — expect large drawdowns")
+        risks.append("Competitive disruption in a fast-moving market")
+
+        key_metrics = {
+            "Rev Growth": f"+{rg:.0f}%" if rg is not None else "—",
+            "Margin": margin_traj.split(",")[0] if isinstance(margin_traj, str) else "—",
+            "EV/EBITDA": f"{ev:.1f}x" if ev else (f"{pe:.0f}x P/E" if pe else "n/a"),
+        }
+
+        return {
+            "ticker": c.get("ticker"),
+            "name": c.get("companyName"),
+            "sector": sector,
+            "marketCap": mc,
+            "marketCapLabel": c.get("marketCapLabel"),
+            "price": c.get("price"),
+            "opportunityScore": round(score),
+            "giantScore": score,
+            "revenueGrowth": round(rg) if rg is not None else None,
+            "revenueCagr": round(rg, 1) if rg is not None else None,
+            "marginTrajectory": margin_traj,
+            "valuation": key_metrics["EV/EBITDA"],
+            "upside": upside,
+            "timeframe": "5+ years",
+            "tam": tam,
+            "thesis": thesis,
+            "whyLarger": why_larger,
+            "moat": moat,
+            "keyMetrics": key_metrics,
+            "risks": risks,
+            "shariah": c.get("shariahStatus") or "Unknown",
+            "source": c.get("source", {}),
+            "lastUpdated": c.get("lastUpdated"),
+        }
+
+    async def rank_future_giants(self, limit: int = 12) -> Dict:
+        col = self.db[self.COLLECTION]
+        proj = {
+            "_id": 0, "ticker": 1, "companyName": 1, "sector": 1, "industry": 1,
+            "marketCap": 1, "marketCapLabel": 1, "price": 1, "opportunityScore": 1, "beta": 1,
+            "revenueGrowth": 1, "revenueAcceleration": 1, "epsGrowth": 1, "fcfMargin": 1,
+            "ebitdaMargin": 1, "analystUpsidePct": 1, "valuationMultiples": 1,
+            "shariahStatus": 1, "source": 1, "lastUpdated": 1,
+        }
+        docs = await col.find({"opportunityScore": {"$ne": None}}, proj).to_list(length=5000)
+        ranked = []
+        for c in docs:
+            s = self._future_giant_score(c)
+            if s is None:
+                continue
+            c["giantScore"] = s
+            ranked.append(c)
+        ranked.sort(key=lambda x: x["giantScore"], reverse=True)
+        top = ranked[:limit]
+        return {
+            "companies": [self._giant_view(c) for c in top],
+            "total_ranked": len(ranked),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     async def coverage(self) -> Dict:
         col = self.db[self.COLLECTION]
         meta = await self.db[self.META_ID].find_one({"_id": self.META_ID}, {"_id": 0}) or {}

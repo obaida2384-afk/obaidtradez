@@ -45,6 +45,12 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - Frontend: `companyUniverse.js` `fetchShortTermGrowth` (rounds marketCap→millions); `TopPlays.jsx` wired to live ranking with graceful mock fallback — relabelled to "Why The Market May Be Wrong", added Key Catalysts / Key Risks chips + "What Could Invalidate The Thesis", null-safe scenarios, data-testids, live data note.
 - Verified: 25 live plays, 1,259 ranked, 0–5 mega caps, mid/small-cap names dominate (MAKO, DEC, CRMD, GPOR…), clean market caps, scenarios + narratives render. No fabricated numbers.
 
+### 2026-06-22 — Phase 4: Future Giants (DONE)
+- `company_universe.py`: `_future_giant_score` (gates rg≥15% & marketCap<150B; weights growth[capped], size-runway, FCF/EBITDA margins, EPS, secular sector, analyst upside) + `_giant_sector_tilt` (secular 1.0 / cyclical-commodity 0.6 / other 0.8) so Tech/Healthcare/Comm/Consumer lead and miners/energy/REITs are demoted. `_giant_view` builds potential bucket (2x→5-10x, framed as "potential"), qualitative TAM (no fake $), margin trajectory, moat, thesis, "why it could become much larger", key metrics, risks. `rank_future_giants(limit)`.
+- `server.py`: `GET /api/universe/future-giants`.
+- Frontend: `companyUniverse.js` `fetchFutureGiants` (marketCap→millions); `FutureGiants.jsx` wired to live screen with mock fallback, added "Why It Could Become Much Larger" block, data-testids, live note.
+- Verified: 12 live giants (CRMD, NUTX, RDDT/Reddit, XPEV/XPeng, biotech/tech names), 338 ranked, secular sectors dominate, all fields render. No guaranteed returns; speculative framing + disclaimers intact.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).

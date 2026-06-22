@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FUTURE_GIANTS } from "@/lib/mockData";
+import { fetchFutureGiants, fetchCoverage } from "@/lib/companyUniverse";
 import { Telescope, TrendingUp, AlertTriangle, ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
 
 const fmtM = (n) => {
@@ -54,6 +55,14 @@ function GiantCard({ g }) {
 
         {/* Thesis */}
         <p className="text-sm text-slate-400 leading-relaxed mt-3">{g.thesis}</p>
+
+        {/* Why it could become much larger */}
+        {g.whyLarger && (
+          <div className="mt-3 p-3 bg-violet-500/[0.06] rounded-lg border border-violet-500/15">
+            <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider mb-1">Why It Could Become Much Larger</p>
+            <p className="text-xs text-slate-400 leading-relaxed">{g.whyLarger}</p>
+          </div>
+        )}
 
         {/* Moat */}
         <div className="mt-3 p-3 bg-white/[0.03] rounded-lg border border-white/[0.04]">
@@ -112,6 +121,32 @@ function GiantCard({ g }) {
 }
 
 export default function FutureGiants() {
+  const [giants, setGiants] = useState([]);
+  const [isLive, setIsLive] = useState(false);
+  const [coverage, setCoverage] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cov, res] = await Promise.all([
+          fetchCoverage().catch(() => null),
+          fetchFutureGiants({ limit: 12 }),
+        ]);
+        setCoverage(cov);
+        if (res.companies && res.companies.length > 0) {
+          setGiants(res.companies);
+          setIsLive(true);
+        } else {
+          setGiants(FUTURE_GIANTS);
+          setIsLive(false);
+        }
+      } catch (e) {
+        setGiants(FUTURE_GIANTS);
+        setIsLive(false);
+      }
+    })();
+  }, []);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
@@ -158,12 +193,14 @@ export default function FutureGiants() {
         </div>
       </div>
 
-      <div className="space-y-6">
-        {FUTURE_GIANTS.map((g) => <GiantCard key={g.ticker} g={g} />)}
+      <div className="space-y-6" data-testid="future-giants-list">
+        {giants.map((g) => <GiantCard key={g.ticker} g={g} />)}
       </div>
 
-      <p className="text-xs text-slate-700 pb-4">
-        Future Giants uses simulated/demo data. Connect AI APIs for real-time fundamental screening and AI-generated thesis across thousands of companies.
+      <p className="text-xs text-slate-700 pb-4" data-testid="future-giants-data-note">
+        {isLive
+          ? `Live screen via Financial Modeling Prep${coverage?.count ? ` across ${coverage.count.toLocaleString()} companies` : ""} — secular-growth companies with runway to compound. Multi-year projections are speculative; not investment advice and returns are not guaranteed.`
+          : "Future Giants uses simulated/demo data. Connect AI APIs for real-time fundamental screening and AI-generated thesis across thousands of companies."}
       </p>
     </div>
   );
