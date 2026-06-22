@@ -1,284 +1,407 @@
-// Excel model generator — requires xlsx package (npm install xlsx)
-// Generates an institutional-quality DCF model workbook
+// Institutional DCF workbook generator (ExcelJS) — multi-sheet, formula-driven,
+// professionally formatted. Built from the live DCF model payload.
 
-let XLSXModule = null;
-
-async function getXLSX() {
-  if (XLSXModule) return XLSXModule;
-  try {
-    XLSXModule = await import("xlsx");
-    return XLSXModule;
-  } catch {
-    return null;
-  }
+let ExcelJSModule = null;
+async function getExcelJS() {
+  if (ExcelJSModule) return ExcelJSModule;
+  const mod = await import("exceljs");
+  ExcelJSModule = mod.default || mod;
+  return ExcelJSModule;
 }
 
-function fmt(n, decimals = 1) {
-  if (n == null) return "N/A";
-  return Number(n).toFixed(decimals);
+// ── palette ───────────────────────────────────────────────────────────────────
+const DARK = "FF1F3864";   // dark blue header
+const SUB = "FFD9E1F2";    // light blue subheader
+const YEL = "FFFFF2CC";    // yellow input
+const GRAY = "FFF2F2F2";   // gray formula
+const GREEN = "FF107C41";
+const RED = "FFC00000";
+const WHITE = "FFFFFFFF";
+const BORDER = { style: "thin", color: { argb: "FFBFBFBF" } };
+const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+const allBorders = { top: BORDER, left: BORDER, bottom: BORDER, right: BORDER };
+
+function headerRow(ws, row, labels, opts = {}) {
+  const r = ws.getRow(row);
+  labels.forEach((t, i) => {
+    const cell = r.getCell(i + 1);
+    cell.value = t;
+    cell.fill = fill(opts.sub ? SUB : DARK);
+    cell.font = { bold: true, color: { argb: opts.sub ? DARK : WHITE }, size: opts.size || 11 };
+    cell.alignment = { vertical: "middle", horizontal: i === 0 ? "left" : "right" };
+    cell.border = allBorders;
+  });
+  r.height = opts.height || 20;
+  return r;
 }
 
-function fmtM(n) {
-  if (n == null) return "N/A";
-  if (Math.abs(n) >= 1000000) return `$${(n / 1000000).toFixed(1)}T`;
-  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}B`;
-  return `$${n.toFixed(0)}M`;
-}
+function pct(v) { return v == null ? null : v / 100; }
 
-export async function generateExcelModel(company) {
-  const XLSX = await getXLSX();
-  if (!XLSX) {
-    throw new Error("xlsx package not installed. Run: npm install xlsx");
-  }
+export async function generateExcelModel(model) {
+  const ExcelJS = await getExcelJS();
+  // Accept either the rich payload or a bare company (graceful fallback).
+  const company = model.company || model;
+  const a = model.assumptions || {};
+  const hist = model.historicals;
+  const comps = model.comps;
+  const analyst = model.analyst;
+  const macro = model.macro;
+  const memo = model.memo;
+  const ticker = company.ticker || "TICKER";
 
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "ALPHA VAULT";
+  wb.created = new Date();
 
-  // ── Cover Page ────────────────────────────────────────────────────────────
-  const coverData = [
-    [],
-    ["", "ALPHAVAULT INVESTMENT RESEARCH"],
-    ["", "Institutional Equity Research | Financial Model"],
-    [],
-    ["", "COMPANY", company.name],
-    ["", "TICKER", company.ticker],
-    ["", "SECTOR", company.sector],
-    ["", "INDUSTRY", company.industry],
-    ["", "MODEL DATE", new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })],
-    ["", "CURRENT PRICE", `$${company.price}`],
-    ["", "MARKET CAP", fmtM(company.marketCap)],
-    [],
-    ["", "DCF IMPLIED PRICE", `$${company.impliedPrice}`],
-    ["", "ANALYST CONSENSUS PT", `$${company.avgPt}`],
-    ["", "ANALYST RATING", company.analystRating],
-    [],
-    ["", "BULL CASE", `$${company.bullPrice}`],
-    ["", "BASE CASE", `$${company.baseprice}`],
-    ["", "BEAR CASE", `$${company.bearPrice}`],
-    [],
-    ["", "DISCLAIMER", "This model is for educational and research purposes only. It does not constitute investment advice."],
-    ["", "", "AlphaVault does not guarantee accuracy of projections. Past performance is not indicative of future results."],
+  // ════════════════════════ COVER ════════════════════════
+  const cover = wb.addWorksheet("Cover", { properties: { tabColor: { argb: DARK } } });
+  cover.columns = [{ width: 4 }, { width: 30 }, { width: 30 }, { width: 20 }];
+  cover.mergeCells("B2:D2");
+  cover.getCell("B2").value = "ALPHA VAULT — EQUITY RESEARCH";
+  cover.getCell("B2").font = { bold: true, size: 18, color: { argb: DARK } };
+  cover.mergeCells("B3:D3");
+  cover.getCell("B3").value = "Discounted Cash Flow Model";
+  cover.getCell("B3").font = { italic: true, size: 11, color: { argb: "FF808080" } };
+  const coverRows = [
+    ["Company", company.name],
+    ["Ticker", ticker],
+    ["Sector", company.sector],
+    ["Industry", company.industry],
+    ["Current Price", company.price != null ? `$${company.price}` : "—"],
+    ["Analyst Consensus", analyst?.consensus || "—"],
+    ["Consensus Target", analyst?.targetConsensus != null ? `$${analyst.targetConsensus}` : "—"],
+    ["Model Date", new Date().toISOString().slice(0, 10)],
   ];
-  const wscover = XLSX.utils.aoa_to_sheet(coverData);
-  wscover["!cols"] = [{ wch: 3 }, { wch: 25 }, { wch: 40 }];
-  XLSX.utils.book_append_sheet(wb, wscover, "Cover");
+  coverRows.forEach(([k, v], i) => {
+    const row = 6 + i;
+    cover.getCell(`B${row}`).value = k;
+    cover.getCell(`B${row}`).font = { bold: true, color: { argb: DARK } };
+    cover.getCell(`C${row}`).value = v == null ? "—" : v;
+  });
+  cover.getCell("B16").value = "Educational research only. Not investment advice. Outputs depend on assumptions, which are uncertain.";
+  cover.getCell("B16").font = { italic: true, size: 9, color: { argb: "FF808080" } };
+  cover.mergeCells("B16:D16");
 
-  // ── Historical Financials ─────────────────────────────────────────────────
-  const years = company.years || [2020, 2021, 2022, 2023, 2024];
-  const rev = company.revenueHistory || [];
-  const ebitda = company.ebitdaHistory || [];
-  const fcf = company.fcfHistory || [];
+  // ════════════════════════ DCF MODEL (formula-driven) ════════════════════════
+  const ws = wb.addWorksheet("DCF Model", { properties: { tabColor: { argb: DARK } } });
+  ws.columns = [{ width: 30 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
+  ws.mergeCells("A1:G1");
+  ws.getCell("A1").value = `${company.name} (${ticker}) — DCF Model`;
+  ws.getCell("A1").font = { bold: true, size: 14, color: { argb: WHITE } };
+  ws.getCell("A1").fill = fill(DARK);
+  ws.getRow(1).height = 26;
+  ws.getCell("A1").alignment = { vertical: "middle" };
 
-  const calcGrowth = (arr, i) => {
-    if (i === 0 || !arr[i] || !arr[i - 1]) return "—";
-    return `${(((arr[i] - arr[i - 1]) / arr[i - 1]) * 100).toFixed(1)}%`;
-  };
+  const usd = "#,##0";
+  const pf = "0.0%";
+  const ps = "$#,##0.00";
 
-  const histData = [
-    ["HISTORICAL FINANCIAL STATEMENTS ($M)"],
-    [],
-    ["", ...years],
-    ["Revenue ($M)", ...rev.map((v) => Math.round(v).toLocaleString())],
-    ["YoY Growth", "—", ...years.slice(1).map((_, i) => calcGrowth(rev, i + 1))],
-    [],
-    ["EBITDA ($M)", ...ebitda.map((v) => (v ? Math.round(v).toLocaleString() : "N/A"))],
-    ["EBITDA Margin", ...rev.map((r, i) => (ebitda[i] ? `${((ebitda[i] / r) * 100).toFixed(1)}%` : "N/A"))],
-    [],
-    ["Free Cash Flow ($M)", ...fcf.map((v) => (v ? Math.round(v).toLocaleString() : "N/A"))],
-    ["FCF Margin", ...rev.map((r, i) => (fcf[i] ? `${((fcf[i] / r) * 100).toFixed(1)}%` : "N/A"))],
-    [],
-    ["KEY METRICS"],
-    ["P/E Ratio (TTM)", company.pe || "N/A"],
-    ["EV/EBITDA (TTM)", company.evEbitda || "N/A"],
-    ["Gross Margin", company.grossMargin ? `${company.grossMargin}%` : "N/A"],
-    ["Net Margin", company.netMargin ? `${company.netMargin}%` : "N/A"],
-    ["ROE", company.roe ? `${company.roe}%` : "N/A"],
+  const baseRev = company.revenue || 0;
+  const growth = (a.revGrowth || [8, 7, 6, 5, 4]).slice(0, 5);
+  const margin = (a.ebitdaMargin || [20, 20, 20, 20, 20]).slice(0, 5);
+  const daP = (a.daPercent || [6, 6, 6, 6, 6]).slice(0, 5);
+  const capexP = (a.capexPercent || [4, 4, 4, 4, 4]).slice(0, 5);
+  const nwcP = (a.nwcPercent || [2, 2, 2, 2, 2]).slice(0, 5);
+
+  // INPUTS (yellow)
+  headerRow(ws, 3, ["Key Inputs (editable)", "", "", "", "", "", ""]);
+  const inputCells = [
+    ["Base Revenue ($M)", baseRev, usd, "C5"],
+    ["Tax Rate", pct(a.taxRate ?? 21), pf, "C6"],
+    ["WACC", pct(a.wacc ?? 9), pf, "C7"],
+    ["Terminal Growth", pct(a.tgr ?? 3), pf, "C8"],
+    ["Total Debt ($M)", a.debt ?? 0, usd, "C9"],
+    ["Cash ($M)", a.cash ?? 0, usd, "C10"],
+    ["Diluted Shares (M)", a.sharesOut ?? 0, usd, "C11"],
+    ["Current Price", company.price ?? 0, ps, "C12"],
   ];
-  const wsHist = XLSX.utils.aoa_to_sheet(histData);
-  wsHist["!cols"] = [{ wch: 25 }, ...years.map(() => ({ wch: 15 }))];
-  XLSX.utils.book_append_sheet(wb, wsHist, "Historical Financials");
-
-  // ── Revenue Forecast ──────────────────────────────────────────────────────
-  const fcastYears = [2025, 2026, 2027, 2028, 2029];
-  const fcastRev = company.revenueForcast || fcastYears.map((_, i) => (rev[rev.length - 1] || 0) * Math.pow(1.12, i + 1));
-
-  const fcastData = [
-    ["REVENUE & MARGIN FORECAST"],
-    [],
-    ["ASSUMPTION NOTES"],
-    ["Revenue growth assumptions are based on: historical CAGR, analyst consensus estimates, management guidance, and industry growth."],
-    ["Margin assumptions reflect: pricing power, scale economics, competitive dynamics, and historical trend."],
-    [],
-    ["", ...fcastYears],
-    ["Revenue ($M)", ...fcastRev.map((v) => Math.round(v).toLocaleString())],
-    ["YoY Growth", ...fcastRev.map((v, i) => {
-      const prev = i === 0 ? rev[rev.length - 1] : fcastRev[i - 1];
-      return prev ? `${(((v - prev) / prev) * 100).toFixed(1)}%` : "—";
-    })],
-    [],
-    ["Gross Margin", ...fcastYears.map(() => `${fmt(company.grossMargin || 50)}%`)],
-    ["EBITDA Margin", ...fcastYears.map((_, i) => `${fmt((company.ebitdaMargin || 20) + i * 0.5)}%`)],
-    ["Net Margin", ...fcastYears.map(() => `${fmt(company.netMargin || 15)}%`)],
-    ["FCF Margin", ...fcastYears.map((_, i) => `${fmt((company.fcfMargin || 12) + i * 0.5)}%`)],
-    [],
-    ["Forecasted EBITDA ($M)", ...fcastRev.map((v, i) => Math.round(v * ((company.ebitdaMargin || 20) + i * 0.5) / 100).toLocaleString())],
-    ["Forecasted FCF ($M)", ...fcastRev.map((v, i) => Math.round(v * ((company.fcfMargin || 12) + i * 0.5) / 100).toLocaleString())],
-  ];
-  const wsFcast = XLSX.utils.aoa_to_sheet(fcastData);
-  wsFcast["!cols"] = [{ wch: 28 }, ...fcastYears.map(() => ({ wch: 14 }))];
-  XLSX.utils.book_append_sheet(wb, wsFcast, "Revenue Forecast");
-
-  // ── DCF Model ─────────────────────────────────────────────────────────────
-  const wacc = company.wacc || 10.0;
-  const tgr = company.tgr || 3.0;
-  const fcastFCF = fcastRev.map((v, i) => v * ((company.fcfMargin || 12) + i * 0.5) / 100);
-  const pvFCF = fcastFCF.map((v, i) => v / Math.pow(1 + wacc / 100, i + 1));
-  const pvSum = pvFCF.reduce((a, b) => a + b, 0);
-  const tv = fcastFCF[fcastFCF.length - 1] * (1 + tgr / 100) / ((wacc - tgr) / 100);
-  const pvTV = tv / Math.pow(1 + wacc / 100, 5);
-  const ev = pvSum + pvTV;
-  const netDebt = (company.debtToEbitda || 0) * ((ebitda[ebitda.length - 1] || 10000));
-  const equityValue = ev - netDebt;
-  const dilutedShares = company.marketCap / company.price;
-  const impliedPrice = equityValue / dilutedShares;
-
-  const dcfData = [
-    ["DISCOUNTED CASH FLOW (DCF) MODEL"],
-    [],
-    ["WACC ASSUMPTIONS"],
-    ["Risk-Free Rate (10Y Treasury)", "4.28%"],
-    ["Equity Risk Premium", "5.50%"],
-    ["Beta", fmt(wacc / 10.0 - 0.4)],
-    ["Cost of Equity", `${fmt(4.28 + 5.50 * (wacc / 10.0 - 0.4))}%`],
-    ["Pre-Tax Cost of Debt", "5.80%"],
-    ["Tax Rate", "21.0%"],
-    ["WACC", `${wacc}%`],
-    [],
-    ["TERMINAL VALUE ASSUMPTIONS"],
-    ["Terminal Growth Rate", `${tgr}%`],
-    ["Terminal Value (Gordon Growth)", `$${Math.round(tv).toLocaleString()}M`],
-    ["PV of Terminal Value", `$${Math.round(pvTV).toLocaleString()}M`],
-    [],
-    ["DCF SUMMARY", ...fcastYears],
-    ["Forecasted FCF ($M)", ...fcastFCF.map((v) => Math.round(v).toLocaleString())],
-    ["PV of FCF ($M)", ...pvFCF.map((v) => Math.round(v).toLocaleString())],
-    [],
-    ["Sum of PV (FCFs)", `$${Math.round(pvSum).toLocaleString()}M`],
-    ["PV of Terminal Value", `$${Math.round(pvTV).toLocaleString()}M`],
-    ["Enterprise Value", `$${Math.round(ev).toLocaleString()}M`],
-    ["Net Debt", `$${Math.round(netDebt).toLocaleString()}M`],
-    ["Equity Value", `$${Math.round(equityValue).toLocaleString()}M`],
-    ["Diluted Shares Outstanding (M)", Math.round(dilutedShares).toLocaleString()],
-    ["IMPLIED SHARE PRICE", `$${impliedPrice.toFixed(2)}`],
-    ["Current Price", `$${company.price}`],
-    ["Upside / Downside", `${(((impliedPrice - company.price) / company.price) * 100).toFixed(1)}%`],
-  ];
-  const wsDCF = XLSX.utils.aoa_to_sheet(dcfData);
-  wsDCF["!cols"] = [{ wch: 35 }, { wch: 18 }, ...fcastYears.map(() => ({ wch: 14 }))];
-  XLSX.utils.book_append_sheet(wb, wsDCF, "DCF Model");
-
-  // ── Sensitivity Tables ────────────────────────────────────────────────────
-  const waccRange = [8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0];
-  const tgrRange = [2.0, 2.5, 3.0, 3.5, 4.0];
-
-  const sensHeader = ["WACC \\ TGR", ...tgrRange.map((t) => `${t}%`)];
-  const sensRows = waccRange.map((w) => {
-    const row = [`${w}%`];
-    tgrRange.forEach((t) => {
-      const tvS = fcastFCF[fcastFCF.length - 1] * (1 + t / 100) / ((w - t) / 100);
-      const pvTvS = tvS / Math.pow(1 + w / 100, 5);
-      const pvFcfS = fcastFCF.reduce((acc, v, i) => acc + v / Math.pow(1 + w / 100, i + 1), 0);
-      const evS = pvFcfS + pvTvS;
-      const eqS = evS - netDebt;
-      row.push(`$${(eqS / dilutedShares).toFixed(0)}`);
-    });
-    return row;
+  inputCells.forEach(([label, val, fmt], i) => {
+    const row = 5 + i;
+    ws.getCell(`A${row}`).value = label;
+    const c = ws.getCell(`C${row}`);
+    c.value = val;
+    c.numFmt = fmt;
+    c.fill = fill(YEL);
+    c.font = { bold: true };
+    c.border = allBorders;
+    c.alignment = { horizontal: "right" };
   });
 
-  const sensData = [
-    ["SENSITIVITY ANALYSIS — Implied Share Price (WACC vs Terminal Growth Rate)"],
-    [],
-    sensHeader,
-    ...sensRows,
-    [],
-    ["NOTE: Highlighted cells represent base case assumptions. Green = above current price. Red = below."],
+  // Forecast driver rows (yellow inputs), period header row 14
+  const yearStart = (company.years && company.years.length ? company.years[company.years.length - 1] : new Date().getFullYear()) + 1;
+  headerRow(ws, 14, ["Forecast Drivers", "Y1", "Y2", "Y3", "Y4", "Y5"].concat([""]), { sub: true });
+  ws.getRow(14).getCell(7).value = "";
+  const periodRow = 15;
+  ws.getCell(`A${periodRow}`).value = "Fiscal Year";
+  for (let i = 0; i < 5; i++) {
+    const col = 3 + i; // C..G
+    const cell = ws.getRow(periodRow).getCell(col);
+    cell.value = yearStart + i;
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: "right" };
+  }
+  const driverDefs = [
+    ["Revenue Growth %", growth, pf, true],
+    ["EBITDA Margin %", margin, pf, true],
+    ["D&A % of Revenue", daP, pf, true],
+    ["CapEx % of Revenue", capexP, pf, true],
+    ["Δ NWC % of Revenue", nwcP, pf, true],
   ];
-  const wsSens = XLSX.utils.aoa_to_sheet(sensData);
-  wsSens["!cols"] = [{ wch: 14 }, ...tgrRange.map(() => ({ wch: 12 }))];
-  XLSX.utils.book_append_sheet(wb, wsSens, "Sensitivity Tables");
+  const driverRowStart = 16;
+  driverDefs.forEach(([label, arr, fmt], di) => {
+    const row = driverRowStart + di;
+    ws.getCell(`A${row}`).value = label;
+    for (let i = 0; i < 5; i++) {
+      const col = 3 + i;
+      const cell = ws.getRow(row).getCell(col);
+      cell.value = pct(arr[i]);
+      cell.numFmt = fmt;
+      cell.fill = fill(YEL);
+      cell.border = allBorders;
+      cell.alignment = { horizontal: "right" };
+    }
+  });
+  const G_ROW = driverRowStart, M_ROW = driverRowStart + 1, DA_ROW = driverRowStart + 2,
+    CX_ROW = driverRowStart + 3, NWC_ROW = driverRowStart + 4;
 
-  // ── Bull / Base / Bear Scenarios ──────────────────────────────────────────
-  const scenData = [
-    ["SCENARIO ANALYSIS — Bull / Base / Bear"],
-    [],
-    ["", "BULL CASE", "BASE CASE", "BEAR CASE"],
-    ["Probability", "25%", "50%", "25%"],
-    ["Revenue Growth (5yr CAGR)", `${fmt((company.revenueGrowth || 15) + 5)}%`, `${fmt(company.revenueGrowth || 15)}%`, `${fmt((company.revenueGrowth || 15) - 8)}%`],
-    ["EBITDA Margin (Exit)", `${fmt((company.ebitdaMargin || 20) + 5)}%`, `${fmt(company.ebitdaMargin || 20)}%`, `${fmt((company.ebitdaMargin || 20) - 5)}%`],
-    ["WACC", `${fmt(wacc - 0.5)}%`, `${wacc}%`, `${fmt(wacc + 1.5)}%`],
-    ["Terminal Growth Rate", `${fmt(tgr + 0.5)}%`, `${tgr}%`, `${fmt(tgr - 1.0)}%`],
-    [],
-    ["Implied Share Price", `$${company.bullPrice}`, `$${company.baseprice}`, `$${company.bearPrice}`],
-    ["vs Current Price", `${(((company.bullPrice - company.price) / company.price) * 100).toFixed(1)}%`, `${(((company.baseprice - company.price) / company.price) * 100).toFixed(1)}%`, `${(((company.bearPrice - company.price) / company.price) * 100).toFixed(1)}%`],
-    [],
-    ["BULL CASE THESIS", company.bullCase?.thesis || `Strong execution on all growth vectors. ${company.name} expands into adjacent markets and sustains premium margins.`],
-    ["BASE CASE THESIS", company.baseCase?.thesis || `Moderate growth in line with guidance. Margins expand incrementally as scale benefits kick in.`],
-    ["BEAR CASE THESIS", company.bearCase?.thesis || `Competition intensifies, growth decelerates, and valuation multiple compresses toward historical average.`],
-    [],
-    ["RISK FACTORS"],
-    ...(company.risks || ["Execution risk", "Competition", "Macro environment"]).map((r) => ["•", r]),
+  // BUILD (gray formulas)
+  let r = driverRowStart + 6; // 22
+  headerRow(ws, r - 1, ["Unlevered Free Cash Flow Build", "", "", "", "", "", ""]);
+  const cols = ["C", "D", "E", "F", "G"];
+  const colLetter = (i) => cols[i];
+  const prevRevRef = (i) => (i === 0 ? "$C$5" : `${colLetter(i - 1)}${r}`);
+
+  const REV = r;
+  ws.getCell(`A${REV}`).value = "Revenue ($M)";
+  cols.forEach((cl, i) => { const c = ws.getCell(`${cl}${REV}`); c.value = { formula: `${prevRevRef(i)}*(1+${cl}${G_ROW})` }; c.numFmt = usd; });
+  const EBITDA = r + 1;
+  ws.getCell(`A${EBITDA}`).value = "EBITDA ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${EBITDA}`); c.value = { formula: `${cl}${REV}*${cl}${M_ROW}` }; c.numFmt = usd; });
+  const DA = r + 2;
+  ws.getCell(`A${DA}`).value = "(–) D&A ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${DA}`); c.value = { formula: `${cl}${REV}*${cl}${DA_ROW}` }; c.numFmt = usd; });
+  const EBIT = r + 3;
+  ws.getCell(`A${EBIT}`).value = "EBIT ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${EBIT}`); c.value = { formula: `${cl}${EBITDA}-${cl}${DA}` }; c.numFmt = usd; });
+  const TAX = r + 4;
+  ws.getCell(`A${TAX}`).value = "(–) Taxes ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${TAX}`); c.value = { formula: `MAX(0,${cl}${EBIT})*$C$6` }; c.numFmt = usd; });
+  const NOPAT = r + 5;
+  ws.getCell(`A${NOPAT}`).value = "NOPAT ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${NOPAT}`); c.value = { formula: `${cl}${EBIT}-${cl}${TAX}` }; c.numFmt = usd; });
+  const ADDDA = r + 6;
+  ws.getCell(`A${ADDDA}`).value = "(+) D&A ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${ADDDA}`); c.value = { formula: `${cl}${DA}` }; c.numFmt = usd; });
+  const CAPEX = r + 7;
+  ws.getCell(`A${CAPEX}`).value = "(–) CapEx ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${CAPEX}`); c.value = { formula: `${cl}${REV}*${cl}${CX_ROW}` }; c.numFmt = usd; });
+  const DNWC = r + 8;
+  ws.getCell(`A${DNWC}`).value = "(–) Δ NWC ($M)";
+  cols.forEach((cl, i) => { const c = ws.getCell(`${cl}${DNWC}`); c.value = { formula: `(${cl}${REV}-${prevRevRef(i)})*${cl}${NWC_ROW}` }; c.numFmt = usd; });
+  const UFCF = r + 9;
+  ws.getCell(`A${UFCF}`).value = "Unlevered FCF ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${UFCF}`); c.value = { formula: `${cl}${NOPAT}+${cl}${ADDDA}-${cl}${CAPEX}-${cl}${DNWC}` }; c.numFmt = usd; c.font = { bold: true }; });
+  const DF = r + 10;
+  ws.getCell(`A${DF}`).value = "Discount Factor";
+  cols.forEach((cl, i) => { const c = ws.getCell(`${cl}${DF}`); c.value = { formula: `1/(1+$C$7)^${i + 1}` }; c.numFmt = "0.000"; });
+  const PV = r + 11;
+  ws.getCell(`A${PV}`).value = "PV of UFCF ($M)";
+  cols.forEach((cl) => { const c = ws.getCell(`${cl}${PV}`); c.value = { formula: `${cl}${UFCF}*${cl}${DF}` }; c.numFmt = usd; c.font = { bold: true }; });
+
+  // style build block gray + borders
+  for (let rr = REV; rr <= PV; rr++) {
+    cols.forEach((cl) => {
+      const c = ws.getCell(`${cl}${rr}`);
+      if (!c.fill || !c.fill.fgColor) c.fill = fill(GRAY);
+      c.border = allBorders;
+      c.alignment = { horizontal: "right" };
+    });
+  }
+
+  // ── Valuation summary ──
+  let v = PV + 2;
+  headerRow(ws, v, ["Valuation Summary", "", "", "", "", "", ""]);
+  const set = (label, formula, fmt, color) => {
+    v += 1;
+    ws.getCell(`A${v}`).value = label;
+    const c = ws.getCell(`C${v}`);
+    c.value = { formula };
+    c.numFmt = fmt;
+    c.font = { bold: true, color: color ? { argb: color } : undefined };
+    c.fill = fill(GRAY);
+    c.border = allBorders;
+    c.alignment = { horizontal: "right" };
+    return v;
+  };
+  const sumPV = set("PV of Forecast UFCF ($M)", `SUM(C${PV}:G${PV})`, usd);
+  const tv = set("Terminal Value ($M, Gordon)", `G${UFCF}*(1+$C$8)/($C$7-$C$8)`, usd);
+  const pvtv = set("PV of Terminal Value ($M)", `C${tv}*G${DF}`, usd);
+  const ev = set("Enterprise Value ($M)", `C${sumPV}+C${pvtv}`, usd);
+  const eq = set("(–) Debt (+) Cash → Equity ($M)", `C${ev}-$C$9+$C$10`, usd);
+  const impl = set("Implied Value / Share", `C${eq}/$C$11`, ps, GREEN);
+  set("Implied Upside / (Downside)", `C${impl}/$C$12-1`, pf);
+
+  // ════════════════════════ HISTORICAL FINANCIALS ════════════════════════
+  if (hist?.rows?.length) {
+    const h = wb.addWorksheet("Historical Financials");
+    h.columns = [{ width: 26 }].concat(hist.rows.map(() => ({ width: 14 })));
+    headerRow(h, 1, ["Line Item ($M)"].concat(hist.rows.map((x) => `FY${x.year}`)));
+    const lines = [
+      ["Revenue", "revenue", usd], ["Gross Profit", "grossProfit", usd], ["Gross Margin", "grossMargin", pf],
+      ["Operating Income", "operatingIncome", usd], ["EBITDA", "ebitda", usd], ["EBITDA Margin", "ebitdaMargin", pf],
+      ["Net Income", "netIncome", usd], ["Diluted EPS", "eps", "$#,##0.00"], ["Free Cash Flow", "freeCashFlow", usd],
+    ];
+    lines.forEach(([label, key, fmt], li) => {
+      const row = h.getRow(2 + li);
+      row.getCell(1).value = label;
+      hist.rows.forEach((x, ci) => {
+        const c = row.getCell(2 + ci);
+        c.value = key.includes("Margin") ? pct(x[key]) : x[key];
+        c.numFmt = fmt;
+        c.alignment = { horizontal: "right" };
+        c.border = allBorders;
+      });
+    });
+    h.getCell(`A${3 + lines.length}`).value = `Source: ${hist.source}`;
+    h.getCell(`A${3 + lines.length}`).font = { italic: true, size: 9, color: { argb: "FF808080" } };
+  }
+
+  // ════════════════════════ SENSITIVITY (green→red color scale) ════════════════════════
+  const sens = wb.addWorksheet("Sensitivity");
+  sens.columns = [{ width: 16 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }];
+  sens.mergeCells("A1:F1");
+  sens.getCell("A1").value = "Implied Value / Share — WACC (rows) vs Terminal Growth (cols)";
+  sens.getCell("A1").font = { bold: true, color: { argb: WHITE } };
+  sens.getCell("A1").fill = fill(DARK);
+  const baseW = (a.wacc ?? 9) / 100, baseT = (a.tgr ?? 3) / 100;
+  const waccs = [-0.015, -0.0075, 0, 0.0075, 0.015].map((d) => baseW + d);
+  const tgrs = [0.02, 0.025, 0.03, 0.035, 0.04];
+  const inputs = { baseRev, growth: growth.map((x) => x / 100), margin: margin.map((x) => x / 100), daP: daP.map((x) => x / 100), capexP: capexP.map((x) => x / 100), nwcP: nwcP.map((x) => x / 100), tax: (a.taxRate ?? 21) / 100, debt: a.debt ?? 0, cash: a.cash ?? 0, shares: a.sharesOut || 1 };
+  sens.getRow(3).getCell(1).value = "WACC \\ TGR";
+  tgrs.forEach((t, i) => { const c = sens.getRow(3).getCell(2 + i); c.value = t; c.numFmt = pf; c.fill = fill(SUB); c.font = { bold: true, color: { argb: DARK } }; c.alignment = { horizontal: "right" }; });
+  waccs.forEach((w, wi) => {
+    const row = sens.getRow(4 + wi);
+    const lc = row.getCell(1); lc.value = w; lc.numFmt = pf; lc.fill = fill(SUB); lc.font = { bold: true, color: { argb: DARK } };
+    tgrs.forEach((t, ti) => {
+      const c = row.getCell(2 + ti);
+      c.value = computeImplied(inputs, w, t);
+      c.numFmt = "$#,##0.00";
+      c.alignment = { horizontal: "right" };
+      c.border = allBorders;
+    });
+  });
+  sens.addConditionalFormatting({
+    ref: `B4:F${3 + waccs.length}`,
+    rules: [{ type: "colorScale", cfvo: [{ type: "min" }, { type: "percentile", value: 50 }, { type: "max" }], color: [{ argb: RED }, { argb: "FFFFEB84" }, { argb: GREEN }] }],
+  });
+
+  // ════════════════════════ COMPARABLES ════════════════════════
+  if (comps?.rows?.length) {
+    const cw = wb.addWorksheet("Comparables");
+    cw.columns = [{ width: 10 }, { width: 28 }, { width: 14 }, { width: 10 }, { width: 12 }, { width: 10 }, { width: 12 }, { width: 12 }];
+    headerRow(cw, 1, ["Ticker", "Company", "Mkt Cap ($M)", "P/E", "EV/EBITDA", "P/S", "Rev Gr.", "EBITDA M."]);
+    comps.rows.forEach((row, i) => {
+      const rr = cw.getRow(2 + i);
+      rr.values = [row.ticker, row.name, row.marketCap, row.pe, row.evEbitda, row.ps, row.revenueGrowth != null ? row.revenueGrowth / 100 : null, row.ebitdaMargin != null ? row.ebitdaMargin / 100 : null];
+      rr.getCell(3).numFmt = usd; rr.getCell(7).numFmt = pf; rr.getCell(8).numFmt = pf;
+      if (row.isTarget) rr.eachCell((c) => { c.fill = fill(SUB); c.font = { bold: true }; });
+      rr.eachCell((c) => { c.border = allBorders; });
+    });
+    const mr = cw.getRow(3 + comps.rows.length);
+    mr.getCell(2).value = "Peer Median"; mr.getCell(2).font = { bold: true };
+    mr.getCell(4).value = comps.medianPe; mr.getCell(5).value = comps.medianEvEbitda;
+  }
+
+  // ════════════════════════ ANALYST & MACRO ════════════════════════
+  const am = wb.addWorksheet("Analyst & Macro");
+  am.columns = [{ width: 26 }, { width: 22 }];
+  headerRow(am, 1, ["Analyst Recommendations", ""]);
+  const amRows = [
+    ["Consensus", analyst?.consensus], ["Strong Buy", analyst?.strongBuy], ["Buy", analyst?.buy],
+    ["Hold", analyst?.hold], ["Sell", analyst?.sell], ["Strong Sell", analyst?.strongSell],
+    ["Target (Consensus)", analyst?.targetConsensus != null ? `$${analyst.targetConsensus}` : "—"],
+    ["Target Range", analyst ? `$${analyst.targetLow}–$${analyst.targetHigh}` : "—"],
+    ["Implied Upside", analyst?.impliedUpside != null ? `${analyst.impliedUpside}%` : "—"],
   ];
-  const wsScen = XLSX.utils.aoa_to_sheet(scenData);
-  wsScen["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 22 }];
-  XLSX.utils.book_append_sheet(wb, wsScen, "Scenarios");
-
-  // ── Investment Memo ────────────────────────────────────────────────────────
-  const ratingLabel = impliedPrice > company.price * 1.2
-    ? "STRONGLY ATTRACTIVE"
-    : impliedPrice > company.price * 1.05
-    ? "ATTRACTIVE"
-    : impliedPrice >= company.price * 0.95
-    ? "FAIRLY VALUED"
-    : impliedPrice >= company.price * 0.8
-    ? "EXPENSIVE"
-    : "AVOID";
-
-  const memoData = [
-    ["INVESTMENT MEMORANDUM"],
-    ["Generated by AlphaVault — For research purposes only"],
-    [],
-    ["COMPANY", company.name],
-    ["TICKER", company.ticker],
-    ["FINAL RATING", ratingLabel],
-    [],
-    ["EXECUTIVE SUMMARY"],
-    [company.description || `${company.name} is a leading company in the ${company.sector} sector.`],
-    [],
-    ["INVESTMENT THESIS"],
-    [company.moat ? `Competitive Advantages: ${company.moat}` : "See full research report for investment thesis."],
-    [],
-    ["VALUATION SUMMARY"],
-    ["DCF Implied Price", `$${impliedPrice.toFixed(2)}`],
-    ["Analyst Consensus PT", `$${company.avgPt}`],
-    ["Bull / Base / Bear", `$${company.bullPrice} / $${company.baseprice} / $${company.bearPrice}`],
-    [],
-    ["KEY FINANCIALS"],
-    ["Revenue (TTM)", fmtM(company.revenue)],
-    ["Revenue Growth (YoY)", `${company.revenueGrowth}%`],
-    ["EBITDA Margin", company.ebitdaMargin ? `${company.ebitdaMargin}%` : "N/A"],
-    ["FCF Margin", company.fcfMargin ? `${company.fcfMargin}%` : "N/A"],
-    [],
-    ["RISK FACTORS"],
-    ...(company.risks || []).map((r) => [`• ${r}`]),
-    [],
-    ["DISCLAIMER"],
-    ["This model was generated by AlphaVault for educational purposes. It does not constitute financial advice."],
-    ["All assumptions should be independently verified. Investing involves substantial risk of loss."],
-    ["AlphaVault ratings: Strongly Attractive / Attractive / Fairly Valued / Expensive / Avoid"],
+  amRows.forEach(([k, val], i) => { const row = am.getRow(2 + i); row.getCell(1).value = k; row.getCell(1).font = { bold: true }; row.getCell(2).value = val == null ? "—" : val; });
+  let mrow = 2 + amRows.length + 1;
+  headerRow(am, mrow, ["Macro (Treasury / WACC inputs)", ""]);
+  const macroRows = [
+    ["Risk-Free (10Y UST)", macro?.riskFreeRate10y != null ? `${macro.riskFreeRate10y}%` : "—"],
+    ["As Of", macro?.asOf || "—"],
+    ...Object.entries(macro?.yieldCurve || {}).map(([k, vv]) => [k, `${vv}%`]),
   ];
-  const wsMemo = XLSX.utils.aoa_to_sheet(memoData);
-  wsMemo["!cols"] = [{ wch: 30 }, { wch: 60 }];
-  XLSX.utils.book_append_sheet(wb, wsMemo, "Investment Memo");
+  macroRows.forEach(([k, val], i) => { const row = am.getRow(mrow + 1 + i); row.getCell(1).value = k; row.getCell(1).font = { bold: true }; row.getCell(2).value = val; });
 
-  // ── Write & Download ──────────────────────────────────────────────────────
-  XLSX.writeFile(wb, `AlphaVault_${company.ticker}_Model_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  // ════════════════════════ ASSUMPTIONS (sources) ════════════════════════
+  if (a.meta) {
+    const as = wb.addWorksheet("Assumptions");
+    as.columns = [{ width: 22 }, { width: 40 }, { width: 50 }, { width: 12 }];
+    headerRow(as, 1, ["Assumption", "Source", "Reasoning", "Confidence"]);
+    Object.entries(a.meta).forEach(([k, m], i) => {
+      const row = as.getRow(2 + i);
+      row.getCell(1).value = k; row.getCell(1).font = { bold: true };
+      row.getCell(2).value = m.source; row.getCell(3).value = m.reasoning;
+      const cc = row.getCell(4); cc.value = m.confidence;
+      cc.font = { bold: true, color: { argb: m.confidence === "High" ? GREEN : m.confidence === "Low" ? RED : "FF1F3864" } };
+      row.eachCell((c) => { c.alignment = { vertical: "top", wrapText: true }; c.border = allBorders; });
+    });
+  }
+
+  // ════════════════════════ INVESTMENT MEMO ════════════════════════
+  const mw = wb.addWorksheet("Investment Memo");
+  mw.columns = [{ width: 100 }];
+  mw.getCell("A1").value = memo?.headline || `${company.name} (${ticker}) — Investment Memo`;
+  mw.getCell("A1").font = { bold: true, size: 13, color: { argb: WHITE } };
+  mw.getCell("A1").fill = fill(DARK);
+  mw.getRow(1).height = 24;
+  mw.getCell("A3").value = memo?.summary || "";
+  mw.getCell("A3").alignment = { wrapText: true, vertical: "top" };
+  mw.getRow(3).height = 90;
+  if (company.risks?.length) {
+    mw.getCell("A5").value = "Risk Factors";
+    mw.getCell("A5").font = { bold: true, color: { argb: DARK } };
+    company.risks.forEach((rk, i) => { mw.getCell(`A${6 + i}`).value = `•  ${rk}`; mw.getCell(`A${6 + i}`).alignment = { wrapText: true }; });
+  }
+  const dr = 6 + (company.risks?.length || 0) + 1;
+  mw.getCell(`A${dr}`).value = memo?.disclaimer || "Educational research only. Not investment advice.";
+  mw.getCell(`A${dr}`).font = { italic: true, size: 9, color: { argb: "FF808080" } };
+
+  // ── download ──
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${ticker}_DCF_Model.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return true;
+}
+
+// JS replica of the DCF for the sensitivity grid (values only).
+function computeImplied(inp, wacc, tgr) {
+  if (wacc <= tgr) return null;
+  let prev = inp.baseRev, pvSum = 0, ufcf5 = 0, df5 = 1;
+  for (let i = 0; i < 5; i++) {
+    const rev = prev * (1 + inp.growth[i]);
+    const ebitda = rev * inp.margin[i];
+    const da = rev * inp.daP[i];
+    const ebit = ebitda - da;
+    const tax = Math.max(0, ebit) * inp.tax;
+    const nopat = ebit - tax;
+    const capex = rev * inp.capexP[i];
+    const dnwc = (rev - prev) * inp.nwcP[i];
+    const ufcf = nopat + da - capex - dnwc;
+    const df = 1 / Math.pow(1 + wacc, i + 1);
+    pvSum += ufcf * df;
+    prev = rev;
+    if (i === 4) { ufcf5 = ufcf; df5 = df; }
+  }
+  const tv = (ufcf5 * (1 + tgr)) / (wacc - tgr);
+  const ev = pvSum + tv * df5;
+  const equity = ev - inp.debt + inp.cash;
+  return inp.shares ? equity / inp.shares : null;
 }

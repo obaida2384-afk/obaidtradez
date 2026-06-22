@@ -58,6 +58,14 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - Verified (NVDA): real 5yr financials, analyst-driven forecast, WACC 16.6%, full UFCF/TV/valuation, comps (AAPL/ADI…), sources tab. DCF implied differs from price (legit conservative output; assumptions editable).
 - Spec sections covered: Company Overview, Historical Financials, Revenue Build, Margin Forecast, Working Capital, CapEx, D&A, UFCF, WACC, Terminal Value, DCF Summary, Sensitivity, Trading Comps, Analyst Recs, Macro, Industry, Bull/Base/Bear, Risk Factors, Investment Memo. NOT in DCF view: News & Catalysts (separate News page exists) — deferred.
 
+### 2026-06-22 — Phase 6: Excel Export (DONE)
+- Rewrote `frontend/src/lib/excelExporter.js` using **ExcelJS** (added via yarn) — SheetJS `xlsx` can't style cells. `generateExcelModel(payload)` builds an 8-sheet institutional workbook: Cover, **DCF Model (formula-driven)**, Historical Financials, Sensitivity, Comparables, Analyst & Macro, Assumptions (sources+confidence), Investment Memo.
+- DCF sheet is genuinely formula-driven (67 formulas): yellow editable inputs → Revenue/EBITDA/EBIT/NOPAT/UFCF/PV/TV/EV/Equity/Implied all as Excel formulas referencing input cells. Palette: dark-blue headers, light-blue subheaders, yellow inputs, gray formulas, green/red. Sensitivity uses a WACC×TGR grid with green→red colorScale conditional formatting.
+- `Modeling.jsx` handleExport passes `{company, ...payload}`; export verified (MSFT/AAPL → valid .xlsx, 8 sheets, 67 formula cells, color scale present).
+- LIMITATION: native embedded Excel charts are not supported by JS Excel libraries (ExcelJS/xlsx) — used colorScale/data visuals instead; on-screen Modeling page has live charts (recharts). Prices are pulled live from FMP at model-build time (accurate/current); real-time streaming not added.
+
+## ALL 6 PHASES COMPLETE. Possible follow-ups: embed News & Catalysts into DCF; wire Research detail page to DCF engine; institutional/insider enrichment; hard fund/ETF exclusion; faster live-price polling.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).
