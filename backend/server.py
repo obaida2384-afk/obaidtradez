@@ -47,6 +47,7 @@ from top_movers_scanner import TopMoversScanner
 from performance_tracker import PerformanceTracker
 from long_term_engine import LongTermInvestingEngine
 from execution_transparency import ExecutionTransparencyTracker
+from company_universe import CompanyUniverseService
 
 # ===================== CONFIGURATION =====================
 class Config:
@@ -903,6 +904,9 @@ class UniverseManager:
         }
 
 universe_manager = UniverseManager()
+
+# API-driven, scalable company universe (1k-5k companies sourced dynamically)
+company_universe_service = CompanyUniverseService(api_client, db, lambda: config.FMP_API_KEY)
 
 # ===================== TRADING SIGNAL ENGINE (Quality-Focused) =====================
 
@@ -2112,6 +2116,57 @@ async def refresh_universe(background_tasks: BackgroundTasks, auth: bool = Depen
     """Trigger universe refresh in background"""
     background_tasks.add_task(universe_manager.load_universe, True)
     return {"message": "Universe refresh started", "status": "processing"}
+
+# ===== Scalable, API-driven Company Universe (Phase 2) =====
+
+@api_router.get("/universe/companies")
+async def list_universe_companies(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    sector: Optional[str] = None,
+    search: Optional[str] = None,
+    min_market_cap: Optional[float] = None,
+    min_opportunity: Optional[float] = None,
+    sort_by: str = Query(default="marketCap"),
+    order: int = Query(default=-1),
+    auth: bool = Depends(verify_access),
+):
+    """Paginated, filterable list of enriched companies."""
+    return await company_universe_service.list_companies(
+        page=page, limit=limit, sector=sector, search=search,
+        min_market_cap=min_market_cap, min_opportunity=min_opportunity,
+        sort_by=sort_by, order=order,
+    )
+
+@api_router.get("/universe/company/{ticker}")
+async def get_universe_company(ticker: str, auth: bool = Depends(verify_access)):
+    """Full enriched record for a single ticker."""
+    record = await company_universe_service.get_company(ticker)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"{ticker.upper()} not in universe")
+    return record
+
+@api_router.get("/universe/coverage")
+async def universe_coverage(auth: bool = Depends(verify_access)):
+    """Universe size, freshness, sector/market-cap breakdown, data-source status."""
+    return await company_universe_service.coverage()
+
+@api_router.post("/universe/build")
+async def build_universe(
+    background_tasks: BackgroundTasks,
+    target_size: int = Query(default=1500, ge=100, le=5000),
+    min_market_cap: float = Query(default=50e6, ge=0),
+    auth: bool = Depends(verify_access),
+):
+    """Build/refresh the API-driven company universe (runs in background)."""
+    if not config.FMP_API_KEY:
+        return {"status": "no_data_source", "started": False,
+                "message": "No FMP_API_KEY configured — add one to populate the universe."}
+    background_tasks.add_task(
+        company_universe_service.build_universe, target_size, min_market_cap
+    )
+    return {"status": "processing", "started": True, "target_size": target_size}
+
 
 @api_router.post("/investments/refresh")
 async def refresh_investment_signals(

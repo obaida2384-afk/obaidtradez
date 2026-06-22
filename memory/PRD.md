@@ -26,6 +26,14 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - `backend/server.py` `MultiAPIClient._request`: skip outbound calls when a required credential (header/param) is `None` — eliminated `Header value must be str/bytes` log-spam + wasted requests in demo mode.
 - Installed deps (yarn frontend, pip backend). Verified: frontend 200, backend `/api/` 200, login+onboarding+all main pages mount with 0 runtime errors.
 
+### 2026-06-22 — Phase 2: Company Universe (BACKEND DONE, awaiting approval + FMP key)
+- New module `backend/company_universe.py` — `CompanyUniverseService`: dynamic ticker discovery via FMP screener (NOT hardcoded; capped 5000), per-ticker enrichment, computed opportunity/risk scores, bull/base/bear + thesis assembled from real data, per-field `source` provenance, `lastUpdated`. Missing data → null + `ESTIMATED` flag (no fabricated numbers).
+- 28-field schema: ticker, companyName, sector, industry, marketCap, price, revenueGrowth, revenueAcceleration, ebitdaMargin, fcfMargin, epsGrowth, analystRating, analystPriceTarget, analystEstimateRevisions, institutionalOwnershipTrend, insiderActivity, valuationMultiples, peerComparison, catalysts, macroSensitivity, shariahStatus, opportunityScore, riskScore, bullCase, baseCase, bearCase, thesis, source, lastUpdated.
+- `server.py`: import + `company_universe_service` instance + endpoints `GET /api/universe/companies` (filter/sort/paginate), `GET /api/universe/company/{ticker}`, `GET /api/universe/coverage`, `POST /api/universe/build`. Mongo collection `company_universe` (indexed).
+- Fixed a pre-existing syntax corruption at end of `server.py` (duplicate mis-indented `except` in `_market_open_verifier_watcher`) that blocked reload.
+- Verified endpoints return honest empty/`has_data_source:false` in demo mode. NOT YET: FMP key to populate, and frontend wiring (intersects Phase 5 DCF fields) — deferred for approval.
+
+
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).
 - P1 Phase 3: Short-Term Growth ranking (de-emphasize mega caps; asymmetric upside framing).
