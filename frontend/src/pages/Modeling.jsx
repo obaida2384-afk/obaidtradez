@@ -8,10 +8,10 @@ import { toast } from "sonner";
 import {
   Search, FileSpreadsheet, Calculator, Edit3, RotateCcw,
   BarChart2, BookOpen, Target, ChevronRight, AlertTriangle,
-  Info, CheckCircle, History, Users, FileText,
+  Info, CheckCircle, History, Users, FileText, Activity, GraduationCap,
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine,
 } from "recharts";
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -194,6 +194,186 @@ const EditInput = ({ value, onChange, step=0.5, min=-200, max=200 }) => (
     className="w-16 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5 text-amber-300 text-xs font-mono text-right outline-none focus:border-amber-400 transition-colors" />
 );
 
+// ─── Plain-English explainer (collapsible, teaches the user) ───────────────────
+function Explainer({ title, points, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="glass-card border-blue-500/20 overflow-hidden" data-testid="tab-explainer">
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors">
+        <GraduationCap className="w-4 h-4 text-blue-400 shrink-0" />
+        <span className="text-xs font-semibold text-blue-200">In plain English — {title}</span>
+        <ChevronRight className={`w-4 h-4 text-slate-500 ml-auto transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 pt-1 space-y-2 border-t border-white/[0.06]">
+          {points.map((p, i) => (
+            <p key={i} className="text-xs text-slate-400 leading-relaxed flex gap-2">
+              <span className="text-blue-400 mt-0.5 shrink-0">›</span><span>{p}</span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Compact DCF (for Monte Carlo + tornado) ───────────────────────────────────
+function quickImplied(c, a, { growthMul = 1, marginShift = 0, wacc = a.wacc, tgr = a.tgr } = {}) {
+  const w = wacc / 100, tax = a.taxRate / 100;
+  let prevRev = c.revenue, prevNWC = c.revenue * (a.nwcPercent[0] / 100), pvF = 0, lastU = 0;
+  for (let i = 0; i < 5; i++) {
+    const g = a.revGrowth[i] * growthMul;
+    const rev = prevRev * (1 + g / 100);
+    const eb = rev * ((a.ebitdaMargin[i] + marginShift) / 100);
+    const da = rev * (a.daPercent[i] / 100);
+    const ebit = eb - da;
+    const nopat = ebit - Math.max(0, ebit * tax);
+    const capex = rev * (a.capexPercent[i] / 100);
+    const nwc = rev * (a.nwcPercent[i] / 100);
+    const u = nopat + da - capex - (nwc - prevNWC);
+    pvF += u / Math.pow(1 + w, i + 1);
+    prevRev = rev; prevNWC = nwc; lastU = u;
+  }
+  if (w <= tgr / 100) return null;
+  const tv = (lastU * (1 + tgr / 100)) / (w - tgr / 100);
+  const eq = pvF + tv / Math.pow(1 + w, 5) + a.cash - a.debt;
+  return Math.max(0, eq / a.sharesOut);
+}
+
+function runMonteCarlo(c, a, n = 6000) {
+  const randn = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const prices = [];
+  for (let i = 0; i < n; i++) {
+    const growthMul = Math.max(0.2, 1 + randn() * 0.25);
+    const marginShift = randn() * 2;
+    const wacc = Math.max(4, a.wacc + randn() * 1.0);
+    const tgr = Math.min(wacc - 0.5, Math.max(0.5, a.tgr + randn() * 0.5));
+    const p = quickImplied(c, a, { growthMul, marginShift, wacc, tgr });
+    if (p != null && isFinite(p)) prices.push(p);
+  }
+  prices.sort((x, y) => x - y);
+  if (!prices.length) return null;
+  const q = (p) => prices[Math.floor(p * (prices.length - 1))];
+  const mean = prices.reduce((s, x) => s + x, 0) / prices.length;
+  const probAbove = (prices.filter(x => x >= c.price).length / prices.length) * 100;
+  let min = prices[0], max = q(0.99); // clip extreme tail for a readable chart
+  const BUCKETS = 26, wdt = (max - min) / BUCKETS || 1;
+  const hist = Array.from({ length: BUCKETS }, (_, i) => ({ price: +(min + wdt * (i + 0.5)).toFixed(2), count: 0 }));
+  prices.forEach(x => { const idx = Math.min(BUCKETS - 1, Math.max(0, Math.floor((x - min) / wdt))); hist[idx].count++; });
+  return { n: prices.length, mean, median: q(0.5), p10: q(0.1), p90: q(0.9), p25: q(0.25), p75: q(0.75), min: prices[0], max: prices[prices.length - 1], probAbove, hist };
+}
+
+function tornado(c, a) {
+  const base = quickImplied(c, a, {});
+  const defs = [
+    { name: "Revenue Growth", lo: { growthMul: 0.7 }, hi: { growthMul: 1.3 } },
+    { name: "EBITDA Margin", lo: { marginShift: -3 }, hi: { marginShift: 3 } },
+    { name: "WACC (discount rate)", lo: { wacc: a.wacc + 1.5 }, hi: { wacc: Math.max(4, a.wacc - 1.5) } },
+    { name: "Terminal Growth", lo: { tgr: Math.max(0.5, a.tgr - 1) }, hi: { tgr: a.tgr + 1 } },
+  ];
+  return defs.map(f => {
+    const x = quickImplied(c, a, f.lo), y = quickImplied(c, a, f.hi);
+    return { name: f.name, low: Math.min(x, y), high: Math.max(x, y) };
+  }).sort((p, q) => (q.high - q.low) - (p.high - p.low)).map(f => ({ ...f, base }));
+}
+
+// ─── TAB: Monte Carlo ──────────────────────────────────────────────────────────
+function MonteCarloTab({ c, assumptions: a }) {
+  const mc = useMemo(() => runMonteCarlo(c, a), [c, a]);
+  const tor = useMemo(() => tornado(c, a), [c, a]);
+  if (!mc) return <div className="glass-card p-6 text-sm text-slate-400">Not enough data to simulate.</div>;
+
+  const undervalued = mc.probAbove >= 50;
+  const spread = mc.p90 - mc.p10;
+  const spreadPct = c.price ? (spread / c.price) * 100 : 0;
+  const uncertainty = spreadPct > 90 ? "very high" : spreadPct > 55 ? "high" : spreadPct > 30 ? "moderate" : "relatively low";
+
+  const torMin = Math.min(...tor.map(t => t.low), c.price);
+  const torMax = Math.max(...tor.map(t => t.high), c.price);
+  const torSpan = torMax - torMin || 1;
+  const posPct = (v) => ((v - torMin) / torSpan) * 100;
+
+  const stats = [
+    { l: "Median Value", v: fmtPx(mc.median), sub: "Most likely outcome" },
+    { l: "Mean Value", v: fmtPx(mc.mean), sub: "Average of all runs" },
+    { l: "Likely Range (P10–P90)", v: `${fmtPx(mc.p10)} – ${fmtPx(mc.p90)}`, sub: "80% of outcomes land here" },
+    { l: "Chance Undervalued", v: `${mc.probAbove.toFixed(0)}%`, sub: `vs price ${fmtPx(c.price)}`, hi: undervalued, lo: !undervalued },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <Explainer title={`Monte Carlo — stress-testing ${c.name}'s valuation`} points={[
+        `A normal DCF gives ONE answer. But nobody knows exactly how fast ${c.name} will grow or what margins it will earn. Monte Carlo runs the model ${mc.n.toLocaleString()} times, each time randomly nudging the key inputs (revenue growth, EBITDA margin, WACC and terminal growth) within realistic ranges — like rolling the dice on the company's future thousands of times.`,
+        `The histogram below shows where the implied share price landed across all those runs. Taller bars = more likely outcomes. The white line marks today's price (${fmtPx(c.price)}).`,
+        `Most important number: about ${mc.probAbove.toFixed(0)}% of simulations valued ${c.ticker} ABOVE its current price — i.e. the model thinks there's roughly a ${mc.probAbove.toFixed(0)}% chance the stock is undervalued today.`,
+        `The range of outcomes is ${uncertainty} (P10–P90 spans ${fmtPx(mc.p10)} to ${fmtPx(mc.p90)}, about ${spreadPct.toFixed(0)}% of the price). A wide range means the answer is very sensitive to assumptions, so treat any single target with caution.`,
+      ]} />
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {stats.map(s => (
+          <div key={s.l} className="glass-card p-4">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">{s.l}</p>
+            <p className={`text-lg font-bold font-mono ${s.hi ? "text-emerald-400" : s.lo ? "text-red-400" : "text-white"}`}>{s.v}</p>
+            <p className="text-[10px] text-slate-600 mt-0.5">{s.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Histogram */}
+      <div className="glass-card p-5">
+        <p className="text-xs font-semibold text-slate-300 mb-1">Distribution of Implied Share Price — {mc.n.toLocaleString()} simulations</p>
+        <p className="text-[10px] text-slate-500 mb-4">Green bars = outcomes above today's price (undervalued). Red bars = below (overvalued).</p>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={mc.hist} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <XAxis dataKey="price" tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${Math.round(v)}`} minTickGap={24} />
+            <YAxis tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ background: "#0d1117", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#e2e8f0", fontSize: 11 }}
+              formatter={(v) => [`${v} runs`, "Frequency"]} labelFormatter={(l) => `≈ $${Number(l).toFixed(2)}/share`} />
+            <ReferenceLine x={mc.hist.reduce((best, h) => Math.abs(h.price - c.price) < Math.abs(best - c.price) ? h.price : best, mc.hist[0].price)}
+              stroke="#e2e8f0" strokeDasharray="3 3" label={{ value: "Today", fill: "#e2e8f0", fontSize: 10, position: "top" }} />
+            <Bar dataKey="count" radius={[2, 2, 0, 0]}>
+              {mc.hist.map((d, i) => <Cell key={i} fill={d.price >= c.price ? "#10b981" : "#ef4444"} opacity={0.8} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Tornado */}
+      <div className="glass-card p-5">
+        <p className="text-xs font-semibold text-slate-300 mb-1">Tornado — what moves the valuation most?</p>
+        <p className="text-[10px] text-slate-500 mb-4">Each bar shows how far the implied price swings when that single input is changed (others held fixed). The longest bar is the assumption that matters most for {c.ticker}.</p>
+        <div className="space-y-3">
+          {tor.map((t, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="text-[11px] text-slate-400 w-40 shrink-0 text-right">{t.name}</span>
+              <div className="relative flex-1 h-6 bg-white/[0.03] rounded">
+                <div className="absolute top-0 bottom-0 rounded bg-blue-500/40 border-x border-blue-400/60"
+                  style={{ left: `${posPct(t.low)}%`, width: `${Math.max(2, posPct(t.high) - posPct(t.low))}%` }} />
+                <div className="absolute top-0 bottom-0 w-px bg-white/70" style={{ left: `${posPct(c.price)}%` }} title="Today's price" />
+              </div>
+              <span className="text-[10px] font-mono text-slate-500 w-28 shrink-0">{fmtPx(t.low)}–{fmtPx(t.high)}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-slate-600 mt-4 flex items-center gap-2">
+          <span className="inline-block w-3 h-2.5 rounded-sm bg-blue-500/40 border-x border-blue-400/60" /> swing range
+          <span className="inline-block w-px h-3 bg-white/70 ml-2" /> today's price
+        </p>
+      </div>
+
+      <div className="glass-card p-4 border-amber-500/20 flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Probabilities are model estimates based on assumed input ranges — not guarantees. They describe the math's sensitivity, not real-world certainty. Educational use only; not investment advice.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
 // ─── TAB: Summary ─────────────────────────────────────────────────────────────
 function SummaryTab({ c, model, assumptions }) {
   const { forecast, implied, upside, EV, pvFCFs, pvTV, tvPct, eqVal } = model;
@@ -216,6 +396,12 @@ function SummaryTab({ c, model, assumptions }) {
 
   return (
     <div className="space-y-5">
+      <Explainer title={`what this Summary tells you about ${c.name}`} points={[
+        `A DCF estimates what ${c.name} is genuinely worth today by forecasting the cash the business generates over the next 5 years and converting that future cash back into today's money.`,
+        `Bottom line: the model values ${c.ticker} at about ${fmtPx(implied)} per share versus ${fmtPx(c.price)} today — ${upside >= 0 ? `roughly ${fmtN(upside)}% upside` : `roughly ${fmtN(Math.abs(upside))}% downside`}.`,
+        `${fmtN(tvPct, 0)}% of the value is "Terminal Value" — everything beyond year 5. The larger this share, the more the answer leans on long-term assumptions, so don't treat it as precise.`,
+        `The scenario table below frames the range: a strong outcome near ${fmtPx(bull)} versus a weak one near ${fmtPx(bear)}.`,
+      ]} />
       {/* Key outputs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
@@ -348,6 +534,12 @@ function AssumptionsTab({ assumptions: a, setAss, setAssArr, model, c }) {
   const yrs = model.forecast.map(f => f.year);
   return (
     <div className="space-y-5">
+      <Explainer title="the dials that drive the whole model" points={[
+        "Yellow cells are inputs you can change; gray cells recalculate automatically. Edit anything and the valuation updates instantly.",
+        "Revenue Growth = how fast sales grow each year. EBITDA Margin = how much of each sales dollar becomes operating profit. These two do most of the heavy lifting.",
+        `WACC (${a.wacc}%) is the "discount rate" — the return investors demand. A higher WACC makes future cash worth less today, lowering the value. Terminal Growth (${a.tgr}%) is how fast ${c.ticker} grows forever after year 5 — kept low, near the economy's long-run rate.`,
+        "Tip: nudge Revenue Growth or WACC by a single point and watch how much the implied price moves — that reveals which assumption matters most.",
+      ]} />
       <div className="glass-card p-4 border-amber-500/20 flex items-start gap-2">
         <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
         <p className="text-xs text-slate-400">
@@ -568,6 +760,11 @@ function DCFTab({ c, model, assumptions: a }) {
 
   return (
     <div className="space-y-5">
+      <Explainer title="how the cash-flow engine builds the price" points={[
+        "We start at Revenue, then subtract operating costs, taxes, capital spending and working-capital needs to reach \u201CUnlevered Free Cash Flow\u201D — the actual spare cash the business throws off each year.",
+        `Each future year's cash is multiplied by a "Discount Factor" (driven by the ${a.wacc}% WACC) to convert it into today's dollars — money received later is worth less than money now.`,
+        "Add up the 5 years of discounted cash plus the discounted Terminal Value = Enterprise Value. Then add cash, subtract debt, and divide by shares to get the implied price per share.",
+      ]} />
       {/* Historical + Forecast table */}
       <div className="glass-card overflow-hidden">
         <div className="px-5 py-3 bg-blue-900/30 border-b border-blue-500/20 flex items-center justify-between">
@@ -711,6 +908,11 @@ function SensitivityTab({ model, assumptions: a, c }) {
 
   return (
     <div className="space-y-6">
+      <Explainer title="how confident can we be in the number?" points={[
+        `No forecast is exact, so this grid re-prices ${c.ticker} across different values of the two most important inputs: WACC (down the side) and ${a.tvMethod === "gordon" ? "Terminal Growth" : "the exit multiple"} (across the top).`,
+        "Green means the stock still looks cheap (upside); red means expensive (downside). If most of the grid is green, the \u201Cundervalued\u201D case holds up even under tougher assumptions — a more robust signal.",
+        "Watch how fast the colors flip as you move one step: a grid that swings from deep green to deep red quickly means the valuation is fragile and highly assumption-dependent.",
+      ]} />
       {/* WACC vs TGR/Exit Multiple */}
       <div className="glass-card overflow-hidden">
         <div className="px-5 py-3 bg-blue-900/30 border-b border-blue-500/20">
@@ -823,6 +1025,10 @@ function MemoTab({ c, model, assumptions: a }) {
 
   return (
     <div className="space-y-5">
+      <Explainer title="the investment story in plain words" points={[
+        `This memo turns the numbers into a narrative: what ${c.name} does, why it could be worth more (or less) than today's price, and what would need to happen for the thesis to play out.`,
+        "Always pair the upside case with the Key Risks section — a sound decision weighs both. The rating reflects the model's implied return, not a promise of performance.",
+      ]} />
       {/* Header */}
       <div className="glass-card p-6 border-blue-500/20">
         <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
@@ -969,6 +1175,11 @@ function HistoricalsTab({ payload }) {
     ["Free Cash Flow", (r) => fmtComma(r.freeCashFlow)],
   ];
   return (
+    <div className="space-y-4">
+      <Explainer title="the real, reported past — the model's foundation" points={[
+        `These are ${payload?.company?.name || "the company"}'s actual reported results, not estimates. The forecast in this model is anchored to these real trends in growth, margins and cash flow.`,
+        "Look for consistency: steady or rising margins and growing free cash flow point to a higher-quality business; lumpy or declining numbers mean the forecast deserves more caution.",
+      ]} />
     <Section title="Historical Financials (reported)">
       <div className="overflow-x-auto">
         <table className="w-full" data-testid="dcf-historicals-table">
@@ -985,6 +1196,7 @@ function HistoricalsTab({ payload }) {
       </div>
       <p className="text-[10px] text-slate-600 mt-3">Source: {h.source}</p>
     </Section>
+    </div>
   );
 }
 
@@ -993,6 +1205,10 @@ function CompsTab({ payload, c }) {
   const comps = payload?.comps, analyst = payload?.analyst, macro = payload?.macro, industry = payload?.industry;
   return (
     <div className="space-y-4">
+      <Explainer title={`how the market prices ${c.ticker} versus its peers`} points={[
+        `Multiples like P/E and EV/EBITDA show how many dollars investors pay per dollar of earnings or profit — they let you compare ${c.ticker} against similar companies on a level field.`,
+        "Trading well ABOVE the peer median means the market already expects strong growth (a high bar to clear). Well BELOW could mean it's overlooked — or that something is wrong. Use this alongside the DCF, never instead of it.",
+      ]} />
       <Section title="Trading Comparables">
         <div className="overflow-x-auto">
           <table className="w-full" data-testid="dcf-comps-table">
@@ -1072,6 +1288,11 @@ function SourcesTab({ assumptions }) {
   };
   const confColor = (c) => c === "High" ? "text-emerald-400 bg-emerald-500/10" : c === "Medium" ? "text-blue-400 bg-blue-500/10" : "text-amber-400 bg-amber-500/10";
   return (
+    <div className="space-y-4">
+      <Explainer title="why you can trust (and challenge) these numbers" points={[
+        "Every forward assumption is tagged with where it came from and a confidence level — \u201CHigh\u201D means pulled straight from financial statements or analyst consensus; \u201CLow\u201D means a reasoned estimate.",
+        "This keeps the model honest: nothing is fabricated, and anything uncertain is flagged so you know exactly where to push back. Edit the yellow inputs in the Assumptions tab to test your own view.",
+      ]} />
     <Section title="Assumption Sources & Confidence">
       <div className="overflow-x-auto">
         <table className="w-full" data-testid="dcf-sources-table">
@@ -1090,6 +1311,7 @@ function SourcesTab({ assumptions }) {
       </div>
       <p className="text-[10px] text-slate-600 mt-3">Every forward assumption is derived from reported financials, consensus estimates or clearly-flagged estimates. Edit the yellow inputs in the Assumptions tab to stress-test.</p>
     </Section>
+    </div>
   );
 }
 
@@ -1213,6 +1435,7 @@ const TABS = [
   { id:"assumptions", label:"Assumptions",     Icon: Edit3 },
   { id:"dcf",         label:"DCF Model",       Icon: Calculator },
   { id:"sensitivity", label:"Sensitivity",     Icon: BarChart2 },
+  { id:"montecarlo",  label:"Monte Carlo",     Icon: Activity },
   { id:"historicals", label:"Historicals",     Icon: History },
   { id:"comps",       label:"Comparables",     Icon: Users },
   { id:"sources",     label:"Sources",         Icon: FileText },
@@ -1363,6 +1586,7 @@ export default function Modeling() {
       {tab==="assumptions" && <AssumptionsTab  assumptions={assumptions} setAss={setAssKey} setAssArr={setAssArr} model={model} c={c} />}
       {tab==="dcf"         && <DCFTab          c={c} model={model} assumptions={assumptions} />}
       {tab==="sensitivity" && <SensitivityTab  model={model} assumptions={assumptions} c={c} />}
+      {tab==="montecarlo"  && <MonteCarloTab    c={c} assumptions={assumptions} />}
       {tab==="historicals" && <HistoricalsTab  payload={payload} />}
       {tab==="comps"       && <CompsTab        payload={payload} c={c} />}
       {tab==="sources"     && <SourcesTab      assumptions={assumptions} />}

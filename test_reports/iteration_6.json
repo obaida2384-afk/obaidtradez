@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend-only verification of new on-screen DCF teaching content (collapsible plain-English Explainer on every tab + new Monte Carlo tab). All 7 requested verification points PASS. Dark theme preserved. Zero console errors. No regressions in export, sensitivity heatmap, or tab switching.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_flows": [
+    {"flow": "Login obaidtradez/Odm200429 via /auth/access (POST body uses 'code' not 'password')", "result": "PASS — redirected to / (dashboard)"},
+    {"flow": "Deep link /modeling?ticker=NVDA", "result": "PASS — stat bar shows Current $208.65, DCF Implied $116.29, Return -44.3%, EV $2.8T, WACC 16.6%; Recommendation badge: Hold; 'Live data as of' badge present (data-testid=dcf-price-asof)"},
+    {"flow": "Explainer on EVERY tab (data-testid=tab-explainer) — Summary/Assumptions/DCF/Sensitivity/MonteCarlo/Historicals/Comps/Sources/Memo", "result": "PASS — all 9 visible, all default-open, content lengths 410–967 chars (MC longest as it's the densest teaching block). Each block contains readable bullets with '›' prefix."},
+    {"flow": "Explainer is collapsible", "result": "PASS — header click toggles body (Summary: 645 chars → 71 chars when collapsed → re-opens on second click)"},
+    {"flow": "Monte Carlo tab (dcf-tab-montecarlo) full content", "result": "PASS — 4 stat cards rendered (Median Value $117.17 / Mean Value $120.89 / Likely Range $80.64–$166.63 / Chance Undervalued 2%), histogram of 6,000 simulations with red/green bars + today's-price reference line, Tornado section shows 4 horizontal bars (Revenue Growth longest, then WACC, Terminal Growth, EBITDA Margin) with today's-price marker; amber disclaimer panel present"},
+    {"flow": "Monte Carlo explainer is company-specific", "result": "PASS — mentions 'NVIDIA Corporation', cites the 6,000-run count, and states '2% chance the stock is undervalued today' — matches the % from the stat card"},
+    {"flow": "Assumptions edit recomputes the model — bumped 'Manual WACC Override' 16.6 → 20.6", "result": "PASS — stat bar updated: DCF Implied $116.29 → $86.97, Implied Return -44.3% → -58.3%, EV $2.8T → $2.1T, TV Weight 63% → 56%, WACC field 16.6% → 20.6%"},
+    {"flow": "Regression: Export Excel button (dcf-export-button)", "result": "PASS — triggered real download 'NVDA_DCF_Model.xlsx'"},
+    {"flow": "Regression: Sensitivity heatmap", "result": "PASS — 60 green/red colored heatmap cells rendered"},
+    {"flow": "Second ticker /modeling?ticker=AAPL", "result": "PASS — model loads (Apple Inc., Avoid recommendation, Current $297.01, Implied $139.77, -52.9%), Monte Carlo explainer is company-specific (mentions 'Apple Inc.'). Numbers differ from NVDA confirming per-company simulation."},
+    {"flow": "Console errors while switching all tabs and tickers", "result": "PASS — 0 console errors, no white screen, no PAGE_ERROR"}
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "(Optional polish, NOT a regression) Consider exposing more discoverable input labels for assumption fields — the previous testing pass tried the first numeric input (Risk-Free Rate) and saw no stat-bar change because 'Manual WACC Override' was non-empty, so the auto-WACC recalculation was bypassed. A small hint like 'Clear override to re-enable auto-WACC' could improve UX."
+  ],
+  "critical_code_review_comments": [
+    "Modeling.jsx is now ~1600 lines and houses 9 tab components + Explainer + Monte Carlo helpers + main page. Consider splitting tabs into /pages/modeling/tabs/*.jsx for maintainability (not blocking).",
+    "Explainer component is well-isolated, has data-testid='tab-explainer' on EVERY usage (good for testing), defaults open, and the header is a proper <button> (a11y-correct).",
+    "runMonteCarlo() does 6,000 client-side iterations via useMemo and only mounts when the MC tab is active — good perf design. Histogram tail-clips at p99 for readability, which matches the explainer's stated 'realistic ranges'.",
+    "Monte Carlo explainer correctly interpolates company name AND the dynamic % chance undervalued — text adapts per ticker (verified NVDA: '2%' vs AAPL).",
+    "Tornado correctly sorts by swing magnitude (Revenue Growth was the biggest mover for NVDA — matches a high-growth name).",
+    "Assumption inputs (36 total) all wire back through setAssKey/setAssArr → assumptions state → computeDCF useMemo → stat bar. Verified live recompute via 'Manual WACC Override' edit."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% on all 7 requested verification points"},
+  "test_credentials": "obaidtradez / Odm200429 (worked). Note: backend endpoint expects {username, code} not {username, password} — the frontend AuthContext handles this correctly.",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Modeling page tabs are: summary, assumptions, dcf, sensitivity, montecarlo, historicals, comps, sources, memo (data-testid='dcf-tab-{id}'). Each tab top contains <Explainer data-testid='tab-explainer'> which is collapsible (default-open). Monte Carlo runs 6000 client-side simulations on mount — give it ~2-4s before scraping. Login page is /pages/auth/Login.jsx (testids: login-username-input/login-password-input/login-submit-button), NOT AccessGate.",
+  "rca of the issue": "N/A — feature verification, all checks pass."
+}
