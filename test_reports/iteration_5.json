@@ -1,0 +1,39 @@
+{
+  "summary": "Frontend-only verification of Research page being wired to LIVE data (DCF + universe). All 8 requested checks PASS — Research now works for arbitrary tickers (including non-featured JPM and KO) with live prices, real historicals, live WACC/TGR, and DCF deep-link CTA.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Research header (Market Cap)", "issue": "Market Cap shows comically small values (NVDA '$5M', JPM '$1M', KO '$0M'). Likely double-conversion: /app/frontend/src/lib/researchModel.js line 40 does `Math.round(co.marketCap / 1e6)` but backend DCF payload `company.marketCap` is already in millions (and the fmtM() helper also expects millions). Fix: drop the /1e6 OR map raw value through toMillions only if backend returns absolute dollars (mirror normalizeCompany). Not blocking — does not affect any of the 8 tested flows.", "selector": "Market Cap text in research header", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_flows": [
+    {"flow": "Login obaidtradez/Odm200429", "result": "PASS — redirected to / (dashboard)"},
+    {"flow": "/research?ticker=NVDA", "result": "PASS — header price $208.465, 'Live · as of 06:02 PM' badge (data-testid=research-price-asof) visible, NO $120.44 mock present"},
+    {"flow": "/research?ticker=JPM (non-featured)", "result": "PASS — price $331.64 (live), name 'JPMorgan Chase & Co.', full report with description, metrics, tabs"},
+    {"flow": "/research?ticker=KO (non-featured)", "result": "PASS — price $79.805 (live), name 'The Coca-Cola Company', full report renders"},
+    {"flow": "Financials tab for NVDA", "result": "PASS — real fiscal years 2022,2023,2024,2025,2026 with realistic non-mock numbers (Revenue $26,914 → $215,938; EBITDA, FCF all present)"},
+    {"flow": "Valuation tab for NVDA", "result": "PASS — WACC 16.6%, Terminal Growth Rate 3%, Consensus Fair Value $316.79, Implied Upside 52.0%, Analyst Consensus Buy. 'Run full institutional DCF model' button (data-testid=research-open-dcf) navigates correctly to /modeling?ticker=NVDA"},
+    {"flow": "AI Thesis tab for NVDA", "result": "PASS — AI Rating: Strongly Attractive badge, Investment Thesis text references live 65.5% growth + 46.97% FCF margin, Bull/Bear Case arguments and Final Assessment all render with no crash"},
+    {"flow": "Top header search bar 'MSFT' + Enter", "result": "PASS — navigates to /research?ticker=MSFT and loads MSFT live report"},
+    {"flow": "Featured Companies grid (/research no ticker)", "result": "PASS — 8 cards rendered with live prices (regression intact)"}
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "Fix Market Cap double-division bug in /app/frontend/src/lib/researchModel.js (drop the /1e6 on co.marketCap, or only convert when value is in absolute dollars). Currently displays $5M instead of ~$5T for NVDA."
+  ],
+  "critical_code_review_comments": [
+    "buildResearchCompany correctly composes live DCF + universe + minimal mock fallback; only qualitative `moat` falls back to mock — good separation.",
+    "data-testid coverage on the two new key elements (research-price-asof, research-open-dcf) is clean and stable for regression.",
+    "Market Cap conversion mismatch between buildResearchCompany (assumes dollars) and the backend DCF payload (already in millions) — see ui_bugs."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% on the 8 requested flows; 1 non-blocking display bug noted"},
+  "test_credentials": "obaidtradez / Odm200429 (worked)",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Research is now fully live-driven via fetchDcf + fetchCompany. Works for any FMP-supported ticker (verified NVDA, AAPL, MSFT, JPM, KO). Tab labels: Overview / Financials / Valuation / AI Thesis. Live quote override happens via useQuotes after the initial DCF load (2-5s). One open minor bug: Market Cap shown as '$5M' for NVDA due to double /1e6 conversion in researchModel.js line 40 — backend DCF company.marketCap already appears to be in millions, so the divide here makes it too small.",
+  "rca of the issue": "N/A — this was a feature-completion verification, no bug to RCA. Implementation is verified working."
+}

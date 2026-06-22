@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { COMPANY_UNIVERSE } from "@/lib/mockData";
+import { fetchDcf, fetchCompany, normalizeCompany } from "@/lib/companyUniverse";
+import { buildResearchCompany } from "@/lib/researchModel";
+import { toast } from "sonner";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
 } from "recharts";
@@ -28,6 +31,7 @@ const RATINGS = {
 };
 
 function getImpliedRating(company) {
+  if (!company?.impliedPrice || !company?.price) return "Fairly Valued";
   const ratio = company.impliedPrice / company.price;
   if (ratio > 1.2) return "Strongly Attractive";
   if (ratio > 1.05) return "Attractive";
@@ -143,14 +147,41 @@ function ScenarioCard({ label, price, current, color, bgColor, thesis }) {
 
 export default function Research() {
   const [searchParams] = useSearchParams();
-  const [company, setCompany] = useState(() => {
-    const ticker = searchParams.get("ticker");
-    return ticker ? COMPANY_UNIVERSE.find((c) => c.ticker === ticker) || null : null;
-  });
+  const navigate = useNavigate();
+  const [company, setCompany] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("overview");
 
   const featured = COMPANY_UNIVERSE.slice(0, 8);
   const { prices: quotes, asOf: quotesAsOf } = useQuotes([...featured.map((x) => x.ticker), ...(company ? [company.ticker] : [])]);
+
+  const loadCompany = useCallback(async (tickerOrObj) => {
+    const ticker = (typeof tickerOrObj === "string" ? tickerOrObj : tickerOrObj?.ticker || "").toUpperCase();
+    if (!ticker) return;
+    setLoading(true);
+    setTab("overview");
+    const mock = COMPANY_UNIVERSE.find((x) => x.ticker === ticker) || null;
+    try {
+      const [dcf, universe] = await Promise.all([
+        fetchDcf(ticker).catch(() => null),
+        fetchCompany(ticker).then(normalizeCompany).catch(() => null),
+      ]);
+      if (dcf || universe) {
+        setCompany(buildResearchCompany({ dcf, universe, mock }));
+      } else if (mock) {
+        setCompany(mock);
+      } else {
+        toast.error(`No data available for ${ticker}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = searchParams.get("ticker");
+    if (t) loadCompany(t);
+  }, [searchParams, loadCompany]);
 
   const rating = company ? getImpliedRating(company) : null;
   const ratingStyle = rating ? RATINGS[rating] : null;
@@ -162,7 +193,7 @@ export default function Research() {
           <h1 className="text-2xl font-bold text-white">Company Research</h1>
           <p className="text-sm text-slate-500 mt-1">Search any company for an institutional-quality research report</p>
         </div>
-        <CompanySearch onSelect={setCompany} />
+        <CompanySearch onSelect={loadCompany} />
 
         {/* Featured companies */}
         <div>
@@ -178,7 +209,7 @@ export default function Research() {
               return (
                 <button
                   key={c.ticker}
-                  onClick={() => setCompany(c)}
+                  onClick={() => loadCompany(c.ticker)}
                   className="glass-card p-4 text-left hover:border-white/[0.1] transition-all group"
                 >
                   <div className="flex items-start justify-between mb-2">
@@ -222,7 +253,7 @@ export default function Research() {
           ← Back to search
         </button>
         <div className="flex-1 max-w-md">
-          <CompanySearch onSelect={setCompany} />
+          <CompanySearch onSelect={loadCompany} />
         </div>
       </div>
 
@@ -390,12 +421,12 @@ export default function Research() {
               <h3 className="text-sm font-semibold text-white mb-4">DCF Valuation Summary</h3>
               <div className="space-y-3">
                 {[
-                  { l: "WACC", v: `${company.wacc}%` },
-                  { l: "Terminal Growth Rate", v: `${company.tgr}%` },
+                  { l: "WACC", v: company.wacc != null ? `${company.wacc}%` : "N/A" },
+                  { l: "Terminal Growth Rate", v: company.tgr != null ? `${company.tgr}%` : "N/A" },
                   { l: "Exit Multiple", v: company.exitMultiple ? `${company.exitMultiple}x EV/EBITDA` : "N/A" },
-                  { l: "DCF Implied Price", v: `$${company.impliedPrice}`, highlight: true },
-                  { l: "DCF Upside / Downside", v: `${fmt(company.dcfUpside)}%`, up: company.dcfUpside > 0 },
-                  { l: "Consensus PT", v: `$${company.avgPt}` },
+                  { l: "Consensus Fair Value", v: company.avgPt != null ? `$${company.avgPt}` : "N/A", highlight: true },
+                  { l: "Implied Upside", v: `${fmt(company.dcfUpside)}%`, up: company.dcfUpside > 0 },
+                  { l: "Analyst Consensus", v: company.analystRating || "—" },
                 ].map((row) => (
                   <div key={row.l} className="flex items-center justify-between py-2 border-b border-white/[0.04] last:border-0">
                     <span className="text-sm text-slate-400">{row.l}</span>
@@ -405,6 +436,13 @@ export default function Research() {
                   </div>
                 ))}
               </div>
+              <button
+                onClick={() => navigate(`/modeling?ticker=${company.ticker}`)}
+                data-testid="research-open-dcf"
+                className="mt-4 w-full flex items-center justify-center gap-2 text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg py-2.5 hover:bg-emerald-500/15 transition-colors"
+              >
+                Run full institutional DCF model <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             <div className="glass-card p-5">
@@ -521,8 +559,8 @@ export default function Research() {
             <div className="mt-5 p-4 bg-white/[0.03] rounded-xl border border-white/[0.05]">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Final Assessment</p>
               <p className="text-sm text-slate-300 leading-relaxed">
-                At ${c.price} per share, {company.ticker} trades at {company.pe}x earnings and {company.evEbitda || "N/A"}x EV/EBITDA.
-                Our DCF model implies a fair value of <strong className="text-white">${company.impliedPrice}</strong>, representing
+                At ${c.price} per share, {company.ticker} trades at {company.pe ? `${company.pe}x` : "—"} earnings and {company.evEbitda || "N/A"}x EV/EBITDA.
+                Analyst consensus implies a fair value of <strong className="text-white">${company.impliedPrice ?? "—"}</strong>, representing
                 <span className={company.dcfUpside > 0 ? " text-emerald-400" : " text-red-400"}> {company.dcfUpside > 0 ? "+" : ""}{fmt(company.dcfUpside)}% upside</span>.
                 Combined with analyst consensus of ${company.avgPt}, the risk/reward appears
                 {rating === "Strongly Attractive" || rating === "Attractive" ? " favorable for long-term investors." : rating === "Fairly Valued" ? " balanced at current levels." : " stretched at current valuations."}
