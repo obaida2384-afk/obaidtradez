@@ -91,6 +91,10 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - **Deployment guide**: `/app/DEPLOYMENT.md` — Vercel (frontend) + Railway (backend) + MongoDB Atlas, env vars, and the one-time `POST /api/universe/build` step. `vercel.json` has SPA rewrites; backend `Procfile` binds `$PORT`; CORS is `*`.
 - Verified by testing_agent iteration_3.json — 100% (8/8 scenarios: login, one-click DCF, auto-load, ratings on all three surfaces, Excel export with recommendation, deep-link).
 
+### 2026-06-22 — Built-in universe auto-refresh scheduler (DONE)
+- Added `_universe_auto_refresh()` background task (registered in `startup_event`): on startup it rebuilds the company universe if missing OR older than `UNIVERSE_REFRESH_DAYS` (default 7), then re-checks every 6h. Size via `UNIVERSE_TARGET_SIZE` (default 3000). Reads freshness from the `company_universe_meta` doc (`updated_at`).
+- Effect: fresh production DBs auto-populate on first boot (manual `POST /api/universe/build` is now optional), and fundamentals/scores stay current automatically. Verified: boots cleanly, correctly skips rebuild when data is fresh (3000 companies, updated today), zero scheduler errors. `DEPLOYMENT.md` updated.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).

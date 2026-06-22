@@ -6061,6 +6061,38 @@ app.include_router(api_router)
 
 
 # Startup event to initialize universe
+async def _universe_auto_refresh():
+    """Built-in scheduler: rebuild the company universe on startup if missing/stale,
+    then re-check on a timer. Interval via UNIVERSE_REFRESH_DAYS (default 7),
+    size via UNIVERSE_TARGET_SIZE (default 3000)."""
+    refresh_days = int(os.environ.get("UNIVERSE_REFRESH_DAYS", "7"))
+    target_size = int(os.environ.get("UNIVERSE_TARGET_SIZE", "3000"))
+    await asyncio.sleep(20)  # let startup settle
+    while True:
+        try:
+            if config.FMP_API_KEY:
+                meta = await db[CompanyUniverseService.META_ID].find_one(
+                    {"_id": CompanyUniverseService.META_ID}
+                )
+                count = (meta or {}).get("count") or 0
+                updated_at = (meta or {}).get("updated_at")
+                stale = True
+                if count > 0 and updated_at:
+                    try:
+                        last = datetime.fromisoformat(updated_at)
+                        if last.tzinfo is None:
+                            last = last.replace(tzinfo=timezone.utc)
+                        stale = (datetime.now(timezone.utc) - last) >= timedelta(days=refresh_days)
+                    except Exception:
+                        stale = True
+                if stale:
+                    logger.info(f"[universe-auto-refresh] rebuilding (count={count}, last={updated_at})")
+                    res = await company_universe_service.build_universe(target_size)
+                    logger.info(f"[universe-auto-refresh] done: {res}")
+        except Exception as e:
+            logger.warning(f"[universe-auto-refresh] error: {e}")
+        await asyncio.sleep(6 * 3600)  # re-check every 6h
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the investment universe and auto-recover scheduler on startup"""
@@ -6116,6 +6148,9 @@ async def startup_event():
 
         # Start market-open verifier watcher
         asyncio.create_task(_market_open_verifier_watcher())
+
+        # Start built-in company-universe auto-refresh scheduler
+        asyncio.create_task(_universe_auto_refresh())
         
     except Exception as e:
         logger.error(f"Startup error: {e}")

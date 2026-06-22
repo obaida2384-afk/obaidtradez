@@ -26,16 +26,19 @@ the company universe, DCF, news and prices), so deploy the backend first.
    ACCESS_USERNAME=obaidtradez
    ACCESS_CODE_HASH=Odm200429
    ```
+   Optional (auto-refresh tuning): `UNIVERSE_REFRESH_DAYS` (default 7), `UNIVERSE_TARGET_SIZE` (default 3000).
 3. Deploy. Note the public backend URL, e.g. `https://obaidtradez-backend-production.up.railway.app`.
-4. **Build the company universe into your production DB** (one-time; required or pages show empty/fallback):
+4. **Company universe** — builds itself automatically: a built-in scheduler runs on startup and rebuilds the
+   universe if it is missing or older than `UNIVERSE_REFRESH_DAYS` (default weekly). So on first boot of a fresh DB
+   it auto-populates within a few minutes — **no manual step required**.
+   (Optional) to force an immediate rebuild any time:
    ```
    curl -X POST "https://YOUR-BACKEND-URL/api/universe/build?target_size=3000"
    ```
-   This runs in the background (a few minutes). Check progress:
+   Check progress / freshness:
    ```
    curl "https://YOUR-BACKEND-URL/api/universe/coverage"
    ```
-   Re-run periodically (e.g. weekly) to refresh fundamentals/prices.
 
 ## STEP 3 — Frontend on Vercel
 1. https://vercel.com → New Project → import this repo → set **Root Directory = `frontend`**.
