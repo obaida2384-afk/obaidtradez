@@ -85,6 +85,12 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - Consolidate legacy `useLivePrices.js` polling with `useQuotes` (refactor).
 - Optional: enforce the bearer token on backend data endpoints (currently open; UI gate only). Optional: replace persistent 'Demo Mode' chip when server data is live.
 
+### 2026-06-22 — One-click DCF + recommendation ratings + Vercel guide (DONE)
+- **One-click DCF from Trending Now**: dashboard ideas now navigate to `/modeling?ticker=` (Modeling auto-loads via `useSearchParams`); the Excel export button is right there. Direct deep-links `/modeling?ticker=MSFT` work.
+- **Buy/sell recommendation rating** (Strong Buy / Buy / Hold / Not a Good Buy / Avoid) via new `lib/rating.js getRating()` (blends valuation upside + opportunityScore + news tone). Rendered on: Trending Now top idea + chips, News stock-idea suggestions, and the DCF model page (badge). Recommendation also written into the Excel export (Cover + DCF sheets).
+- **Deployment guide**: `/app/DEPLOYMENT.md` — Vercel (frontend) + Railway (backend) + MongoDB Atlas, env vars, and the one-time `POST /api/universe/build` step. `vercel.json` has SPA rewrites; backend `Procfile` binds `$PORT`; CORS is `*`.
+- Verified by testing_agent iteration_3.json — 100% (8/8 scenarios: login, one-click DCF, auto-load, ratings on all three surfaces, Excel export with recommendation, deep-link).
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).
