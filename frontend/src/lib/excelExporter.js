@@ -9,13 +9,13 @@ async function getExcelJS() {
   return ExcelJSModule;
 }
 
-// ── palette (navy + gold "Wall Street Classic") ────────────────────────────────
-const NAVY = "FF14213D";   // deep navy hero
-const DARK = "FF1F3864";   // header navy
-const SUB = "FFDCE6F1";    // light blue subheader
-const GOLD = "FFC9A227";   // rich gold accent
-const GOLDLT = "FFF6E7A8"; // light gold band
-const CREAM = "FFFBF8EF";  // cream cell
+// ── palette (green "Equity Research" template) ─────────────────────────────────
+const NAVY = "FF0A5A2F";   // banner dark green
+const DARK = "FF0B6B3A";   // header green
+const SUB = "FFC6EFCE";    // light green subheader
+const GOLD = "FF0A5A2F";   // dark green accent / rules
+const GOLDLT = "FFE2EFDA"; // pale green band
+const CREAM = "FFFCF4D6";  // cream / yellow cell
 const YEL = "FFFFF2CC";    // yellow input
 const GRAY = "FFF2F2F2";   // gray formula
 const GREEN = "FF1E7B34";
@@ -59,66 +59,8 @@ export async function generateExcelModel(model) {
   wb.creator = "ALPHA VAULT";
   wb.created = new Date();
 
-  // ════════════════════════ COVER ════════════════════════
-  const cover = wb.addWorksheet("Cover", { properties: { tabColor: { argb: GOLD } }, views: [{ showGridLines: false }] });
-  cover.columns = [{ width: 3 }, { width: 26 }, { width: 22 }, { width: 22 }, { width: 16 }];
-  // navy hero band
-  for (let rr = 1; rr <= 5; rr++) {
-    cover.getRow(rr).height = rr === 2 ? 30 : rr === 3 ? 22 : 16;
-    for (let cc = 1; cc <= 5; cc++) cover.getCell(rr, cc).fill = fill(NAVY);
-  }
-  cover.mergeCells("B2:E2");
-  cover.getCell("B2").value = "ALPHA VAULT  ·  EQUITY RESEARCH";
-  cover.getCell("B2").font = { bold: true, size: 20, color: { argb: WHITE } };
-  cover.getCell("B2").alignment = { vertical: "middle" };
-  cover.mergeCells("B3:E3");
-  cover.getCell("B3").value = "Discounted Cash Flow Valuation Model";
-  cover.getCell("B3").font = { italic: true, size: 11, color: { argb: GOLDLT } };
-  // gold rule
-  for (let cc = 1; cc <= 5; cc++) cover.getCell(6, cc).fill = fill(GOLD);
-  cover.getRow(6).height = 4;
-
-  // company title + rating badge
-  cover.getCell("B8").value = `${company.name || ticker}  (${ticker})`;
-  cover.getCell("B8").font = { bold: true, size: 16, color: { argb: DARK } };
-  cover.mergeCells("B8:D8");
-  const badge = cover.getCell("E8");
-  badge.value = (model.recommendation || "—").toUpperCase();
-  badge.fill = fill(recColor(model.recommendation));
-  badge.font = { bold: true, size: 12, color: { argb: WHITE } };
-  badge.alignment = { horizontal: "center", vertical: "middle" };
-  badge.border = allBorders;
-  cover.getRow(8).height = 26;
-
-  const coverRows = [
-    ["Sector", company.sector],
-    ["Industry", company.industry],
-    ["Current Price", company.price != null ? `$${company.price}` : "—"],
-    ["Analyst Consensus", analyst?.consensus || "—"],
-    ["Consensus Target", analyst?.targetConsensus != null ? `$${analyst.targetConsensus}` : "—"],
-    ["Target Range", analyst?.targetLow != null ? `$${analyst.targetLow} – $${analyst.targetHigh}` : "—"],
-    ["Implied Upside (Analyst)", analyst?.impliedUpside != null ? `${analyst.impliedUpside}%` : "—"],
-    ["Model Date", new Date().toISOString().slice(0, 10)],
-    ["Live Price As Of", model.priceAsOf ? new Date(model.priceAsOf).toLocaleString() : "—"],
-  ];
-  coverRows.forEach(([k, val], i) => {
-    const row = 10 + i;
-    const kc = cover.getCell(`B${row}`);
-    kc.value = k; kc.font = { bold: true, color: { argb: DARK } };
-    kc.fill = fill(i % 2 ? CREAM : WHITE); kc.border = allBorders;
-    cover.mergeCells(`C${row}:E${row}`);
-    const vc = cover.getCell(`C${row}`);
-    vc.value = val == null ? "—" : val;
-    vc.alignment = { horizontal: "right" };
-    vc.fill = fill(i % 2 ? CREAM : WHITE);
-    cover.getCell(`D${row}`).fill = fill(i % 2 ? CREAM : WHITE);
-    cover.getCell(`E${row}`).fill = fill(i % 2 ? CREAM : WHITE);
-    cover.getCell(`E${row}`).border = { right: BORDER };
-  });
-  const disc = 10 + coverRows.length + 1;
-  cover.mergeCells(`B${disc}:E${disc}`);
-  cover.getCell(`B${disc}`).value = "Educational research only. Not investment advice. Outputs depend on assumptions, which are uncertain.";
-  cover.getCell(`B${disc}`).font = { italic: true, size: 9, color: { argb: MUTE } };
+  // ════════════════════════ COVER (green Equity-Research layout) ════════════════
+  await buildCoverSheet(wb, { company, analyst, comps, hist, computed: model.computed, ticker, recommendation: model.recommendation, priceAsOf: model.priceAsOf });
 
   // ════════════════════════ DCF MODEL (formula-driven) ════════════════════════
   const ws = wb.addWorksheet("DCF Model", { properties: { tabColor: { argb: DARK } }, views: [{ showGridLines: false }] });
@@ -578,6 +520,224 @@ function buildScenarioSheet(wb, { company, analyst, jsInputs, baseW, baseT, reco
     sc.getCell(`A${legRow}`).font = { italic: true, size: 9, color: { argb: MUTE } };
     sc.mergeCells(`A${legRow}:AE${legRow}`);
   }
+}
+
+// ── Green Equity-Research cover sheet (matches the reference layout) ────────────
+function canvasPng(w, h, draw) {
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+  draw(ctx, w, h);
+  return cv.toDataURL("image/png");
+}
+
+function revGrowthChartPng(title, labels, values) {
+  return canvasPng(560, 300, (ctx, W, H) => {
+    ctx.fillStyle = "#0B6B3A"; ctx.fillRect(0, 0, W, 38);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
+    ctx.fillText(title, W / 2, 25);
+    const padL = 24, padR = 24, padT = 64, padB = 42;
+    const n = values.length || 1;
+    const cw = (W - padL - padR) / n;
+    const maxV = Math.max(...values, 1) * 1.3;
+    const baseY = H - padB;
+    values.forEach((v, i) => {
+      const bh = Math.max(3, (v / maxV) * (baseY - padT));
+      const x = padL + i * cw + cw * 0.22, bw = cw * 0.56, y = baseY - bh;
+      ctx.fillStyle = "#1E7B34"; ctx.fillRect(x, y, bw, bh);
+      ctx.fillStyle = "#0B6B3A"; ctx.font = "bold 13px Arial"; ctx.textAlign = "center";
+      ctx.fillText(`${v.toFixed(0)}%`, x + bw / 2, y - 7);
+      ctx.fillStyle = "#444"; ctx.font = "12px Arial";
+      ctx.fillText(labels[i], x + bw / 2, baseY + 20);
+    });
+    ctx.strokeStyle = "#cccccc"; ctx.beginPath(); ctx.moveTo(padL, baseY); ctx.lineTo(W - padR, baseY); ctx.stroke();
+  });
+}
+
+function footballPng(title, rows) {
+  return canvasPng(560, 300, (ctx, W, H) => {
+    ctx.fillStyle = "#0B6B3A"; ctx.fillRect(0, 0, W, 38);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
+    ctx.fillText(title, W / 2, 25);
+    const top = 66, areaH = H - top - 24, rowH = areaH / (rows.length || 1);
+    const labelW = 120, barL = labelW + 16, barMax = W - barL - 96;
+    rows.forEach((r, i) => {
+      const cy = top + i * rowH + rowH / 2;
+      ctx.fillStyle = "#0B6B3A"; ctx.font = "bold 13px Arial"; ctx.textAlign = "right";
+      ctx.fillText(r.label, labelW, cy + 4);
+      const bw = Math.max(56, (r.frac || 0.5) * barMax);
+      ctx.fillStyle = "#1E7B34"; ctx.fillRect(barL, cy - 15, bw, 30);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 12px Arial"; ctx.textAlign = "center";
+      ctx.fillText(r.rangeText, barL + bw / 2, cy + 4);
+      ctx.fillStyle = "#333"; ctx.textAlign = "left"; ctx.font = "bold 12px Arial";
+      ctx.fillText(r.value, barL + bw + 10, cy + 4);
+    });
+  });
+}
+
+async function fetchLogoBase64(ticker, company) {
+  const urls = [company?.image, company?.logo, `https://images.financialmodelingprep.com/symbol/${ticker}.png`].filter(Boolean);
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (!blob.size || !/image\//.test(blob.type)) continue;
+      const dataUrl = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(null); fr.readAsDataURL(blob); });
+      if (dataUrl) return dataUrl;
+    } catch { /* next */ }
+  }
+  return null;
+}
+
+async function buildCoverSheet(wb, { company, analyst, comps, hist, computed, ticker, recommendation, priceAsOf }) {
+  const usd = "#,##0", pf = "0.0%";
+  const price = company.price || 0;
+  const implied = computed?.implied ?? (analyst?.targetConsensus || price);
+  const bull = Math.max(implied * 1.35, analyst?.targetHigh ?? 0);
+  const base = implied;
+  const bear = Math.min(implied * 0.65, analyst?.targetLow ?? Infinity);
+
+  const cover = wb.addWorksheet("Cover", { properties: { tabColor: { argb: DARK } }, views: [{ showGridLines: false }] });
+  cover.columns = [{ width: 3 }, { width: 20 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 6 }, { width: 3 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
+
+  // Banner
+  cover.mergeCells("A1:N1");
+  const b = cover.getCell("A1");
+  b.value = `EQUITY RESEARCH    |    ${(company.name || ticker).toUpperCase()} (${ticker})`;
+  b.font = { bold: true, size: 18, color: { argb: WHITE } };
+  b.fill = fill(NAVY); b.alignment = { vertical: "middle" };
+  cover.getRow(1).height = 34;
+  for (let r = 2; r <= 5; r++) cover.getRow(r).height = 24;
+
+  // Logo tile A2:B5
+  cover.mergeCells("A2:B5");
+  const logoCell = cover.getCell("A2");
+  logoCell.fill = fill(WHITE);
+  logoCell.border = allBorders;
+  logoCell.value = ticker;
+  logoCell.font = { bold: true, size: 28, color: { argb: DARK } };
+  logoCell.alignment = { horizontal: "center", vertical: "middle" };
+
+  // BUY badge C2:C5
+  cover.mergeCells("C2:C5");
+  const recU = (recommendation || "HOLD").toUpperCase();
+  const word = /STRONG BUY|^BUY/.test(recU) ? "BUY" : /SELL|AVOID|NOT A GOOD/.test(recU) ? "SELL" : "HOLD";
+  const wordColor = word === "BUY" ? GREEN : word === "SELL" ? RED : "FF808080";
+  const bc = cover.getCell("C2");
+  bc.value = `★ ${word}\nRating`;
+  bc.fill = fill(SUB);
+  bc.font = { bold: true, size: 18, color: { argb: wordColor } };
+  bc.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  bc.border = allBorders;
+
+  // Target price D2:G5
+  cover.mergeCells("D2:G5");
+  const tp = cover.getCell("D2");
+  tp.value = `Target Price:   $${base.toFixed(2)}`;
+  tp.fill = fill(CREAM);
+  tp.font = { bold: true, size: 22, color: { argb: DARK } };
+  tp.alignment = { horizontal: "center", vertical: "middle" };
+  tp.border = allBorders;
+
+  // Sector / price H2:N5
+  cover.mergeCells("H2:N5");
+  const sp = cover.getCell("H2");
+  sp.value = `Sector: ${company.sector || "—"}\nCurrent Price: $${price.toFixed(2)}\n(as of ${priceAsOf ? new Date(priceAsOf).toLocaleDateString() : new Date().toLocaleDateString()})`;
+  sp.fill = fill(NAVY);
+  sp.font = { bold: true, size: 13, color: { argb: WHITE } };
+  sp.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+
+  // Scenario block rows 7-11 (BULL / BASE / BEAR)
+  const groups = [
+    { c1: "C", c2: "D", hd: "FF92D050", bg: "FFC6EFCE", name: "BULL", tp: bull },
+    { c1: "E", c2: "F", hd: "FFBFBFBF", bg: "FFF2F2F2", name: "BASE", tp: base },
+    { c1: "G", c2: "H", hd: "FFE6A0A0", bg: "FFFADBD8", name: "BEAR", tp: bear },
+  ];
+  cover.getCell("B7").value = "Scenario"; cover.getCell("B7").font = { bold: true, color: { argb: DARK } };
+  groups.forEach((g) => {
+    cover.mergeCells(`${g.c1}7:${g.c2}7`);
+    const h = cover.getCell(`${g.c1}7`); h.value = g.name; h.fill = fill(g.hd); h.font = { bold: true, size: 13, color: { argb: "FF1A1A1A" } }; h.alignment = { horizontal: "center" }; h.border = allBorders;
+    cover.mergeCells(`${g.c1}8:${g.c2}8`);
+    const t = cover.getCell(`${g.c1}8`); t.value = `$${g.tp.toFixed(2)} TP`; t.fill = fill(g.bg); t.font = { bold: true, size: 12 }; t.alignment = { horizontal: "center" }; t.border = allBorders;
+  });
+  const srows = [
+    ["Target Price", (g) => `$${g.tp.toFixed(2)}`, true],
+    ["Upside / (Downside)", (g) => price ? `${((g.tp / price - 1) * 100).toFixed(1)}%` : "—", false],
+    ["Current Price", () => `$${price.toFixed(2)}`, false],
+  ];
+  srows.forEach((row, ri) => {
+    const r = 9 + ri;
+    const lab = cover.getCell(`B${r}`); lab.value = row[0]; lab.font = { bold: row[2], color: { argb: "FF1A1A1A" } };
+    groups.forEach((g) => {
+      cover.mergeCells(`${g.c1}${r}:${g.c2}${r}`);
+      const cc = cover.getCell(`${g.c1}${r}`); cc.value = row[1](g);
+      cc.fill = fill(g.bg); cc.alignment = { horizontal: "right" }; cc.border = allBorders; cc.font = { bold: row[2] };
+    });
+  });
+
+  // Financial Summary & Key Metrics
+  cover.mergeCells("B13:H13");
+  const fh = cover.getCell("B13"); fh.value = "Financial Summary & Key Metrics";
+  fh.fill = fill(DARK); fh.font = { bold: true, size: 13, color: { argb: WHITE } }; fh.alignment = { vertical: "middle" };
+  cover.getRow(13).height = 22;
+
+  const fc = computed?.forecast || [];
+  const histRows = hist?.rows || [];
+  const histA = histRows.length ? histRows[histRows.length - 1] : null;
+  const histPrev = histRows.length > 1 ? histRows[histRows.length - 2] : null;
+  const baseYr = histA ? histA.year : (fc.length ? fc[0].year - 1 : new Date().getFullYear());
+  const yrHeader = ["Metric", `${baseYr}A`, ...fc.map((_, i) => `${baseYr + 1 + i}E`)];
+  const hr = cover.getRow(15);
+  yrHeader.forEach((t, i) => { const cell = hr.getCell(2 + i); cell.value = t; cell.fill = fill(SUB); cell.font = { bold: true, color: { argb: DARK } }; cell.alignment = { horizontal: i === 0 ? "left" : "right" }; cell.border = allBorders; });
+  const metricRows = [
+    ["Revenue ($M)", histA?.revenue, fc.map((f) => f.rev), usd, true],
+    ["Revenue Growth %", (histPrev && histA && histPrev.revenue) ? (histA.revenue / histPrev.revenue - 1) : null, fc.map((f) => f.revGrowth / 100), pf, false],
+    ["EBITDA ($M)", histA?.ebitda, fc.map((f) => f.ebitda), usd, false],
+    ["EBITDA Margin %", histA?.ebitdaMargin != null ? histA.ebitdaMargin / 100 : null, fc.map((f) => f.ebitdaM / 100), pf, false],
+    ["EBIT ($M)", histA?.operatingIncome, fc.map((f) => f.ebit), usd, false],
+    ["Unlevered FCF ($M)", histA?.freeCashFlow, fc.map((f) => f.ufcf), usd, true],
+    ["FCF Margin %", (histA?.freeCashFlow != null && histA?.revenue) ? histA.freeCashFlow / histA.revenue : null, fc.map((f) => f.ufcfM / 100), pf, false],
+  ];
+  metricRows.forEach((m, ri) => {
+    const r = 16 + ri; const row = cover.getRow(r);
+    const lab = row.getCell(2); lab.value = m[0]; lab.font = { bold: !!m[4], color: { argb: m[4] ? DARK : "FF1A1A1A" } }; lab.fill = fill(CREAM); lab.border = allBorders;
+    const hc = row.getCell(3); hc.value = m[1] == null ? "—" : m[1]; hc.numFmt = m[3]; hc.alignment = { horizontal: "right" }; hc.fill = fill(GOLDLT); hc.border = allBorders; hc.font = { bold: true };
+    (m[2] || []).forEach((v, ci) => { const cc = row.getCell(4 + ci); cc.value = v == null ? "—" : v; cc.numFmt = m[3]; cc.alignment = { horizontal: "right" }; cc.fill = fill(CREAM); cc.border = allBorders; if (m[4]) cc.font = { bold: true }; });
+  });
+
+  // Charts (right side)
+  try {
+    if (fc.length) {
+      const png = revGrowthChartPng(`REVENUE GROWTH (${fc[0].year}-${fc[fc.length - 1].year}E)`, fc.map((f) => String(f.year)), fc.map((f) => f.revGrowth));
+      const id = wb.addImage({ base64: png.split(",")[1], extension: "png" });
+      cover.addImage(id, { tl: { col: 9.1, row: 13.3 }, ext: { width: 470, height: 240 } });
+    }
+  } catch { /* charts optional */ }
+  try {
+    const pes = (comps?.rows || []).map((r) => r.pe).filter((v) => v != null && v > 0);
+    const evs = (comps?.rows || []).map((r) => r.evEbitda).filter((v) => v != null && v > 0);
+    const fbRows = [];
+    if (pes.length) { const lo = Math.min(...pes), hi = Math.max(...pes); fbRows.push({ label: "P/E", rangeText: `${lo.toFixed(0)}x – ${hi.toFixed(0)}x`, value: `${(comps.medianPe || (lo + hi) / 2).toFixed(0)}x`, frac: 0.55 }); }
+    if (evs.length) { const lo = Math.min(...evs), hi = Math.max(...evs); fbRows.push({ label: "EV/EBITDA", rangeText: `${lo.toFixed(0)}x – ${hi.toFixed(0)}x`, value: `${(comps.medianEvEbitda || (lo + hi) / 2).toFixed(0)}x`, frac: 0.45 }); }
+    fbRows.push({ label: "DCF", rangeText: `$${bear.toFixed(0)} – $${bull.toFixed(0)}`, value: `$${base.toFixed(0)}`, frac: 0.8 });
+    const png = footballPng(`VALUATION FOOTBALL-FIELD (${ticker})`, fbRows);
+    const id = wb.addImage({ base64: png.split(",")[1], extension: "png" });
+    cover.addImage(id, { tl: { col: 9.1, row: 25.6 }, ext: { width: 470, height: 230 } });
+  } catch { /* optional */ }
+  try {
+    const logo = await fetchLogoBase64(ticker, company);
+    if (logo) {
+      const ext = /image\/jpe?g/i.test(logo.slice(0, 30)) ? "jpeg" : "png";
+      const id = wb.addImage({ base64: logo.split(",")[1], extension: ext });
+      logoCell.value = "";
+      cover.addImage(id, { tl: { col: 0.2, row: 1.3 }, ext: { width: 150, height: 72 } });
+    }
+  } catch { /* fall back to ticker tile */ }
+
+  cover.mergeCells("B36:N36");
+  cover.getCell("B36").value = "Educational research only. Not investment advice. Outputs depend on assumptions, which are uncertain.";
+  cover.getCell("B36").font = { italic: true, size: 9, color: { argb: MUTE } };
 }
 
 // JS replica of the DCF for the sensitivity grid (values only).

@@ -1499,7 +1499,7 @@ export default function Modeling() {
     try {
       toast.loading(`Building Excel model for ${c.ticker}…`, { id:"model" });
       await new Promise(r => setTimeout(r, 800));
-      await generateExcelModel({ company: c, ...(payload || {}), recommendation: rec.label, priceAsOf: loadedAt });
+      await generateExcelModel({ company: c, ...(payload || {}), recommendation: rec.label, priceAsOf: loadedAt, computed: model });
       toast.success(`${c.ticker} Excel model downloaded`, { id:"model" });
     } catch (err) {
       toast.error(`Export failed: ${err.message}`, { id:"model" });
