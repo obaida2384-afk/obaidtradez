@@ -2213,6 +2213,59 @@ async def prices_quotes(symbols: str = Query(...), auth: bool = Depends(verify_a
             }
     return {"prices": out, "count": len(out), "asOf": datetime.now(timezone.utc).isoformat()}
 
+_MARKET_INDEX_DEFS = [
+    ("^GSPC", "S&P 500", "SPX"),
+    ("^IXIC", "NASDAQ", "COMP"),
+    ("^DJI", "DOW", "DJI"),
+    ("^RUT", "Russell 2000", "RUT"),
+    ("^VIX", "VIX", "VIX"),
+]
+
+@api_router.get("/market/indices")
+async def market_indices(auth: bool = Depends(verify_access)):
+    """Live major-index quotes (FMP) + 10Y Treasury yield for the dashboard ticker bar."""
+    async def one(sym, name, tk):
+        data = await api_client._request(
+            f"{api_client.fmp_url}/quote",
+            headers={"apikey": config.FMP_API_KEY},
+            params={"symbol": sym},
+        )
+        if data and isinstance(data, list) and data:
+            q = data[0]
+            return {
+                "name": name, "ticker": tk,
+                "value": q.get("price"),
+                "change": q.get("change"),
+                "pct": q.get("changePercentage") or q.get("changesPercentage"),
+            }
+        return None
+
+    results = await asyncio.gather(*[one(*d) for d in _MARKET_INDEX_DEFS])
+    out = [r for r in results if r and r.get("value") is not None]
+
+    try:
+        today = datetime.now(timezone.utc).date()
+        frm = today - timedelta(days=14)
+        rates = await api_client._request(
+            f"{api_client.fmp_url}/treasury-rates",
+            headers={"apikey": config.FMP_API_KEY},
+            params={"from": frm.isoformat(), "to": today.isoformat()},
+        )
+        if rates and isinstance(rates, list):
+            rates = sorted(rates, key=lambda r: r.get("date", ""), reverse=True)
+            if rates and rates[0].get("year10") is not None:
+                val = rates[0]["year10"]
+                change, pct = 0, 0
+                if len(rates) > 1 and rates[1].get("year10") is not None:
+                    prev = rates[1]["year10"]
+                    change = round(val - prev, 2)
+                    pct = round((change / prev) * 100, 2) if prev else 0
+                out.append({"name": "10-Yr Treasury", "ticker": "TNX", "value": val, "change": change, "pct": pct})
+    except Exception:
+        pass
+
+    return {"indices": out, "asOf": datetime.now(timezone.utc).isoformat()}
+
 @api_router.get("/status")
 async def data_status():
     """Reports whether the backend is serving live market data (keys configured + universe populated)."""
@@ -6086,7 +6139,7 @@ async def _universe_auto_refresh():
     """Built-in scheduler: rebuild the company universe on startup if missing/stale,
     then re-check on a timer. Interval via UNIVERSE_REFRESH_DAYS (default 7),
     size via UNIVERSE_TARGET_SIZE (default 3000)."""
-    refresh_days = int(os.environ.get("UNIVERSE_REFRESH_DAYS", "7"))
+    refresh_days = int(os.environ.get("UNIVERSE_REFRESH_DAYS", "1"))
     target_size = int(os.environ.get("UNIVERSE_TARGET_SIZE", "3000"))
     await asyncio.sleep(20)  # let startup settle
     while True:

@@ -115,6 +115,12 @@ export async function fetchStatus() {
   return res.json();
 }
 
+export async function fetchMarketIndices() {
+  const res = await fetch(`${API}/market/indices`);
+  if (!res.ok) throw new Error(`Indices request failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchFutureGiants({ limit = 12 } = {}) {
   const params = new URLSearchParams({ limit });
   const res = await fetch(`${API}/universe/future-giants?${params.toString()}`);

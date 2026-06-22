@@ -4,7 +4,7 @@ import {
   MARKET_INDICES, SECTOR_PERFORMANCE, MACRO_INDICATORS,
   EARNINGS_CALENDAR, ANALYST_ACTIONS, NEWS_FEED, DISCOVERY_RESULTS,
 } from "@/lib/mockData";
-import { fetchNewsSuggestions } from "@/lib/companyUniverse";
+import { fetchNewsSuggestions, fetchMarketIndices } from "@/lib/companyUniverse";
 import { getRating } from "@/lib/rating";
 import { useLiveStatus } from "@/hooks/useLiveStatus";
 import {
@@ -189,6 +189,20 @@ function TrendingNow() {
 export default function Dashboard() {
   const navigate = useNavigate();
   const status = useLiveStatus();
+  const [indices, setIndices] = useState(MARKET_INDICES);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetchMarketIndices();
+        if (alive && res?.indices?.length) setIndices(res.indices);
+      } catch { /* keep last good values */ }
+    };
+    load();
+    const id = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -217,8 +231,8 @@ export default function Dashboard() {
       <TrendingNow />
 
       {/* Market indices */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        {MARKET_INDICES.map((idx) => <IndexTicker key={idx.ticker} idx={idx} />)}
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="market-indices">
+        {indices.map((idx) => <IndexTicker key={idx.ticker} idx={idx} />)}
       </div>
 
       {/* AI commentary + Sector */}
