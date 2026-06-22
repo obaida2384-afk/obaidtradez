@@ -34,6 +34,8 @@ export function normalizeCompany(r) {
     bearCase: r.bearCase,
     catalysts: r.catalysts || [],
     macroSensitivity: r.macroSensitivity,
+    institutionalOwnershipTrend: r.institutionalOwnershipTrend,
+    insiderActivity: r.insiderActivity,
     shariah: r.shariahStatus || "Unknown",
     source: r.source || {},
     lastUpdated: r.lastUpdated,

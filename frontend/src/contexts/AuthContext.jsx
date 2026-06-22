@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useEffect } from "react";
 const AuthContext = createContext(null);
 
 const STORAGE_KEY = "alphavault_user";
+const API = process.env.REACT_APP_BACKEND_URL;
 
 const defaultUser = {
   id: null,
@@ -64,30 +65,37 @@ export function AuthProvider({ children }) {
     return { success: true };
   };
 
-  const login = async (email, password) => {
+  const login = async (username, password) => {
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const u = JSON.parse(stored);
-      if (u.email === email) {
+    try {
+      const res = await fetch(`${API}/api/auth/access`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, code: password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.token) {
+        let stored = {};
+        try { stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { stored = {}; }
+        const u = {
+          ...defaultUser,
+          ...stored,
+          id: username,
+          email: username,
+          name: username,
+          token: data.token,
+          hasCompletedOnboarding: true,
+          createdAt: stored.createdAt || new Date().toISOString(),
+        };
         setUser(u);
-        setIsLoading(false);
         return { success: true };
       }
+      return { success: false, message: data.message || "Invalid credentials" };
+    } catch {
+      return { success: false, message: "Could not reach the server" };
+    } finally {
+      setIsLoading(false);
     }
-    // Demo: allow any login
-    const demoUser = {
-      ...defaultUser,
-      id: crypto.randomUUID(),
-      email,
-      name: email.split("@")[0],
-      hasCompletedOnboarding: false,
-      createdAt: new Date().toISOString(),
-    };
-    setUser(demoUser);
-    setIsLoading(false);
-    return { success: true };
   };
 
   const logout = () => {

@@ -87,6 +87,24 @@ function OpportunityCard({ d, onClick }) {
         </div>
       )}
 
+      {(d.insiderActivity || d.institutionalOwnershipTrend) && (
+        <div className="flex flex-wrap items-center gap-2 mt-3 text-[10px]" data-testid="discovery-ownership">
+          {d.insiderActivity && (
+            <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${
+              /buy/i.test(d.insiderActivity) ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/15"
+              : /sell/i.test(d.insiderActivity) ? "text-red-400 bg-red-500/10 border-red-500/15"
+              : "text-slate-400 bg-slate-500/10 border-slate-500/15"}`}>
+              Insider: {d.insiderActivity}
+            </span>
+          )}
+          {d.institutionalOwnershipTrend && (
+            <span className="text-slate-400 bg-white/[0.03] border border-white/[0.06] rounded-full px-2 py-0.5">
+              Inst: {d.institutionalOwnershipTrend}
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/[0.04]">
         <span className="text-[11px] text-slate-600">{fmtM(d.marketCap)}</span>
         <span className="flex items-center gap-1 text-[11px] text-emerald-400 group-hover:gap-2 transition-all">

@@ -662,6 +662,8 @@ class CompanyUniverseService:
             "fcfMargin": c.get("fcfMargin"),
             "ebitdaMargin": c.get("ebitdaMargin"),
             "analystEstimateRevisions": c.get("analystEstimateRevisions"),
+            "insiderActivity": c.get("insiderActivity"),
+            "institutionalOwnershipTrend": c.get("institutionalOwnershipTrend"),
             "shariah": c.get("shariahStatus") or "Unknown",
             "whyMarketMayBeWrong": why_wrong,
             "whatInvalidates": "Thesis breaks if " + ", ".join(invalidate) + ".",
@@ -683,6 +685,7 @@ class CompanyUniverseService:
             "ebitdaMargin": 1, "analystRating": 1, "analystPriceTarget": 1,
             "analystPriceTargetHigh": 1, "analystPriceTargetLow": 1, "analystUpsidePct": 1,
             "analystEstimateRevisions": 1, "valuationMultiples": 1, "shariahStatus": 1,
+            "insiderActivity": 1, "institutionalOwnershipTrend": 1,
             "source": 1, "lastUpdated": 1,
         }
         docs = await col.find({"opportunityScore": {"$ne": None}}, proj).to_list(length=5000)

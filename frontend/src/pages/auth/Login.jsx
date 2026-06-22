@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Eye, EyeOff, Zap, ArrowRight } from "lucide-react";
@@ -7,18 +7,19 @@ import { Eye, EyeOff, Zap, ArrowRight } from "lucide-react";
 export default function Login() {
   const { login, isLoading } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !password) return toast.error("Enter email and password");
-    const result = await login(email, password);
+    if (!username || !password) return toast.error("Enter username and password");
+    const result = await login(username.trim(), password);
     if (result.success) {
       toast.success("Welcome back");
+      navigate("/");
     } else {
-      toast.error("Invalid credentials");
+      toast.error(result.message || "Invalid credentials");
     }
   };
 
@@ -43,14 +44,15 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-xs font-medium text-slate-400 block mb-1.5">Email address</label>
+              <label className="text-xs font-medium text-slate-400 block mb-1.5">Username</label>
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Username"
                 className="input-dark"
-                autoComplete="email"
+                autoComplete="username"
+                data-testid="login-username-input"
               />
             </div>
 
@@ -64,6 +66,7 @@ export default function Login() {
                   placeholder="••••••••"
                   className="input-dark pr-10"
                   autoComplete="current-password"
+                  data-testid="login-password-input"
                 />
                 <button
                   type="button"
@@ -75,15 +78,10 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="flex justify-end">
-              <Link to="/auth/forgot-password" className="text-xs text-emerald-500 hover:text-emerald-400 transition-colors">
-                Forgot password?
-              </Link>
-            </div>
-
             <button
               type="submit"
               disabled={isLoading}
+              data-testid="login-submit-button"
               className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm py-2.5 rounded-lg transition-colors mt-2"
             >
               {isLoading ? (
@@ -93,13 +91,6 @@ export default function Login() {
               )}
             </button>
           </form>
-
-          <p className="text-center text-sm text-slate-500 mt-6">
-            Don't have an account?{" "}
-            <Link to="/auth/signup" className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
-              Create one
-            </Link>
-          </p>
         </div>
 
         <p className="text-center text-xs text-slate-700 mt-6">

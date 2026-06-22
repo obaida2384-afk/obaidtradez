@@ -7,8 +7,6 @@ import { PriceProvider } from "@/contexts/PriceContext";
 
 // Auth pages
 import Login from "@/pages/auth/Login";
-import Signup from "@/pages/auth/Signup";
-import ForgotPassword from "@/pages/auth/ForgotPassword";
 import Onboarding from "@/pages/auth/Onboarding";
 
 // Main pages
@@ -298,8 +296,8 @@ function AppRoutes() {
     <Routes>
       {/* Auth routes — no layout */}
       <Route path="/auth/login" element={<AuthRoute><Login /></AuthRoute>} />
-      <Route path="/auth/signup" element={<AuthRoute><Signup /></AuthRoute>} />
-      <Route path="/auth/forgot-password" element={<ForgotPassword />} />
+      <Route path="/auth/signup" element={<Navigate to="/auth/login" replace />} />
+      <Route path="/auth/forgot-password" element={<Navigate to="/auth/login" replace />} />
       <Route path="/onboarding" element={<Onboarding />} />
 
       {/* Protected app routes — with layout */}

@@ -154,6 +154,24 @@ function PlayCard({ play, rank }) {
               )}
             </div>
           </div>
+          {(play.insiderActivity || play.institutionalOwnershipTrend) && (
+            <div className="flex flex-wrap items-center gap-2" data-testid="top-play-ownership">
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider w-full mb-0.5">Ownership & Insider Activity</p>
+              {play.insiderActivity && (
+                <span className={`text-[10px] rounded-full border px-2 py-0.5 ${
+                  /buy/i.test(play.insiderActivity) ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/15"
+                  : /sell/i.test(play.insiderActivity) ? "text-red-400 bg-red-500/10 border-red-500/15"
+                  : "text-slate-400 bg-slate-500/10 border-slate-500/15"}`}>
+                  Insider: {play.insiderActivity}
+                </span>
+              )}
+              {play.institutionalOwnershipTrend && (
+                <span className="text-[10px] text-slate-400 bg-white/[0.03] border border-white/[0.06] rounded-full px-2 py-0.5">
+                  Institutional: {play.institutionalOwnershipTrend}
+                </span>
+              )}
+            </div>
+          )}
           {play.whatInvalidates && (
             <div>
               <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-2">What Could Invalidate The Thesis</p>

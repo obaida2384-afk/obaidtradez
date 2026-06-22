@@ -2093,15 +2093,6 @@ async def verify_access_code(request: AccessRequest):
         pass
     return AccessResponse(success=False, message="Invalid access code")
 
-@api_router.get("/auth/debug")
-async def debug_auth():
-    return {
-        "username_set": bool(config.ACCESS_USERNAME),
-        "username_value": config.ACCESS_USERNAME,
-        "password_set": bool(config.ACCESS_CODE),
-        "password_value": config.ACCESS_CODE,
-    }
-
 @api_router.get("/auth/verify")
 async def verify_token(authorization: str = Header(None)):
     """Verify if token is valid"""
