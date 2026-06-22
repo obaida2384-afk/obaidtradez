@@ -32,12 +32,15 @@ function relTime(dateStr) {
   return `${d}d ago`;
 }
 
+// Topic noise from the news provider that should not surface as a catalyst type.
+const JUNK_TOPICS = new Set(["paywall", "paylimitwall", "prnews", "pr", "general"]);
+
 // Map a StockNewsAPI article into the card shape the page renders.
 function mapArticle(a, idx) {
   const sentiment = String(a.sentiment || "neutral").toLowerCase();
   const tickers = a.tickers || [];
-  const topic = (a.topics || [])[0];
-  const strength = sentiment !== "neutral" && tickers.length > 0 ? "High" : sentiment !== "neutral" ? "Medium" : "Low";
+  const topic = (a.topics || []).find((t) => t && !JUNK_TOPICS.has(String(t).toLowerCase()));
+  const strength = sentiment !== "neutral" ? "High" : tickers.length > 0 ? "Medium" : "Low";
   return {
     id: a.url || idx,
     title: a.title,

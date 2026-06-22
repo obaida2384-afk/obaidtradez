@@ -66,6 +66,13 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 
 ## ALL 6 PHASES COMPLETE. Possible follow-ups: embed News & Catalysts into DCF; wire Research detail page to DCF engine; institutional/insider enrichment; hard fund/ETF exclusion; faster live-price polling.
 
+### 2026-06-22 — Post-Phase: Live News, Live Pricing & DCF News (DONE)
+- `News.jsx` rewritten to drop all mock `NEWS_FEED` data — now consumes live `fetchMarketNews` (StockNewsAPI `/api/news/market`) + `fetchNewsSuggestions` (`/api/news/suggestions`). Added "News-Driven Stock Ideas" suggestions row (buzz × universe fundamentals). Filters (ticker/catalyst-type/sentiment) work against live feed; catalyst types built dynamically from article topics with junk-topic sanitisation (paywall/paylimitwall → "Market News"). High-Impact KPI now keyed off non-neutral sentiment.
+- Live pricing: new `useQuotes` hook (polls `/api/prices/quotes` FMP batch-quote, 20s) wired into `TopPlays.jsx` (Current price) and `FutureGiants.jsx` (Price) — displayed prices refresh to live FMP quotes. Discovery shows no price field so left unchanged; Modeling builds live at fetch time.
+- DCF Excel export: `excelExporter.js` now writes a dedicated IB-styled "News & Catalysts" worksheet (date / hyperlinked headline / source / colour-coded sentiment / tickers + tone summary) from `model.news` (DCF payload attaches `news_service.company_news`).
+- Verified by testing_agent (iteration_1.json): 100% frontend pass — 40 live news cards (no legacy mock headlines), 10 suggestions, numeric live prices on Top Plays (25) & Future Giants (12), DCF export of AAPL succeeded with success toast + News sheet, no errors.
+- Known cosmetic note (not blocking): `companyUniverse.js normalizeCompany` sets grossMargin = ebitdaMargin (pre-existing copy-paste); left as-is to avoid out-of-scope change.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).
