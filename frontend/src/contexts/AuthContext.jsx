@@ -50,21 +50,6 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
-  const signup = async (email, password, name) => {
-    setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    const newUser = {
-      ...defaultUser,
-      id: crypto.randomUUID(),
-      email,
-      name,
-      createdAt: new Date().toISOString(),
-    };
-    setUser(newUser);
-    setIsLoading(false);
-    return { success: true };
-  };
-
   const login = async (username, password) => {
     setIsLoading(true);
     try {
@@ -135,7 +120,6 @@ export function AuthProvider({ children }) {
         isAuthenticated: !!user,
         hasCompletedOnboarding: user?.hasCompletedOnboarding ?? false,
         isLoading,
-        signup,
         login,
         logout,
         updateUser,

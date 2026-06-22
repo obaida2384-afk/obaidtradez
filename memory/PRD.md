@@ -73,6 +73,18 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - Verified by testing_agent (iteration_1.json): 100% frontend pass — 40 live news cards (no legacy mock headlines), 10 suggestions, numeric live prices on Top Plays (25) & Future Giants (12), DCF export of AAPL succeeded with success toast + News sheet, no errors.
 - Known cosmetic note (not blocking): `companyUniverse.js normalizeCompany` sets grossMargin = ebitdaMargin (pre-existing copy-paste); left as-is to avoid out-of-scope change.
 
+### 2026-06-22 — Owner lockdown, Trending banner, Ownership rendering, Vercel prep (DONE)
+- **Single-credential access lock**: app now restricted to ONE login (Username `obaidtradez`), validated server-side by existing `POST /api/auth/access` against `ACCESS_USERNAME` / `ACCESS_CODE_HASH` (added to `backend/.env`). `AuthContext.login(username,password)` posts to it, stores token + user in localStorage, routes straight to dashboard (onboarding auto-completed). Public **signup disabled**: removed `signup` from AuthContext, dropped Signup/ForgotPassword imports, `/auth/signup` & `/auth/forgot-password` redirect to `/auth/login`, Login.jsx now a Username field with no signup/forgot links. Removed the credential-leaking `/api/auth/debug` endpoint. Credentials recorded in test_credentials.md.
+- **Dashboard 'Trending Now' banner**: new `TrendingNow` component surfaces the top news-driven idea (StockNewsAPI suggestions) with ticker/sector/mentions/sentiment/price/PT, click → Research, plus 'All ideas' → News and 3 secondary chips.
+- **Institutional ownership + insider activity rendering**: `normalizeCompany` now maps `institutionalOwnershipTrend` + `insiderActivity`; Discovery cards show a color-coded ownership chip row (data-testid `discovery-ownership`); Top Plays expanded card shows an 'Ownership & Insider Activity' block (data-testid `top-play-ownership`). Backend `rank_short_term_growth`/`_growth_view` now project & return these fields (sparse data — ~4/25 populated — renders where present).
+- **Vercel / zero Emergent traces**: audited frontend `src/`, `public/`, `index.html`, `vite.config.js`, `package.json` — NO Emergent references. `vercel.json` updated with SPA rewrites (deep links no longer 404). Backend fallback URL in vite.config is the owner's own Railway host. Deployment is the owner's responsibility via Vercel (not performed here).
+- Verified by testing_agent iteration_2.json — 100% frontend pass (auth correct/wrong/signup-disabled, trending banner + navigation, ownership chips, regression on News/prices/DCF). 
+
+### Deferred / backlog (next pass)
+- **Research → DCF engine wiring**: `Research.jsx` is still 100% mock (`COMPANY_UNIVERSE`) and uses a data shape (revenueHistory, impliedPrice, bullPrice, etc.) different from the DCF engine payload — needs a dedicated rewrite to consume `fetchCompany` + `fetchDcf` and add a richer institutional/insider panel. (P1, larger effort.)
+- Consolidate legacy `useLivePrices.js` polling with `useQuotes` (refactor).
+- Optional: enforce the bearer token on backend data endpoints (currently open; UI gate only). Optional: replace persistent 'Demo Mode' chip when server data is live.
+
 
 ## Backlog (await user approval per phase)
 - P1 Phase 2: Company Universe — scalable API-driven schema for 1k–5k companies (no hardcoded permanent fake numbers).
