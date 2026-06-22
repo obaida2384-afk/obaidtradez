@@ -114,3 +114,9 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 
 ### 2026-06-22 — Live "as of" price timestamps (DONE)
 - `useQuotes` now also returns `asOf` (from /api/prices/quotes). Research header shows "Live · as of HH:MM" next to the price; DCF model stat bar shows "Live data as of …" (stamped when the model loads); the Excel export Cover adds a "Live Price As Of" row. Callers (TopPlays/FutureGiants/Research) updated to the `{prices, asOf}` shape. Additive UI; frontend compiles clean.
+
+### 2026-06-22 — Research wired to LIVE DCF data (DONE)
+- New `lib/researchModel.js buildResearchCompany({dcf, universe, mock})`: composes the Research report from the live DCF payload (fetchDcf) + universe record (fetchCompany→normalizeCompany) + live quote, mock used only for qualitative `moat`. Research now works for ANY FMP ticker.
+- `Research.jsx`: async `loadCompany` (deep-link via useEffect, featured cards, search, header search bar route through it); loading spinner; real historicals (Financials), real WACC/TGR + "Consensus Fair Value" + "Run full institutional DCF model" CTA → /modeling?ticker (Valuation); generated memo thesis (AI Thesis). Live price + "as of".
+- Verified testing_agent iteration_5.json — 8/8 PASS. Fixed Market Cap double /1e6 (DCF marketCap already in millions).
+- DECISION (not done, by design): `useLivePrices` is a streaming hook used only by trading pages (Trading/Investments/AutoTrade) — different purpose from `useQuotes` (screening batch-poll), so NOT merged. MarketMacro remains illustrative/labeled — no macro-data API integrated.

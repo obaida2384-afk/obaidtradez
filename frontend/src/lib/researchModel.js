@@ -37,7 +37,7 @@ export function buildResearchCompany({ dcf, universe, mock } = {}) {
     price: co.price ?? u.price ?? m.price,
     change: m.change ?? 0,
     pct: m.pct ?? 0,
-    marketCap: co.marketCap != null ? Math.round(co.marketCap / 1e6) : (u.marketCap ?? m.marketCap ?? null),
+    marketCap: co.marketCap ?? u.marketCap ?? m.marketCap ?? null,
     description: co.description || m.description || `${co.name || u.name || "The company"} operates in the ${co.sector || u.sector || "market"} sector.`,
     risks: (co.risks && co.risks.length ? co.risks : m.risks) || [],
     moat: m.moat || null,
