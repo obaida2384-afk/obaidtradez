@@ -20,6 +20,7 @@ import asyncio
 import json
 import hashlib
 import secrets
+import bcrypt
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -228,10 +229,23 @@ _valid_tokens: Dict[str, datetime] = {}
 def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
+def _code_matches(submitted: str, stored: str) -> bool:
+    """Accept EITHER a bcrypt hash OR a plaintext value in ACCESS_CODE_HASH."""
+    submitted = (submitted or "").strip()
+    stored = (stored or "").strip()
+    if not stored:
+        return False
+    if stored.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            return bcrypt.checkpw(submitted.encode("utf-8"), stored.encode("utf-8"))
+        except Exception:
+            return False
+    return secrets.compare_digest(submitted, stored)
+
 def validate_access_code(code: str, username: str = None) -> bool:
-    password_ok = code.strip() == config.ACCESS_CODE.strip()
+    password_ok = _code_matches(code, config.ACCESS_CODE)
     if config.ACCESS_USERNAME.strip():
-        return password_ok and (username or '').strip() == config.ACCESS_USERNAME.strip()
+        return password_ok and secrets.compare_digest((username or '').strip(), config.ACCESS_USERNAME.strip())
     return password_ok
 
 def validate_token(token: str) -> bool:
@@ -2117,6 +2131,7 @@ async def auth_config_check():
         "code_configured": bool(c),
         "code_length": len(c),
         "code_fingerprint": sha8(c),
+        "code_is_bcrypt_hash": c.startswith(("$2a$", "$2b$", "$2y$")),
     }
 
 # Universe Management
