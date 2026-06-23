@@ -2101,6 +2101,24 @@ async def verify_token(authorization: str = Header(None)):
     token = authorization.replace("Bearer ", "")
     return {"valid": validate_token(token)}
 
+@api_router.get("/auth/config-check")
+async def auth_config_check():
+    """Safe diagnostic: reports whether access env vars are configured and their
+    fingerprints (one-way sha256 prefix) — never the actual values. Used to debug
+    deployment env-var mismatches."""
+    import hashlib
+    u = config.ACCESS_USERNAME.strip()
+    c = config.ACCESS_CODE.strip()
+    sha8 = lambda s: hashlib.sha256(s.encode()).hexdigest()[:8] if s else None
+    return {
+        "username_configured": bool(u),
+        "username_length": len(u),
+        "username_fingerprint": sha8(u),
+        "code_configured": bool(c),
+        "code_length": len(c),
+        "code_fingerprint": sha8(c),
+    }
+
 # Universe Management
 @api_router.get("/universe/stats")
 async def get_universe_stats(auth: bool = Depends(verify_access)):
