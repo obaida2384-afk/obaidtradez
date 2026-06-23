@@ -65,6 +65,23 @@ class DCFEngine:
             timeout=timeout,
         )
 
+    async def _fx_rate(self, frm: Optional[str], to: Optional[str]) -> float:
+        """Units of `to` per 1 unit of `frm` (e.g. USD per TWD). 1.0 if same/unknown."""
+        frm = (frm or "").upper()
+        to = (to or "").upper()
+        if not frm or not to or frm == to:
+            return 1.0
+        for sym, invert in ((f"{frm}{to}", False), (f"{to}{frm}", True)):
+            try:
+                q = await self._fmp("quote", {"symbol": sym})
+                row = q[0] if isinstance(q, list) and q else (q if isinstance(q, dict) else None)
+                p = _f((row or {}).get("price"))
+                if p and p > 0:
+                    return round(1.0 / p, 8) if invert else round(p, 8)
+            except Exception:
+                pass
+        return 1.0
+
     async def build_dcf(self, ticker: str) -> Optional[Dict]:
         symbol = ticker.upper()
         profile, income, balance, cashflow, estimates, ratios, treasury, peers, grades, ptc = await asyncio.gather(
@@ -165,6 +182,14 @@ class DCFEngine:
         if not shares_m and market_cap_m and price:
             shares_m = round(market_cap_m / price, 1)
 
+        # ── Currency detection (convert only at output; keep all ratios raw) ─────
+        # Statements use the reporting currency (e.g. TWD); price/marketCap/targets
+        # use the trading currency (e.g. USD). fx = trading per reported (1.0 for US).
+        reported_ccy = (latest.get("reportedCurrency") or "").upper()
+        trading_ccy = (profile.get("currency") or "").upper()
+        fx = await self._fx_rate(reported_ccy, trading_ccy)
+        market_cap_reported_m = (market_cap_m / fx) if (market_cap_m and fx) else market_cap_m
+
         # WACC inputs
         rf = None
         if isinstance(treasury, list) and treasury:
@@ -173,11 +198,11 @@ class DCFEngine:
         beta = _f(profile.get("beta")) or SECTOR_BETA.get(profile.get("sector") or "default", SECTOR_BETA["default"])
         erp = 5.5
         cost_of_equity = round(rf + beta * erp, 1)
-        # cost of debt from interest expense / total debt
+        # cost of debt from interest expense / total debt (both reporting ccy)
         int_exp = _f(latest.get("interestExpense"))
         cost_of_debt = round(int_exp / (debt_m * 1e6) * 100, 1) if (int_exp and debt_m and debt_m > 0) else 5.5
         cost_of_debt = min(12.0, max(3.0, cost_of_debt))
-        total_cap = (market_cap_m or 0) + debt_m
+        total_cap = (market_cap_reported_m or 0) + debt_m
         debt_weight = round(debt_m / total_cap * 100) if total_cap else 10
         debt_weight = min(60, debt_weight)
         equity_weight = 100 - debt_weight
@@ -228,16 +253,19 @@ class DCFEngine:
             "industry": profile.get("industry"),
             "price": _r(price, 2),
             "marketCap": market_cap_m,
-            "revenue": revenue_m,
+            "revenue": round(revenue_m * fx, 1),
             "revenueGrowth": last_yoy if last_yoy is not None else rev_cagr,
             "revenueCagr": rev_cagr,
             "ebitdaMargin": ebitda_margin,
             "debtToEbitda": debt_to_ebitda,
             "exitMultiple": exit_multiple,
             "beta": _r(beta, 2),
-            "revenueHistory": revenue_hist,
+            "revenueHistory": [(round(v * fx, 1) if v else v) for v in revenue_hist],
             "years": years,
             "description": profile.get("description"),
+            "currency": trading_ccy or "USD",
+            "reportingCurrency": reported_ccy or (trading_ccy or "USD"),
+            "fxApplied": round(fx, 6),
             "risks": self._risk_factors(profile, fwd_growth, ebitda_margin, debt_to_ebitda, beta),
         }
 
@@ -250,7 +278,7 @@ class DCFEngine:
             "daPercent": [da_pct] * 5,
             "capexPercent": [capex_pct] * 5,
             "nwcPercent": [nwc_pct] * 5,
-            "cash": round(cash_m), "debt": round(debt_m), "sharesOut": round(shares_m) if shares_m else 0,
+            "cash": round(cash_m * fx), "debt": round(debt_m * fx), "sharesOut": round(shares_m) if shares_m else 0,
             "meta": {
                 "revGrowth": {"source": growth_src, "reasoning": f"Years 1–5 forward revenue growth. Historical CAGR {rev_cagr}%, last YoY {last_yoy}%.", "confidence": growth_conf},
                 "ebitdaMargin": {"source": "Historical statements (FMP income-statement)", "reasoning": f"Current EBITDA margin {ebitda_margin}%, expanded toward best historical {round(best_margin,1)}%.", "confidence": "Medium"},
@@ -267,7 +295,7 @@ class DCFEngine:
             },
         }
 
-        historicals = self._historicals(inc, cashflow)
+        historicals = self._historicals(inc, cashflow, fx, reported_ccy, trading_ccy)
         comps = await self._comps(symbol, peers, profile)
         analyst = self._analyst(grades, ptc, price)
         macro = self._macro(treasury, rf)
@@ -286,7 +314,7 @@ class DCFEngine:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _historicals(self, inc: List[Dict], cashflow: List[Dict]) -> Dict:
+    def _historicals(self, inc: List[Dict], cashflow: List[Dict], fx: float = 1.0, reported_ccy: str = "", trading_ccy: str = "") -> Dict:
         cf_by_year = {c.get("fiscalYear"): c for c in cashflow}
         rows = []
         for r in inc:
@@ -296,19 +324,23 @@ class DCFEngine:
             ocf = _f(cf.get("operatingCashFlow"))
             capex = _f(cf.get("capitalExpenditure"))
             fcf = round((ocf + capex) / 1e6, 1) if (ocf is not None and capex is not None) else None
+            cv = lambda v: (round(v * fx, 1) if v is not None else None)
             rows.append({
                 "year": int(str(r.get("fiscalYear") or r.get("date", "")[:4]) or 0),
-                "revenue": rev,
-                "grossProfit": _m(r.get("grossProfit")),
+                "revenue": cv(rev),
+                "grossProfit": cv(_m(r.get("grossProfit"))),
                 "grossMargin": _r((_f(r.get("grossProfit")) or 0) / (_f(r.get("revenue")) or 1) * 100),
-                "operatingIncome": _m(r.get("operatingIncome")),
-                "ebitda": ebitda,
+                "operatingIncome": cv(_m(r.get("operatingIncome"))),
+                "ebitda": cv(ebitda),
                 "ebitdaMargin": _r((ebitda / rev * 100) if (ebitda and rev) else None),
-                "netIncome": _m(r.get("netIncome")),
-                "eps": _f(r.get("epsDiluted") or r.get("eps")),
-                "freeCashFlow": fcf,
+                "netIncome": cv(_m(r.get("netIncome"))),
+                "eps": (round((_f(r.get("epsDiluted") or r.get("eps")) or 0) * fx, 2) if (r.get("epsDiluted") or r.get("eps")) is not None else None),
+                "freeCashFlow": cv(fcf),
             })
-        return {"rows": rows, "source": "FMP income-statement / cash-flow-statement (reported)"}
+        src = "FMP income-statement / cash-flow-statement (reported)"
+        if fx != 1.0:
+            src += f" · converted {reported_ccy}→{trading_ccy} @ {round(fx, 6)}"
+        return {"rows": rows, "source": src}
 
     async def _comps(self, symbol: str, peers: List, profile: Dict) -> Dict:
         tickers = [symbol]

@@ -594,9 +594,9 @@ async function buildCoverSheet(wb, { company, analyst, comps, hist, computed, ti
   const usd = "#,##0", pf = "0.0%";
   const price = company.price || 0;
   const implied = computed?.implied ?? (analyst?.targetConsensus || price);
-  const bull = Math.max(implied * 1.35, analyst?.targetHigh ?? 0);
+  const bull = implied * 1.35;
   const base = implied;
-  const bear = Math.min(implied * 0.65, analyst?.targetLow ?? Infinity);
+  const bear = implied * 0.65;
 
   const cover = wb.addWorksheet("Cover", { properties: { tabColor: { argb: DARK } }, views: [{ showGridLines: false }] });
   cover.columns = [{ width: 3 }, { width: 20 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 6 }, { width: 3 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
