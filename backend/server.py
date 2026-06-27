@@ -276,20 +276,42 @@ class MultiAPIClient:
             "APCA-API-SECRET-KEY": config.ALPACA_SECRET_KEY
         }
     
-    async def _request(self, url: str, headers: Dict = None, params: Dict = None, timeout: float = 15.0) -> Optional[Any]:
+    async def _request(self, url: str, headers: Dict = None, params: Dict = None, timeout: float = 15.0, retries: int = 3) -> Optional[Any]:
         # Skip calls when a required credential (header or query param) is missing.
         if headers and any(v is None for v in headers.values()):
             return None
         if params and any(v is None for v in params.values()):
             return None
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.get(url, headers=headers, params=params)
-                if resp.status_code == 200:
-                    return resp.json()
-                logger.warning(f"API error {resp.status_code}: {url}")
-        except Exception as e:
-            logger.error(f"Request error: {e}")
+        backoff = 0.6
+        for attempt in range(retries):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.get(url, headers=headers, params=params)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        # FMP signals burst-limit breaches as a 200 with an error message body.
+                        if isinstance(data, dict) and ("Limit Reach" in str(data.get("Error Message", "")) or "Limit Reach" in str(data.get("message", ""))):
+                            if attempt < retries - 1:
+                                await asyncio.sleep(backoff); backoff *= 2; continue
+                            logger.warning(f"API rate-limit (200-body) after {retries} tries: {url}")
+                            return None
+                        return data
+                    if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries - 1:
+                        # honour Retry-After if present, else exponential backoff
+                        try:
+                            wait = float(resp.headers.get("Retry-After", "")) or backoff
+                        except ValueError:
+                            wait = backoff
+                        await asyncio.sleep(min(wait, 5)); backoff *= 2; continue
+                    logger.warning(f"API error {resp.status_code}: {url}")
+                    return None
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(backoff); backoff *= 2; continue
+                logger.error(f"Request error (after retries): {e}")
+            except Exception as e:
+                logger.error(f"Request error: {e}")
+                return None
         return None
     
     # ============ UNIVERSE LOADING METHODS ============
