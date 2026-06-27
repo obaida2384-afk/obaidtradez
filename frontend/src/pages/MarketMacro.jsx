@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { MACRO_INDICATORS, SECTOR_PERFORMANCE, MARKET_INDICES } from "@/lib/mockData";
 import { fetchMacro, fetchMarketIndices } from "@/lib/companyUniverse";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
@@ -52,7 +51,7 @@ function MacroRow({ m }) {
 
 export default function MarketMacro() {
   const [macro, setMacro] = useState(null);
-  const [indices, setIndices] = useState(MARKET_INDICES);
+  const [indices, setIndices] = useState([]);
   const [live, setLive] = useState(false);
 
   useEffect(() => {
@@ -64,8 +63,8 @@ export default function MarketMacro() {
 
   const rateHistory = macro?.fedFundsHistory?.length ? macro.fedFundsHistory : [];
   const yieldCurve = macro?.yieldCurve?.length ? macro.yieldCurve : [];
-  const indicators = macro?.indicators?.length ? macro.indicators : MACRO_INDICATORS;
-  const sectors = macro?.sectorPerformance?.length ? macro.sectorPerformance : SECTOR_PERFORMANCE;
+  const indicators = macro?.indicators?.length ? macro.indicators : [];
+  const sectors = macro?.sectorPerformance?.length ? macro.sectorPerformance : [];
   const spread = macro?.spread2y10y;
   const inverted = macro?.inverted;
   const commentary = live ? buildCommentary(indicators, spread, inverted) : [];
@@ -89,6 +88,7 @@ export default function MarketMacro() {
       </div>
 
       {/* Index overview */}
+      {indices.length > 0 && (
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="macro-indices">
         {indices.map((idx) => {
           const up = (idx.change ?? 0) >= 0;
@@ -105,6 +105,7 @@ export default function MarketMacro() {
           );
         })}
       </div>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
