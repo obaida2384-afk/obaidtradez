@@ -67,6 +67,7 @@ class Config:
     POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY')
     FINNHUB_API_KEY = os.environ.get('FINNHUB_API_KEY')
     STOCKNEWS_API_KEY = os.environ.get('STOCKNEWS_API_KEY')
+    FRED_API_KEY = os.environ.get('FRED_API_KEY')
     
     # Alpaca
     ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
@@ -2233,7 +2234,11 @@ async def top_plays_tracked(auth: bool = Depends(verify_access)):
     live = {}
     if tickers:
         try:
-            quotes = await api_client.fmp_batch_quote(tickers)
+            quotes = await api_client._request(
+                f"{api_client.fmp_url}/batch-quote",
+                headers={"apikey": config.FMP_API_KEY},
+                params={"symbols": ",".join(tickers[:200])},
+            )
             live = {q.get("symbol"): q.get("price") for q in (quotes or []) if q.get("symbol")}
         except Exception:
             live = {}
@@ -2353,6 +2358,106 @@ async def market_indices(auth: bool = Depends(verify_access)):
         pass
 
     return {"indices": out, "asOf": datetime.now(timezone.utc).isoformat()}
+
+def _fmt_month(d):
+    try:
+        return datetime.fromisoformat(d).strftime("%b %y")
+    except Exception:
+        return d
+
+async def _fred_series(series_id: str, limit: int = 1):
+    data = await api_client._request(
+        "https://api.stlouisfed.org/fred/series/observations",
+        params={"series_id": series_id, "api_key": config.FRED_API_KEY,
+                "file_type": "json", "sort_order": "desc", "limit": limit},
+    )
+    obs = (data or {}).get("observations", []) if isinstance(data, dict) else []
+    out = []
+    for o in obs:
+        v = o.get("value")
+        if v not in (".", "", None):
+            try:
+                out.append({"date": o["date"], "value": float(v)})
+            except ValueError:
+                pass
+    return out
+
+@api_router.get("/market/macro")
+async def market_macro(auth: bool = Depends(verify_access)):
+    """Live macro from FRED (Federal Reserve) + live sector performance from FMP."""
+    if not config.FRED_API_KEY:
+        return {"available": False}
+
+    async def latest(sid):
+        s = await _fred_series(sid, 1)
+        return s[0]["value"] if s else None
+
+    async def yoy(sid):
+        s = await _fred_series(sid, 15)
+        if not s:
+            return None
+        latest_o = s[0]
+        target = f"{int(latest_o['date'][:4]) - 1:04d}-{latest_o['date'][5:7]}"
+        for o in s[1:]:
+            if o["date"].startswith(target) and o["value"]:
+                return round((latest_o["value"] / o["value"] - 1) * 100, 1)
+        if len(s) > 12 and s[12]["value"]:
+            return round((latest_o["value"] / s[12]["value"] - 1) * 100, 1)
+        return None
+
+    ff_raw = await _fred_series("FEDFUNDS", 18)
+    fed_funds_history = [{"date": _fmt_month(o["date"]), "rate": o["value"]} for o in reversed(ff_raw)]
+
+    curve_ids = [("1M", "DGS1MO"), ("3M", "DGS3MO"), ("6M", "DGS6MO"), ("1Y", "DGS1"),
+                 ("2Y", "DGS2"), ("5Y", "DGS5"), ("10Y", "DGS10"), ("20Y", "DGS20"), ("30Y", "DGS30")]
+    curve_vals = await asyncio.gather(*[latest(sid) for _, sid in curve_ids])
+    yield_curve = [{"maturity": m, "yield": v} for (m, _), v in zip(curve_ids, curve_vals) if v is not None]
+
+    fedfunds, unrate, gdp, dgs10, dgs2 = await asyncio.gather(
+        latest("FEDFUNDS"), latest("UNRATE"), latest("A191RL1Q225SBEA"), latest("DGS10"), latest("DGS2"))
+    cpi_yoy, pce_yoy = await asyncio.gather(yoy("CPIAUCSL"), yoy("PCEPILFE"))
+    spread = round(dgs10 - dgs2, 2) if (dgs10 is not None and dgs2 is not None) else None
+
+    pct = lambda v, d=2: (f"{v:.{d}f}%" if v is not None else "—")
+    indicators = [
+        {"label": "Fed Funds Rate", "value": pct(fedfunds), "trend": None, "note": "The Fed's policy rate"},
+        {"label": "CPI Inflation (YoY)", "value": pct(cpi_yoy, 1), "trend": "up" if (cpi_yoy or 0) > 2 else "down", "note": "Headline consumer inflation"},
+        {"label": "Core PCE (YoY)", "value": pct(pce_yoy, 1), "trend": "up" if (pce_yoy or 0) > 2 else "down", "note": "Fed's preferred gauge (2% target)"},
+        {"label": "Unemployment Rate", "value": pct(unrate, 1), "trend": None, "note": "U-3 headline unemployment"},
+        {"label": "Real GDP Growth", "value": pct(gdp, 1), "trend": "up" if (gdp or 0) > 0 else "down", "note": "Latest quarter, annualized"},
+        {"label": "10Y Treasury", "value": pct(dgs10), "trend": None, "note": "Risk-free benchmark for valuations"},
+        {"label": "2Y Treasury", "value": pct(dgs2), "trend": None, "note": "Short-end rate / Fed expectations"},
+    ]
+
+    sectors = [("Technology", "XLK"), ("Financials", "XLF"), ("Healthcare", "XLV"), ("Energy", "XLE"),
+               ("Industrials", "XLI"), ("Cons Disc", "XLY"), ("Cons Staples", "XLP"), ("Utilities", "XLU"),
+               ("Materials", "XLB"), ("Real Estate", "XLRE"), ("Comm Svcs", "XLC")]
+    sector_perf = []
+    try:
+        q = await api_client._request(
+            f"{api_client.fmp_url}/batch-quote",
+            headers={"apikey": config.FMP_API_KEY},
+            params={"symbols": ",".join([s for _, s in sectors])},
+        )
+        pm = {x.get("symbol"): (x.get("changePercentage") if x.get("changePercentage") is not None else x.get("changesPercentage")) for x in (q or [])}
+        sector_perf = sorted(
+            [{"name": n, "pct": round(pm.get(s), 2)} for n, s in sectors if pm.get(s) is not None],
+            key=lambda x: x["pct"], reverse=True,
+        )
+    except Exception:
+        pass
+
+    return {
+        "available": True,
+        "fedFundsHistory": fed_funds_history,
+        "yieldCurve": yield_curve,
+        "spread2y10y": spread,
+        "inverted": (spread is not None and spread < 0),
+        "indicators": indicators,
+        "sectorPerformance": sector_perf,
+        "asOf": datetime.now(timezone.utc).isoformat(),
+        "source": "FRED (Federal Reserve) + FMP",
+    }
 
 @api_router.get("/status")
 async def data_status():
