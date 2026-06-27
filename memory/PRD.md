@@ -153,3 +153,9 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
   4. Conviction stack (momentum + value): High/Medium/Standard from growthScore + analyst upside + P/E vs sector anchor + FCF.
   5. Risk discipline: suggestedWeightPct & suggestedStopPct (scaled by riskScore/beta), reward/risk ratio, and portfolio sector-concentration check (flags >30%).
   - Endpoints: `GET /api/top-plays/tracked`, `POST /api/top-plays/reconcile`. Reconcile is hooked into the 6h universe scheduler. Verified: 30 picks seeded with conviction/risk; simulated exits produce correct Target Hit (+20%) / Thesis Broke (−12%) + stats (hitRate, reasonBreakdown). Frontend tab renders all sections (dark theme).
+
+### 2026-06-27 — Cleanup pass (DONE) + deliberate non-actions
+- Deleted 8 dead frontend pages (not routed/imported): Alerts, AutoTrade, Backtesting, Chatbot, Investments, LongTermInvest, Screener, Trading. Sidebar is now a clean research platform. App verified rendering post-deletion.
+- Added **FMP rate-limit retry/backoff** centrally in `MultiAPIClient._request` (exponential backoff + Retry-After on 429/5xx, and detects FMP's "Limit Reach" 200-body). Verified live (status + quotes OK).
+- **Deliberately NOT removed: backend trading engine.** Modules `ai_trading_system`, `auto_trade_scheduler`, `technical_analysis_engine`, `performance_tracker`, `live_reeval_engine`, `reeval_verifier`, `execution_transparency`, `top_movers_scanner` are referenced ~84× across the 6,300-line `server.py` with cross-imports. A blind rip-out would very likely break the deployed app for zero functional gain. The auto-trade scheduler only starts if previously enabled (it isn't), so the trading code is dormant/harmless. If full removal is wanted later, it needs a dedicated, tested refactor.
+- Deferred: MarketMacro→FRED (needs a free FRED API key from user); split Modeling.jsx (pure refactor, regression risk, no user benefit).
