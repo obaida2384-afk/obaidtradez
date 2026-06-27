@@ -924,6 +924,8 @@ universe_manager = UniverseManager()
 
 # API-driven, scalable company universe (1k-5k companies sourced dynamically)
 company_universe_service = CompanyUniverseService(api_client, db, lambda: config.FMP_API_KEY)
+from top_plays_tracker import TopPlaysTracker
+top_plays_tracker = TopPlaysTracker(db)
 dcf_engine = DCFEngine(api_client, db, lambda: config.FMP_API_KEY)
 news_service = NewsService(api_client, db, lambda: config.STOCKNEWS_API_KEY)
 
@@ -2188,6 +2190,37 @@ async def universe_short_term_growth(
 ):
     """Asymmetric short-term growth ranking (mega caps de-emphasised)."""
     return await company_universe_service.rank_short_term_growth(limit=limit, max_megacap=max_megacap)
+
+async def _reconcile_top_plays(limit: int = 30):
+    """Snapshot the current Top Plays list into the tracker (entries/exits/conviction)."""
+    try:
+        ranked = await company_universe_service.rank_short_term_growth(limit=limit, max_megacap=6)
+        res = await top_plays_tracker.reconcile(ranked.get("companies", []))
+        logger.info(f"[top-plays-tracker] reconcile: {res}")
+        return res
+    except Exception as e:
+        logger.warning(f"[top-plays-tracker] reconcile error: {e}")
+        return {"error": str(e)}
+
+@api_router.get("/top-plays/tracked")
+async def top_plays_tracked(auth: bool = Depends(verify_access)):
+    """Tracked Top Plays picks: active holdings (with conviction + risk plan + live
+    return), recently exited picks (with exit reason), and forward-performance stats."""
+    active = await top_plays_tracker.col.find({"status": "active"}).to_list(length=2000)
+    tickers = [p["ticker"] for p in active]
+    live = {}
+    if tickers:
+        try:
+            quotes = await api_client.fmp_batch_quote(tickers)
+            live = {q.get("symbol"): q.get("price") for q in (quotes or []) if q.get("symbol")}
+        except Exception:
+            live = {}
+    return await top_plays_tracker.get_tracked(live_prices=live)
+
+@api_router.post("/top-plays/reconcile")
+async def top_plays_reconcile(auth: bool = Depends(verify_access)):
+    """Manually refresh the Top Plays tracker against the current ranked list."""
+    return await _reconcile_top_plays()
 
 @api_router.get("/universe/future-giants")
 async def universe_future_giants(
@@ -6196,6 +6229,8 @@ async def _universe_auto_refresh():
                     logger.info(f"[universe-auto-refresh] rebuilding (count={count}, last={updated_at})")
                     res = await company_universe_service.build_universe(target_size)
                     logger.info(f"[universe-auto-refresh] done: {res}")
+                # Snapshot Top Plays into the tracker every cycle (entries/exits/perf)
+                await _reconcile_top_plays()
         except Exception as e:
             logger.warning(f"[universe-auto-refresh] error: {e}")
         await asyncio.sleep(6 * 3600)  # re-check every 6h

@@ -143,3 +143,13 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - Excel cover scenarios made DCF-consistent (bull = implied×1.35, bear = implied×0.65) to match the on-screen Summary (previously pulled analyst high/low, causing a $700 vs $146 mismatch).
 - Verified: US names unchanged (fx=1.0, AAPL/NVDA identical). TSM implied $4,125→$146.44 (bull $197.70, bear $95.19); BABA $151 (+44%), SAP $251, TM/NVO/UL/NSRGY/RY all correct USD scale. On-screen TSM + Excel export confirmed.
 - Determinism: all assumptions are derived from real FMP data (analyst revenueAvg, historical CAGR, effective tax, CAPM WACC from real beta+10Y treasury, margins from statements) — no LLM/random. The only randomness is the Monte Carlo tab (intentional, labeled statistical simulation).
+
+### 2026-06-27 — Auth dual-mode + Top Plays Performance Tracker (DONE)
+- **Auth hardened** (`server.py`): `ACCESS_CODE_HASH` now accepts EITHER plaintext OR a bcrypt hash (`_code_matches` → constant-time `secrets.compare_digest` for plaintext, `bcrypt.checkpw` for hashes). Added safe diagnostic `GET /api/auth/config-check` (no secrets; returns configured/length/sha8 fingerprint + code_is_bcrypt_hash). Diagnosed a user Railway login failure: password env was correct but `ACCESS_USERNAME` was an 8-char value (target `obaidtradez`=11, fp a32c3c6b). Root cause = env-var value mismatch / Railway not redeploying the variable change.
+- **Top Plays Tracker (`top_plays_tracker.py` + endpoints + `TopPlays.jsx` "Tracked Picks" tab)** — all 5 requested items:
+  1. Performance tracker: snapshots the ranked list into `top_plays_picks` collection; tracks entryPrice/Date, live return, hit-rate, avg winner/loser, avg hold days.
+  2. Exit-reason labels: Target Hit / Thesis Broke / Out-ranked (`_exit_reason`).
+  3. Hysteresis: a pick exits only after being absent ≥2 real days (time-based, frequency-independent).
+  4. Conviction stack (momentum + value): High/Medium/Standard from growthScore + analyst upside + P/E vs sector anchor + FCF.
+  5. Risk discipline: suggestedWeightPct & suggestedStopPct (scaled by riskScore/beta), reward/risk ratio, and portfolio sector-concentration check (flags >30%).
+  - Endpoints: `GET /api/top-plays/tracked`, `POST /api/top-plays/reconcile`. Reconcile is hooked into the 6h universe scheduler. Verified: 30 picks seeded with conviction/risk; simulated exits produce correct Target Hit (+20%) / Thesis Broke (−12%) + stats (hitRate, reasonBreakdown). Frontend tab renders all sections (dark theme).

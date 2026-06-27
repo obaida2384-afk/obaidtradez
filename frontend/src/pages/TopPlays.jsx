@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { TOP_PLAYS, COMPANY_UNIVERSE } from "@/lib/mockData";
-import { fetchShortTermGrowth, fetchCoverage } from "@/lib/companyUniverse";
+import { fetchShortTermGrowth, fetchCoverage, fetchTrackedPlays } from "@/lib/companyUniverse";
 import { useQuotes } from "@/hooks/useQuotes";
-import { TrendingUp, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { TrendingUp, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Info, Activity, Target, ShieldAlert } from "lucide-react";
 
 const fmt = (n, d = 1) => Number(n).toFixed(d);
 const fmtM = (n) => {
@@ -184,7 +184,148 @@ function PlayCard({ play, rank }) {
   );
 }
 
+const convBadge = (c) =>
+  c === "High" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+  : c === "Medium" ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
+  : "text-slate-400 bg-slate-500/10 border-slate-500/20";
+const reasonBadge = (r) =>
+  r === "Target Hit" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+  : r === "Thesis Broke" ? "text-red-400 bg-red-500/10 border-red-500/20"
+  : "text-amber-400 bg-amber-500/10 border-amber-500/20";
+const retClass = (v) => (v == null ? "text-slate-400" : v >= 0 ? "text-emerald-400" : "text-red-400");
+
+function StatCard({ label, value, sub, tone }) {
+  return (
+    <div className="glass-card p-4" data-testid={`tracker-stat-${label.toLowerCase().replace(/[^a-z]/g, "-")}`}>
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">{label}</p>
+      <p className={`text-xl font-bold font-mono ${tone || "text-white"}`}>{value}</p>
+      {sub && <p className="text-[10px] text-slate-600 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function TrackedPicks() {
+  const navigate = useNavigate();
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetchTrackedPlays()
+      .then((d) => alive && setData(d))
+      .catch(() => alive && setErr(true));
+    return () => { alive = false; };
+  }, []);
+
+  if (err) return <div className="glass-card p-6 text-sm text-slate-400">Tracker not available yet — it populates on the daily refresh.</div>;
+  if (!data) return <div className="glass-card p-6 text-sm text-slate-500 animate-pulse">Loading tracked picks…</div>;
+
+  const { active = [], exited = [], stats = {}, sectorConcentration = [] } = data;
+  const fmtRet = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v}%`);
+  const fmtPx = (v) => (v == null ? "—" : `$${Number(v).toFixed(2)}`);
+
+  return (
+    <div className="space-y-6">
+      {/* Explainer */}
+      <div className="glass-card p-4 border-blue-500/20 flex items-start gap-3">
+        <Activity className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-blue-200">How tracking works</p>
+          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+            Every refresh we snapshot the Top Plays list. New names are tracked from their entry price; when a name
+            leaves (after a 2-day buffer to avoid noise) we record why — <span className="text-emerald-400">Target Hit</span> (ran to its goal),
+            <span className="text-red-400"> Thesis Broke</span> (fundamentals/price deteriorated), or <span className="text-amber-400">Out-ranked</span> (still fine, just beaten by better setups).
+            Forward returns below tell you whether the picks actually worked.
+          </p>
+        </div>
+      </div>
+
+      {/* Performance stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <StatCard label="Closed Picks" value={stats.closedCount ?? 0} sub="exited & measured" />
+        <StatCard label="Hit Rate" value={stats.hitRate != null ? `${stats.hitRate}%` : "—"} sub="% that gained" tone={stats.hitRate >= 50 ? "text-emerald-400" : stats.hitRate != null ? "text-amber-400" : "text-white"} />
+        <StatCard label="Avg Return" value={fmtRet(stats.avgReturn)} sub="per closed pick" tone={retClass(stats.avgReturn)} />
+        <StatCard label="Avg Winner" value={fmtRet(stats.avgWinner)} sub="winning picks" tone="text-emerald-400" />
+        <StatCard label="Avg Loser" value={fmtRet(stats.avgLoser)} sub="losing picks" tone="text-red-400" />
+      </div>
+
+      {/* Sector concentration */}
+      {sectorConcentration.length > 0 && (
+        <div className="glass-card p-4" data-testid="sector-concentration">
+          <div className="flex items-center gap-2 mb-3">
+            <ShieldAlert className="w-4 h-4 text-amber-400" />
+            <p className="text-sm font-semibold text-white">Diversification check ({active.length} active)</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {sectorConcentration.map((s) => (
+              <span key={s.sector} className={`text-[11px] rounded-full border px-2.5 py-1 ${s.concentrated ? "text-amber-400 bg-amber-500/10 border-amber-500/25" : "text-slate-400 bg-white/[0.03] border-white/[0.06]"}`}>
+                {s.sector}: {s.count} ({s.pct}%){s.concentrated ? " ⚠ heavy" : ""}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-600 mt-2">A sector above 30% of your active picks is flagged — spread risk across sectors so one bad theme can't sink the book.</p>
+        </div>
+      )}
+
+      {/* Active picks */}
+      <div>
+        <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Active Picks ({active.length})</p>
+        <div className="space-y-2" data-testid="tracked-active-list">
+          {active.length === 0 && <p className="text-sm text-slate-500">No active picks yet.</p>}
+          {active.map((p) => (
+            <div key={p.ticker} className="glass-card p-4 hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => navigate(`/modeling?ticker=${p.ticker}`)}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-[10px] text-slate-600 w-6">#{p.entryRank}</span>
+                <span className="font-mono font-bold text-blue-400 w-16">{p.ticker}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${convBadge(p.conviction)}`}>{p.conviction} conviction</span>
+                <span className="text-xs text-slate-500 hidden sm:inline">{p.sector}</span>
+                <div className="ml-auto flex items-center gap-4 text-right">
+                  <div>
+                    <p className="text-[9px] text-slate-600 uppercase">Entry → Now</p>
+                    <p className="text-xs font-mono text-slate-300">{fmtPx(p.entryPrice)} → {fmtPx(p.currentPrice)}</p>
+                  </div>
+                  <div className="w-16">
+                    <p className="text-[9px] text-slate-600 uppercase">Return</p>
+                    <p className={`text-sm font-bold font-mono ${retClass(p.returnPct)}`}>{fmtRet(p.returnPct)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 pl-6 text-[10px] text-slate-500">
+                <span>Held {p.holdDays}d</span>
+                <span>·</span>
+                <span title="Suggested position size, scaled down for higher risk">Size <span className="text-slate-300">{p.suggestedWeightPct}%</span></span>
+                <span title="Suggested stop-loss, wider for higher volatility">Stop <span className="text-red-300">-{p.suggestedStopPct}%</span></span>
+                {p.rewardRiskRatio != null && <span title="Reward (to analyst target) ÷ stop-loss risk">R/R <span className={p.rewardRiskRatio >= 2 ? "text-emerald-400" : "text-slate-300"}>{p.rewardRiskRatio}:1</span></span>}
+                {p.analystTarget && <span>PT ${p.analystTarget}</span>}
+                {p.convictionReasons?.length > 0 && <span className="hidden md:inline text-slate-600">· {p.convictionReasons.join(" · ")}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Exited picks */}
+      <div>
+        <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Recently Exited ({exited.length})</p>
+        <div className="space-y-2" data-testid="tracked-exited-list">
+          {exited.length === 0 && <p className="text-sm text-slate-500">No exits yet — names appear here once they leave the list.</p>}
+          {exited.map((p) => (
+            <div key={`${p.ticker}-${p.exitDate}`} className="glass-card p-3 flex items-center gap-3 flex-wrap opacity-90">
+              <span className="font-mono font-bold text-slate-300 w-16">{p.ticker}</span>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${reasonBadge(p.exitReason)}`}>{p.exitReason}</span>
+              <span className="text-xs font-mono text-slate-500">{fmtPx(p.entryPrice)} → {fmtPx(p.exitPrice)}</span>
+              <span className="text-[10px] text-slate-600">held {p.holdDays}d</span>
+              <span className={`ml-auto text-sm font-bold font-mono ${retClass(p.exitReturnPct)}`}>{fmtRet(p.exitReturnPct)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TopPlays() {
+  const [tab, setTab] = useState("current");
   const [plays, setPlays] = useState([]);
   const [isLive, setIsLive] = useState(false);
   const [coverage, setCoverage] = useState(null);
@@ -222,7 +363,7 @@ export default function TopPlays() {
             <h1 className="text-2xl font-bold text-white">Top Plays This Month</h1>
           </div>
           <p className="text-sm text-slate-500">
-            {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })} · Updated weekly
+            {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })} · Refreshed daily
           </p>
         </div>
         <div className="text-xs text-slate-500 bg-slate-800/60 border border-white/[0.06] rounded-lg px-3 py-2 max-w-sm">
@@ -231,6 +372,28 @@ export default function TopPlays() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-white/[0.06]">
+        {[
+          { id: "current", label: "Current Picks", Icon: TrendingUp },
+          { id: "tracked", label: "Tracked Picks & Performance", Icon: Target },
+        ].map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            data-testid={`top-plays-tab-${id}`}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === id ? "border-emerald-400 text-white" : "border-transparent text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "tracked" ? <TrackedPicks /> : (
+      <>
       {/* Disclaimer */}
       <div className="glass-card p-4 border-amber-500/20 flex items-start gap-3">
         <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
@@ -282,6 +445,8 @@ export default function TopPlays() {
           ? `Live ranking via Financial Modeling Prep${coverage?.count ? ` across ${coverage.count.toLocaleString()} companies` : ""}, emphasising asymmetric upside in mid/small caps. Educational research only — not a trading system and no trades are executed.`
           : "Top Plays uses simulated data in demo mode. Connect Financial Modeling Prep, Polygon.io, and an AI API for live screening and reasoning. This platform is not a trading system and does not execute trades."}
       </p>
+      </>
+      )}
     </div>
   );
 }
