@@ -176,3 +176,7 @@ Owner's project. Identity: **ObaidTradez** (UI brand shows "ALPHA VAULT"). Do NO
 - **Top-10 toggles** (`tracker-toggle-more`) on Best Performers, Active, and Exited lists (show top 10 ↔ show all N).
 - Verified: backend returns all fields (20 best performers, peak/now/sold/status); preview env has 44 active / 0 exited so forward-summary correctly hidden. testids: best-performers, best-performers-list, exited-forward-summary, tracker-toggle-more.
 - Code-review note (non-blocking): TopPlays.jsx now ~553 lines (TrackedPicks ~280) — candidate to split into /pages/topPlays/ later.
+
+### 2026-06-28 — Dashboard "Hall of Fame" best-ever pick badge (DONE)
+- New `GET /api/top-plays/hall-of-fame` (`top_plays_tracker.hall_of_fame(live_prices)`) returns the single best tracked pick across ALL picks (no 90-day window) by Peak ROI since suggestion date; uses live prices (peak = max(stored peak, live, entry)) so it stays consistent with the Best Performers leaderboard. Returns {best:{ticker,name,sector,entryDate,entryPrice,peakPrice,peakReturnPct,status,holdDays}, trackedCount}.
+- `companyUniverse.js fetchHallOfFame`; Dashboard.jsx renders a gold badge (data-testid=hall-of-fame-badge / hall-of-fame-roi) below Trending Now: Trophy + "Hall of Fame · Best pick to date" + ticker/name + big "+X% peak ROI if bought when suggested". Click → /modeling?ticker. Hidden when no tracked picks. Verified backend live: CTRE +10.2% (matches leaderboard #1). Dashboard.jsx compiles clean; UI render pending preview wake (additive card, mirrors verified TrendingNow pattern).

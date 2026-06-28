@@ -4,12 +4,12 @@ import {
   MARKET_INDICES, SECTOR_PERFORMANCE, MACRO_INDICATORS,
   EARNINGS_CALENDAR, ANALYST_ACTIONS, NEWS_FEED, DISCOVERY_RESULTS,
 } from "@/lib/mockData";
-import { fetchNewsSuggestions, fetchMarketIndices } from "@/lib/companyUniverse";
+import { fetchNewsSuggestions, fetchMarketIndices, fetchHallOfFame } from "@/lib/companyUniverse";
 import { getRating } from "@/lib/rating";
 import { useLiveStatus } from "@/hooks/useLiveStatus";
 import {
   TrendingUp, TrendingDown, Calendar, Sparkles,
-  Telescope, Newspaper, AlertCircle, ChevronRight, Globe, Flame, ArrowUpRight,
+  Telescope, Newspaper, AlertCircle, ChevronRight, Globe, Flame, ArrowUpRight, Trophy,
 } from "lucide-react";
 
 const fmt = (n, d = 2) => Number(n).toFixed(d);
@@ -190,6 +190,13 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const status = useLiveStatus();
   const [indices, setIndices] = useState(MARKET_INDICES);
+  const [hof, setHof] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchHallOfFame().then((d) => { if (alive && d?.best) setHof(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -229,6 +236,31 @@ export default function Dashboard() {
 
       {/* Trending now — live news-driven idea */}
       <TrendingNow />
+
+      {/* Hall of Fame — best-ever tracked pick */}
+      {hof?.best && (
+        <div
+          onClick={() => navigate(`/modeling?ticker=${hof.best.ticker}`)}
+          data-testid="hall-of-fame-badge"
+          className="glass-card p-4 border border-amber-500/25 bg-gradient-to-r from-amber-500/[0.08] via-amber-500/[0.03] to-transparent cursor-pointer hover:border-amber-500/40 transition-colors flex items-center gap-4 flex-wrap"
+        >
+          <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+            <Trophy className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-amber-400/80 font-semibold">Hall of Fame · Best pick to date</p>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+              <span className="font-mono font-bold text-blue-400">{hof.best.ticker}</span>
+              <span className="text-sm text-slate-300 truncate max-w-[180px]">{hof.best.name}</span>
+              <span className="text-[10px] text-slate-600 hidden sm:inline">· {hof.best.status === "active" ? "still tracked" : "exited"} · since {new Date(hof.best.entryDate).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+            </div>
+          </div>
+          <div className="ml-auto text-right shrink-0">
+            <p className="text-2xl font-bold font-mono text-amber-400" data-testid="hall-of-fame-roi">+{hof.best.peakReturnPct}%</p>
+            <p className="text-[10px] text-slate-500">peak ROI if bought when suggested</p>
+          </div>
+        </div>
+      )}
 
       {/* Market indices */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3" data-testid="market-indices">

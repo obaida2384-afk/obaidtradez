@@ -127,6 +127,12 @@ export async function fetchTrackedPlays() {
   return res.json();
 }
 
+export async function fetchHallOfFame() {
+  const res = await fetch(`${API}/top-plays/hall-of-fame`);
+  if (!res.ok) throw new Error(`Hall of fame request failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchMacro() {
   const res = await fetch(`${API}/market/macro`);
   if (!res.ok) throw new Error(`Macro request failed: ${res.status}`);

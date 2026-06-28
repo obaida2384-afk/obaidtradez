@@ -259,6 +259,29 @@ class TopPlaysTracker:
             "avgDaysSinceExit": round(sum(days) / len(days), 1) if days else None,
         }
 
+    # ---------- all-time best pick (Hall of Fame) ----------
+    async def hall_of_fame(self, live_prices: Optional[Dict[str, float]] = None) -> Dict:
+        live_prices = live_prices or {}
+        docs = await self.col.find({}).to_list(length=5000)
+        best = None
+        total = 0
+        for p in docs:
+            entry = p.get("entryPrice")
+            if not entry:
+                continue
+            total += 1
+            cur = live_prices.get(p.get("ticker")) or p.get("lastPrice") or entry
+            peak = max(p.get("peakPrice") or 0, cur or 0, entry)
+            ret = round((peak - entry) / entry * 100, 1)
+            if best is None or ret > best["peakReturnPct"]:
+                best = {
+                    "ticker": p.get("ticker"), "name": p.get("name"), "sector": p.get("sector"),
+                    "entryDate": p.get("entryDate"), "entryPrice": entry,
+                    "peakPrice": round(peak, 2), "peakReturnPct": ret,
+                    "status": p.get("status"), "holdDays": _days_since(p.get("entryDate")),
+                }
+        return {"best": best, "trackedCount": total, "generated_at": _iso()}
+
     def _stats(self, exited: List[Dict]) -> Dict:
         rets = [p.get("exitReturnPct") for p in exited if p.get("exitReturnPct") is not None]
         if not rets:

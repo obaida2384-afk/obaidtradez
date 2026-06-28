@@ -2255,6 +2255,29 @@ async def top_plays_reconcile(auth: bool = Depends(verify_access)):
     """Manually refresh the Top Plays tracker against the current ranked list."""
     return await _reconcile_top_plays()
 
+@api_router.get("/top-plays/hall-of-fame")
+async def top_plays_hall_of_fame(auth: bool = Depends(verify_access)):
+    """The single best-ever tracked pick by Peak ROI since its suggestion date."""
+    docs = await top_plays_tracker.col.find({}, {"ticker": 1}).to_list(length=5000)
+    seen, tickers = set(), []
+    for p in docs:
+        tk = p.get("ticker")
+        if tk and tk not in seen:
+            seen.add(tk)
+            tickers.append(tk)
+    live = {}
+    if tickers:
+        try:
+            quotes = await api_client._request(
+                f"{api_client.fmp_url}/batch-quote",
+                headers={"apikey": config.FMP_API_KEY},
+                params={"symbols": ",".join(tickers[:200])},
+            )
+            live = {q.get("symbol"): q.get("price") for q in (quotes or []) if q.get("symbol")}
+        except Exception:
+            live = {}
+    return await top_plays_tracker.hall_of_fame(live_prices=live)
+
 @api_router.get("/universe/future-giants")
 async def universe_future_giants(
     limit: int = Query(default=12, ge=5, le=50),
