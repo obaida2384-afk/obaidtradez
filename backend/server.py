@@ -2255,6 +2255,17 @@ async def top_plays_reconcile(auth: bool = Depends(verify_access)):
     """Manually refresh the Top Plays tracker against the current ranked list."""
     return await _reconcile_top_plays()
 
+@api_router.post("/top-plays/backfill")
+async def top_plays_backfill(
+    lookback_days: int = Query(default=30, ge=5, le=180),
+    auth: bool = Depends(verify_access),
+):
+    """Seed active picks' entry from real market prices ~lookback_days ago so
+    returns/Peak ROI are meaningful immediately (uses real FMP historical data)."""
+    async def fetch_hist(ticker):
+        return await api_client.fmp_historical(ticker, days=lookback_days + 15)
+    return await top_plays_tracker.backfill_entries(fetch_hist, lookback_days=lookback_days)
+
 @api_router.get("/top-plays/hall-of-fame")
 async def top_plays_hall_of_fame(auth: bool = Depends(verify_access)):
     """The single best-ever tracked pick by Peak ROI since its suggestion date."""

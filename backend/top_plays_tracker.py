@@ -2,7 +2,7 @@
 exits with hysteresis, labels exit reasons, computes conviction + risk-discipline
 fields, and reports forward performance. All data-driven; no randomness."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
 SECTOR_PE_ANCHOR = {
@@ -258,6 +258,50 @@ class TopPlaysTracker:
             "avgSinceExit": round(sum(rets) / len(rets), 1),
             "avgDaysSinceExit": round(sum(days) / len(days), 1) if days else None,
         }
+
+    # ---------- backfill entries from real historical prices ----------
+    async def backfill_entries(self, fetch_history, lookback_days: int = 30) -> Dict:
+        """Set each active pick's entry to a real market price ~lookback_days ago and
+        peak to the real high over that window, so returns are meaningful immediately.
+        fetch_history(ticker) -> list of EOD bars [{date, close, high, ...}] (any order)."""
+        cutoff = _now() - timedelta(days=lookback_days)
+        actives = await self.col.find({"status": "active"}).to_list(length=2000)
+        updated, skipped = 0, 0
+        for p in actives:
+            try:
+                bars = await fetch_history(p["ticker"])
+            except Exception:
+                bars = None
+            parsed = []
+            for b in (bars or []):
+                ds = b.get("date")
+                close = b.get("close")
+                if not ds or close is None:
+                    continue
+                high = b.get("high") if b.get("high") is not None else close
+                try:
+                    d = datetime.fromisoformat(str(ds).split(" ")[0]).replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+                parsed.append((d, float(close), float(high)))
+            if not parsed:
+                skipped += 1
+                continue
+            parsed.sort(key=lambda x: x[0])
+            entry_bar = next((x for x in parsed if x[0] >= cutoff), parsed[0])
+            window = [x for x in parsed if x[0] >= entry_bar[0]]
+            entry_price = entry_bar[1]
+            last_price = window[-1][1]
+            peak_price = max(h for _, _, h in window)
+            await self.col.update_one({"_id": p["_id"]}, {"$set": {
+                "entryDate": entry_bar[0].isoformat(),
+                "entryPrice": round(entry_price, 4),
+                "lastPrice": round(last_price, 4),
+                "peakPrice": round(peak_price, 4),
+                "backfilled": True,
+            }})
+            updated += 1
+        return {"updated": updated, "skipped": skipped, "lookbackDays": lookback_days, "at": _iso()}
 
     # ---------- all-time best pick (Hall of Fame) ----------
     async def hall_of_fame(self, live_prices: Optional[Dict[str, float]] = None) -> Dict:

@@ -254,6 +254,7 @@ function TrackedPicks() {
             leaves (after a 2-day buffer to avoid noise) we record why — <span className="text-emerald-400">Target Hit</span> (ran to its goal),
             <span className="text-red-400"> Thesis Broke</span> (fundamentals/price deteriorated), or <span className="text-amber-400">Out-ranked</span> (still fine, just beaten by better setups).
             Forward returns below tell you whether the picks actually worked.
+            <span className="block mt-1 text-slate-500">To show performance right away, current picks' entry was set from real market prices ~30 days ago; names that enter from here on are tracked live from day one.</span>
           </p>
         </div>
       </div>
