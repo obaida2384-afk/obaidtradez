@@ -124,6 +124,8 @@ export default function Discovery() {
   const [opportunities, setOpportunities] = useState([]);
   const [isLive, setIsLive] = useState(false);
   const [coverage, setCoverage] = useState(null);
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState(null);
 
   const load = useCallback(async () => {
     setScanning(true);
@@ -152,9 +154,24 @@ export default function Discovery() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 1) { setSearchResults(null); return; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetchCompanies({ search: term, limit: 60, sortBy: "opportunityScore", order: -1 });
+        if (alive) setSearchResults(res.companies || []);
+      } catch { if (alive) setSearchResults([]); }
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [query]);
+
   const SECTORS = ["All", ...Array.from(new Set(opportunities.map((c) => c.sector).filter(Boolean)))];
 
-  const filtered = opportunities.filter((d) => {
+  const baseList = query.trim() && searchResults != null ? searchResults : opportunities;
+
+  const filtered = baseList.filter((d) => {
     const matchSector = sector === "All" || d.sector === sector;
     const matchShariah = shariah === "All" || d.shariah === shariah;
     const matchScore = (d.opportunityScore || 0) >= minScore;
@@ -229,6 +246,16 @@ export default function Discovery() {
           <Filter className="w-4 h-4 text-slate-500" />
           <span className="text-xs text-slate-500">Filter:</span>
         </div>
+        <div className="flex items-center gap-2 glass-card px-3 py-2 flex-1 min-w-[200px] max-w-sm">
+          <Sparkles className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search all companies — ticker or name…"
+            data-testid="discovery-search-input"
+            className="bg-transparent text-sm text-slate-300 placeholder:text-slate-600 outline-none flex-1"
+          />
+        </div>
         <select value={sector} onChange={(e) => setSector(e.target.value)} data-testid="discovery-sector-filter" className="glass-card px-3 py-2 text-sm text-slate-300 outline-none">
           {SECTORS.map((s) => <option key={s} value={s} className="bg-slate-900">{s}</option>)}
         </select>
@@ -262,7 +289,7 @@ export default function Discovery() {
         <div className="text-center py-20 text-slate-600">
           <Sparkles className="w-8 h-8 mx-auto mb-3 opacity-40" />
           <p>No opportunities match your filters</p>
-          <button onClick={() => { setSector("All"); setShariah("All"); setMinScore(0); }} className="text-sm text-emerald-400 mt-2 hover:text-emerald-300">
+          <button onClick={() => { setSector("All"); setShariah("All"); setMinScore(0); setQuery(""); }} className="text-sm text-emerald-400 mt-2 hover:text-emerald-300">
             Clear filters
           </button>
         </div>

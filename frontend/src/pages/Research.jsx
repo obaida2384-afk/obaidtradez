@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useQuotes } from "@/hooks/useQuotes";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { COMPANY_UNIVERSE } from "@/lib/mockData";
-import { fetchDcf, fetchCompany, normalizeCompany } from "@/lib/companyUniverse";
+import { fetchDcf, fetchCompany, fetchCompanies, normalizeCompany } from "@/lib/companyUniverse";
 import { buildResearchCompany } from "@/lib/researchModel";
 import { toast } from "sonner";
 import {
@@ -31,8 +31,10 @@ const RATINGS = {
 };
 
 function getImpliedRating(company) {
-  if (!company?.impliedPrice || !company?.price) return "Fairly Valued";
-  const ratio = company.impliedPrice / company.price;
+  let ratio = null;
+  if (company?.impliedPrice && company?.price) ratio = company.impliedPrice / company.price;
+  else if (company?.dcfUpside != null) ratio = 1 + company.dcfUpside / 100;
+  if (ratio == null) return "Fairly Valued";
   if (ratio > 1.2) return "Strongly Attractive";
   if (ratio > 1.05) return "Attractive";
   if (ratio >= 0.95) return "Fairly Valued";
@@ -42,12 +44,25 @@ function getImpliedRating(company) {
 
 function CompanySearch({ onSelect }) {
   const [q, setQ] = useState("");
-  const results = q.length > 0
-    ? COMPANY_UNIVERSE.filter((c) =>
-        c.ticker.includes(q.toUpperCase()) ||
-        c.name.toLowerCase().includes(q.toLowerCase())
-      ).slice(0, 6)
-    : [];
+  const [results, setResults] = useState([]);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 1) { setResults([]); return; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const { companies } = await fetchCompanies({ search: term, limit: 8, page: 1 });
+        if (alive) setResults(companies || []);
+      } catch { if (alive) setResults([]); }
+    }, 220);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q]);
+
+  const submitDirect = () => {
+    const t = q.trim().toUpperCase();
+    if (t) { onSelect(t); setQ(""); setResults([]); }
+  };
 
   return (
     <div className="relative max-w-2xl mx-auto">
@@ -56,26 +71,38 @@ function CompanySearch({ onSelect }) {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submitDirect(); }}
           placeholder="Search any company — e.g. AAPL, Microsoft, NVDA..."
           className="bg-transparent text-white text-lg placeholder:text-slate-600 outline-none flex-1"
+          data-testid="research-search-input"
           autoFocus
         />
       </div>
       {results.length > 0 && (
-        <div className="absolute top-full mt-2 w-full glass-card border border-white/[0.08] rounded-xl overflow-hidden z-20 shadow-2xl shadow-black/50">
+        <div className="absolute top-full mt-2 w-full glass-card border border-white/[0.08] rounded-xl overflow-hidden z-20 shadow-2xl shadow-black/50" data-testid="research-search-results">
           {results.map((c) => (
             <button
               key={c.ticker}
-              onClick={() => { onSelect(c); setQ(""); }}
+              onClick={() => { onSelect(c); setQ(""); setResults([]); }}
               className="w-full flex items-center gap-4 px-5 py-3 hover:bg-white/[0.05] transition-colors text-left"
+              data-testid={`research-search-result-${c.ticker}`}
             >
               <span className="font-mono font-bold text-blue-400 w-14 shrink-0">{c.ticker}</span>
-              <span className="text-slate-200 flex-1">{c.name}</span>
+              <span className="text-slate-200 flex-1 truncate">{c.name}</span>
               <span className="text-xs text-slate-500">{c.sector}</span>
               <span className="text-xs text-slate-500 font-mono">{fmtM(c.marketCap)}</span>
             </button>
           ))}
         </div>
+      )}
+      {q.trim().length >= 1 && results.length === 0 && (
+        <button
+          onClick={submitDirect}
+          className="absolute top-full mt-2 w-full glass-card border border-white/[0.08] rounded-xl px-5 py-3 text-left text-sm text-slate-300 hover:bg-white/[0.05] transition-colors z-20"
+          data-testid="research-search-direct"
+        >
+          Load <span className="font-mono font-bold text-blue-400">{q.trim().toUpperCase()}</span> directly →
+        </button>
       )}
     </div>
   );
@@ -152,7 +179,14 @@ export default function Research() {
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("overview");
 
-  const featured = COMPANY_UNIVERSE.slice(0, 8);
+  const [featured, setFeatured] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetchCompanies({ limit: 8, page: 1, sortBy: "opportunityScore", order: -1 })
+      .then(({ companies }) => { if (alive) setFeatured(companies || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const { prices: quotes, asOf: quotesAsOf } = useQuotes([...featured.map((x) => x.ticker), ...(company ? [company.ticker] : [])]);
 
   const loadCompany = useCallback(async (tickerOrObj) => {
