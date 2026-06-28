@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { TOP_PLAYS, COMPANY_UNIVERSE } from "@/lib/mockData";
 import { fetchShortTermGrowth, fetchCoverage, fetchTrackedPlays } from "@/lib/companyUniverse";
 import { useQuotes } from "@/hooks/useQuotes";
-import { TrendingUp, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Info, Activity, Target, ShieldAlert } from "lucide-react";
+import { TrendingUp, AlertTriangle, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronUp, Info, Activity, Target, ShieldAlert, Trophy } from "lucide-react";
 
 const fmt = (n, d = 1) => Number(n).toFixed(d);
 const fmtM = (n) => {
@@ -193,6 +193,11 @@ const reasonBadge = (r) =>
   : r === "Thesis Broke" ? "text-red-400 bg-red-500/10 border-red-500/20"
   : "text-amber-400 bg-amber-500/10 border-amber-500/20";
 const retClass = (v) => (v == null ? "text-slate-400" : v >= 0 ? "text-emerald-400" : "text-red-400");
+const exitMeaning = (r) =>
+  r === "Target Hit" ? "Ran to its goal — the short-term thesis worked. Booking profit was the right call."
+  : r === "Thesis Broke" ? "Price/fundamentals deteriorated — the setup failed. This is the one to respect your stop on."
+  : "Still a fine company — just beaten out by fresher setups. Leaving the list is NOT a sell signal.";
+const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return "—"; } };
 
 function StatCard({ label, value, sub, tone }) {
   return (
@@ -208,6 +213,9 @@ function TrackedPicks() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
+  const [showAllActive, setShowAllActive] = useState(false);
+  const [showAllExited, setShowAllExited] = useState(false);
+  const [showAllBest, setShowAllBest] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -220,9 +228,19 @@ function TrackedPicks() {
   if (err) return <div className="glass-card p-6 text-sm text-slate-400">Tracker not available yet — it populates on the daily refresh.</div>;
   if (!data) return <div className="glass-card p-6 text-sm text-slate-500 animate-pulse">Loading tracked picks…</div>;
 
-  const { active = [], exited = [], stats = {}, sectorConcentration = [] } = data;
+  const { active = [], exited = [], stats = {}, sectorConcentration = [], bestPerformers = [], exitedForwardSummary = {} } = data;
   const fmtRet = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v}%`);
   const fmtPx = (v) => (v == null ? "—" : `$${Number(v).toFixed(2)}`);
+  const TOP_N = 10;
+  const shownActive = showAllActive ? active : active.slice(0, TOP_N);
+  const shownExited = showAllExited ? exited : exited.slice(0, TOP_N);
+  const shownBest = showAllBest ? bestPerformers : bestPerformers.slice(0, TOP_N);
+
+  const Toggle = ({ open, setOpen, total }) => total > TOP_N ? (
+    <button onClick={() => setOpen(!open)} className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1" data-testid="tracker-toggle-more">
+      {open ? <>Show top {TOP_N} <ChevronUp className="w-3 h-3" /></> : <>Show all {total} <ChevronDown className="w-3 h-3" /></>}
+    </button>
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -249,6 +267,68 @@ function TrackedPicks() {
         <StatCard label="Avg Loser" value={fmtRet(stats.avgLoser)} sub="losing picks" tone="text-red-400" />
       </div>
 
+      {/* Best performers — ROI since suggestion */}
+      <div className="glass-card p-5 border-emerald-500/20" data-testid="best-performers">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+          <div className="flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <p className="text-sm font-semibold text-white">Best Performers — what you'd have made</p>
+          </div>
+          <Toggle open={showAllBest} setOpen={setShowAllBest} total={bestPerformers.length} />
+        </div>
+        <p className="text-[11px] text-slate-500 mb-4 leading-relaxed">
+          ROI assumes you bought on the date it was first suggested (Entry).
+          <span className="text-amber-300"> Peak</span> = best case if you sold at the high ·
+          <span className="text-emerald-300"> Now</span> = if you still hold today ·
+          <span className="text-slate-300"> Sold</span> = if you exited when it left the list.
+        </p>
+        {shownBest.length === 0 && <p className="text-sm text-slate-500">No tracked picks yet — this fills in as the screen runs.</p>}
+        <div className="space-y-1.5" data-testid="best-performers-list">
+          {shownBest.map((p, i) => (
+            <div key={`${p.ticker}-${p.entryDate}`} className="flex items-center gap-3 flex-wrap py-2 border-b border-white/[0.04] last:border-0 cursor-pointer hover:bg-white/[0.02] rounded px-1" onClick={() => navigate(`/modeling?ticker=${p.ticker}`)}>
+              <span className={`text-xs font-bold w-6 text-center ${i < 3 ? "text-amber-400" : "text-slate-600"}`}>{i + 1}</span>
+              <span className="font-mono font-bold text-blue-400 w-16">{p.ticker}</span>
+              <span className="text-xs text-slate-400 hidden md:inline truncate max-w-[160px]">{p.name}</span>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded border ${p.status === "active" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-slate-400 bg-slate-500/10 border-slate-500/20"}`}>{p.status === "active" ? "Holding" : "Exited"}</span>
+              <span className="text-[10px] text-slate-600 hidden sm:inline">since {fmtDate(p.entryDate)} · {fmtPx(p.entryPrice)}</span>
+              <div className="ml-auto flex items-center gap-4 text-right">
+                <div className="w-16">
+                  <p className="text-[9px] text-slate-600 uppercase">Peak</p>
+                  <p className="text-sm font-bold font-mono text-amber-400">{fmtRet(p.peakReturnPct)}</p>
+                </div>
+                <div className="w-14">
+                  <p className="text-[9px] text-slate-600 uppercase">Now</p>
+                  <p className={`text-xs font-mono ${retClass(p.nowReturnPct)}`}>{fmtRet(p.nowReturnPct)}</p>
+                </div>
+                <div className="w-14 hidden sm:block">
+                  <p className="text-[9px] text-slate-600 uppercase">Sold</p>
+                  <p className={`text-xs font-mono ${p.realizedReturnPct == null ? "text-slate-600" : retClass(p.realizedReturnPct)}`}>{p.realizedReturnPct == null ? "held" : fmtRet(p.realizedReturnPct)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Forward performance of names that left the list */}
+      {exitedForwardSummary.count > 0 && (
+        <div className="glass-card p-4 border-blue-500/20 flex items-start gap-3" data-testid="exited-forward-summary">
+          <TrendingUp className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-blue-200">Do dropped names keep performing?</p>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Of the <span className="text-white">{exitedForwardSummary.count}</span> names that left the list,
+              <span className={exitedForwardSummary.pctStillUp >= 50 ? "text-emerald-400" : "text-amber-400"}> {exitedForwardSummary.pctStillUp}% are still higher</span> than where they exited —
+              averaging <span className={retClass(exitedForwardSummary.avgSinceExit)}>{fmtRet(exitedForwardSummary.avgSinceExit)}</span> since exit
+              {exitedForwardSummary.avgDaysSinceExit != null ? ` (≈${exitedForwardSummary.avgDaysSinceExit} days later)` : ""}.
+              {exitedForwardSummary.avgSinceExit >= 0
+                ? " Exits have generally been a touch early — names kept running."
+                : " Exits have generally been well-timed — names faded after leaving."}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Sector concentration */}
       {sectorConcentration.length > 0 && (
         <div className="glass-card p-4" data-testid="sector-concentration">
@@ -269,10 +349,13 @@ function TrackedPicks() {
 
       {/* Active picks */}
       <div>
-        <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Active Picks ({active.length})</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Active Picks ({active.length})</p>
+          <Toggle open={showAllActive} setOpen={setShowAllActive} total={active.length} />
+        </div>
         <div className="space-y-2" data-testid="tracked-active-list">
           {active.length === 0 && <p className="text-sm text-slate-500">No active picks yet.</p>}
-          {active.map((p) => (
+          {shownActive.map((p) => (
             <div key={p.ticker} className="glass-card p-4 hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => navigate(`/modeling?ticker=${p.ticker}`)}>
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-[10px] text-slate-600 w-6">#{p.entryRank}</span>
@@ -306,16 +389,33 @@ function TrackedPicks() {
 
       {/* Exited picks */}
       <div>
-        <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">Recently Exited ({exited.length})</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Recently Exited ({exited.length})</p>
+          <Toggle open={showAllExited} setOpen={setShowAllExited} total={exited.length} />
+        </div>
         <div className="space-y-2" data-testid="tracked-exited-list">
           {exited.length === 0 && <p className="text-sm text-slate-500">No exits yet — names appear here once they leave the list.</p>}
-          {exited.map((p) => (
-            <div key={`${p.ticker}-${p.exitDate}`} className="glass-card p-3 flex items-center gap-3 flex-wrap opacity-90">
-              <span className="font-mono font-bold text-slate-300 w-16">{p.ticker}</span>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${reasonBadge(p.exitReason)}`}>{p.exitReason}</span>
-              <span className="text-xs font-mono text-slate-500">{fmtPx(p.entryPrice)} → {fmtPx(p.exitPrice)}</span>
-              <span className="text-[10px] text-slate-600">held {p.holdDays}d</span>
-              <span className={`ml-auto text-sm font-bold font-mono ${retClass(p.exitReturnPct)}`}>{fmtRet(p.exitReturnPct)}</span>
+          {shownExited.map((p) => (
+            <div key={`${p.ticker}-${p.exitDate}`} className="glass-card p-3 opacity-95">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="font-mono font-bold text-slate-300 w-16">{p.ticker}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${reasonBadge(p.exitReason)}`}>{p.exitReason}</span>
+                <span className="text-xs font-mono text-slate-500">{fmtPx(p.entryPrice)} → {fmtPx(p.exitPrice)}</span>
+                <span className="text-[10px] text-slate-600">held {p.holdDays}d</span>
+                <div className="ml-auto flex items-center gap-4 text-right">
+                  <div>
+                    <p className="text-[9px] text-slate-600 uppercase">At exit</p>
+                    <p className={`text-sm font-bold font-mono ${retClass(p.exitReturnPct)}`}>{fmtRet(p.exitReturnPct)}</p>
+                  </div>
+                  {p.sinceExitPct != null && (
+                    <div className="w-20" title="Price move since it left the list — shows if it kept running or faded">
+                      <p className="text-[9px] text-slate-600 uppercase">Since exit</p>
+                      <p className={`text-xs font-mono ${retClass(p.sinceExitPct)}`}>{fmtRet(p.sinceExitPct)}{p.daysSinceExit != null ? <span className="text-slate-600"> · {p.daysSinceExit}d</span> : null}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1.5 pl-0">{exitMeaning(p.exitReason)}</p>
             </div>
           ))}
         </div>

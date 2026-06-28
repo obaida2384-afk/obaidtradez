@@ -2230,7 +2230,13 @@ async def top_plays_tracked(auth: bool = Depends(verify_access)):
     """Tracked Top Plays picks: active holdings (with conviction + risk plan + live
     return), recently exited picks (with exit reason), and forward-performance stats."""
     active = await top_plays_tracker.col.find({"status": "active"}).to_list(length=2000)
-    tickers = [p["ticker"] for p in active]
+    exited = await top_plays_tracker.col.find({"status": "exited"}).sort("exitDate", -1).to_list(length=300)
+    seen, tickers = set(), []
+    for p in [*active, *exited]:
+        tk = p.get("ticker")
+        if tk and tk not in seen:
+            seen.add(tk)
+            tickers.append(tk)
     live = {}
     if tickers:
         try:

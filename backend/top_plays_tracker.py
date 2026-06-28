@@ -181,11 +181,15 @@ class TopPlaysTracker:
             entry = p.get("entryPrice")
             cur = live_prices.get(p["ticker"]) or p.get("lastPrice") or entry
             ret = round((cur - entry) / entry * 100, 1) if (cur and entry) else None
+            # Peak return = best gain achievable from the suggestion date (best-case exit timing).
+            peak_seen = max(p.get("peakPrice") or 0, cur or 0, entry or 0)
+            peak_ret = round((peak_seen - entry) / entry * 100, 1) if (peak_seen and entry) else None
             doc = {
                 "ticker": p["ticker"], "name": p.get("name"), "sector": p.get("sector"),
                 "entryDate": p.get("entryDate"), "entryPrice": entry,
                 "entryScore": p.get("entryScore"), "entryRank": p.get("entryRank"),
-                "currentPrice": cur, "returnPct": ret,
+                "currentPrice": cur, "returnPct": ret, "nowReturnPct": ret,
+                "peakPrice": round(peak_seen, 2) if peak_seen else None, "peakReturnPct": peak_ret,
                 "holdDays": _days_since(p.get("entryDate")),
                 "lastScore": p.get("lastScore"), "lastRank": p.get("lastRank"),
                 "analystTarget": p.get("analystTarget"),
@@ -197,9 +201,12 @@ class TopPlaysTracker:
                 "riskScore": p.get("riskScore"), "beta": p.get("beta"),
             }
             if not is_active:
+                exit_price = p.get("exitPrice")
+                since_exit = round((cur - exit_price) / exit_price * 100, 1) if (cur and exit_price) else None
                 doc.update({
-                    "exitDate": p.get("exitDate"), "exitPrice": p.get("exitPrice"),
+                    "exitDate": p.get("exitDate"), "exitPrice": exit_price,
                     "exitReturnPct": p.get("exitReturnPct"), "exitReason": p.get("exitReason"),
+                    "sinceExitPct": since_exit, "daysSinceExit": _days_since(p.get("exitDate")),
                 })
             return doc
 
@@ -210,8 +217,46 @@ class TopPlaysTracker:
             "active": active_list,
             "exited": recent_exited,
             "stats": self._stats(exited),
+            "bestPerformers": self._best_performers(active_list, recent_exited),
+            "exitedForwardSummary": self._exited_forward_summary(recent_exited),
             "sectorConcentration": self._sector_concentration(active_list),
             "generated_at": _iso(),
+        }
+
+    # ---------- best performers leaderboard (ROI since suggestion) ----------
+    def _best_performers(self, active: List[Dict], exited: List[Dict], limit: int = 20) -> List[Dict]:
+        rows = []
+        for p in active:
+            rows.append({
+                "ticker": p["ticker"], "name": p.get("name"), "sector": p.get("sector"),
+                "status": "active", "entryDate": p.get("entryDate"), "entryPrice": p.get("entryPrice"),
+                "peakReturnPct": p.get("peakReturnPct"), "nowReturnPct": p.get("nowReturnPct"),
+                "realizedReturnPct": None, "holdDays": p.get("holdDays"),
+            })
+        for p in exited:
+            rows.append({
+                "ticker": p["ticker"], "name": p.get("name"), "sector": p.get("sector"),
+                "status": "exited", "entryDate": p.get("entryDate"), "entryPrice": p.get("entryPrice"),
+                "peakReturnPct": p.get("peakReturnPct"), "nowReturnPct": p.get("nowReturnPct"),
+                "realizedReturnPct": p.get("exitReturnPct"), "holdDays": p.get("holdDays"),
+            })
+        rows = [r for r in rows if r.get("peakReturnPct") is not None]
+        rows.sort(key=lambda r: r["peakReturnPct"], reverse=True)
+        return rows[:limit]
+
+    # ---------- forward performance of names that left the list ----------
+    def _exited_forward_summary(self, exited: List[Dict]) -> Dict:
+        vals = [(p.get("sinceExitPct"), p.get("daysSinceExit")) for p in exited if p.get("sinceExitPct") is not None]
+        if not vals:
+            return {"count": 0}
+        rets = [v for v, _ in vals]
+        days = [d for _, d in vals if d is not None]
+        up = [r for r in rets if r > 0]
+        return {
+            "count": len(rets),
+            "pctStillUp": round(len(up) / len(rets) * 100, 1),
+            "avgSinceExit": round(sum(rets) / len(rets), 1),
+            "avgDaysSinceExit": round(sum(days) / len(days), 1) if days else None,
         }
 
     def _stats(self, exited: List[Dict]) -> Dict:

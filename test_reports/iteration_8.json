@@ -1,0 +1,38 @@
+{
+  "summary": "Frontend-only verification of Top Plays → 'Tracked Picks & Performance' tab (Best Performers leaderboard, Top-10 toggles, exited cards, forward-summary). All acceptance criteria pass. No console errors. Backend skipped per instructions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_behaviors": [
+    "Login at /auth/login (obaidtradez / Odm200429) → routes to dashboard at '/'",
+    "Top Plays page loads; clicking [data-testid=top-plays-tab-tracked] switches to Tracked tab and loads tracker data within ~2.5s",
+    "Best Performers section [data-testid=best-performers] renders with Trophy icon + heading 'Best Performers — what you\\'d have made' and explainer mentioning Peak / Now / Sold semantics",
+    "best-performers-list shows 10 rows initially with rank (1..10), ticker (CTRE, ASBA, MAKO, ZVRA, PFSI, HKD, MFAO, MFAN, MAMA, WRD), 'Holding' badge, and Peak / Now / Sold ROI columns (e.g. CTRE Peak +10.2% Now +10.2% Sold held)",
+    "Best Performers toggle [data-testid=tracker-toggle-more] (first instance) flips 'Show all 20' ↔ 'Show top 10'; list expands 10 → 20 rows and collapses back to 10",
+    "All 5 performance stat cards present: CLOSED PICKS, HIT RATE, AVG RETURN, AVG WINNER, AVG LOSER (rendered uppercase via CSS)",
+    "Active Picks section header reads 'ACTIVE PICKS (44)'; [data-testid=tracked-active-list] shows 10 rows; toggle text 'Show all 44'; on click, list expands to 44 rows and toggle text becomes 'Show top 10'; clicking again collapses back to 10",
+    "Recently Exited section [data-testid=tracked-exited-list] correctly shows 'No exits yet — names appear here once they leave the list.' (expected — env has zero exits)",
+    "exited-forward-summary card is correctly ABSENT (expected when exitedForwardSummary.count is 0)",
+    "0 console errors and 0 page errors throughout login → tab switch → both toggles expand/collapse"
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TopPlays.jsx is 553 lines and includes multiple sub-components (TrackedPicks ~280 lines, current-picks list, Toggle); consider splitting TrackedPicks into its own file under /pages/topPlays/ for maintainability.",
+    "The Toggle component is defined inline inside TrackedPicks (re-created on every render). Functionally fine here, but if it grows or starts holding local state it should be lifted out of the parent function body."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100%"},
+  "test_credentials": "obaidtradez / Odm200429 (login works as expected)",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "On this preview env, tracker has 44 active picks and 0 exited picks. Best Performers backend returns 20 rows (peakReturnPct/nowReturnPct/realizedReturnPct/status). Toggles render only when total > 10; first toggle in DOM belongs to Best Performers, second belongs to Active Picks. Use .nth(0)/.nth(1) on [data-testid=tracker-toggle-more] to target them individually rather than DOM-walking heuristics. To assert stat card labels via text, account for CSS uppercase (labels render 'CLOSED PICKS', 'HIT RATE', etc.). The 'No exits yet…' message and absent exited-forward-summary card are expected when exit count is 0 — do NOT flag as bugs.",
+  "rca of the issue": "No live issues found. (Intermediate test reported active-rows not expanding; root cause was a stale Element handle / a DOM-walking heuristic that mis-identified the active toggle. After targeting each toggle precisely by index and re-querying children counts via page.evaluate, both toggles behaved correctly.)"
+}
