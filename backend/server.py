@@ -951,6 +951,8 @@ from top_plays_tracker import TopPlaysTracker
 top_plays_tracker = TopPlaysTracker(db)
 dcf_engine = DCFEngine(api_client, db, lambda: config.FMP_API_KEY)
 news_service = NewsService(api_client, db, lambda: config.STOCKNEWS_API_KEY)
+from day_trades_engine import DayTradesEngine
+day_trades_engine = DayTradesEngine(db, api_client, lambda: config.FMP_API_KEY, news_service)
 
 # ===================== TRADING SIGNAL ENGINE (Quality-Focused) =====================
 
@@ -2296,6 +2298,20 @@ async def universe_future_giants(
 ):
     """Long-term 'future giants' ranking — smaller secular-growth names with runway to compound."""
     return await company_universe_service.rank_future_giants(limit=limit)
+
+@api_router.get("/day-trades/today")
+async def day_trades_today(refresh: bool = Query(default=False), auth: bool = Depends(verify_access)):
+    """Today's intraday trade candidates with technicals, catalysts, analyst flow and a full trade plan."""
+    if not config.FMP_API_KEY:
+        raise HTTPException(status_code=503, detail="No FMP_API_KEY configured")
+    return await day_trades_engine.generate(force=refresh)
+
+@api_router.get("/day-trades/scoreboard")
+async def day_trades_scoreboard(auth: bool = Depends(verify_access)):
+    """Historical outcomes of day-trade picks: target hits, stops, win rate."""
+    if not config.FMP_API_KEY:
+        raise HTTPException(status_code=503, detail="No FMP_API_KEY configured")
+    return await day_trades_engine.scoreboard()
 
 @api_router.get("/modeling/dcf/{ticker}")
 async def modeling_dcf(ticker: str, auth: bool = Depends(verify_access)):

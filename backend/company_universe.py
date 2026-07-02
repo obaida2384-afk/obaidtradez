@@ -153,7 +153,7 @@ class CompanyUniverseService:
             self.api.fmp_quote(symbol),
             self.api.fmp_ratios(symbol),
             self.api.fmp_metrics(symbol),
-            self._fmp("financial-growth", {"symbol": symbol, "limit": 2}),
+            self._fmp("income-statement", {"symbol": symbol, "period": "quarter", "limit": 6}),
             self._fmp("analyst-estimates", {"symbol": symbol, "period": "annual", "limit": 2}),
             self._fmp("price-target-consensus", {"symbol": symbol}),
             self._fmp("grades-consensus", {"symbol": symbol}),
@@ -168,8 +168,7 @@ class CompanyUniverseService:
         profile, quote, ratios, metrics = ok(profile), ok(quote), ok(ratios), ok(metrics)
         growth, estimates, ptc, grades, peers, insider = ok(growth), ok(estimates), ok(ptc), ok(grades), ok(peers), ok(insider)
 
-        g0 = growth[0] if isinstance(growth, list) and growth else {}
-        g1 = growth[1] if isinstance(growth, list) and len(growth) > 1 else {}
+        quarters = growth if isinstance(growth, list) else []
         ptc0 = ptc[0] if isinstance(ptc, list) and ptc else (ptc if isinstance(ptc, dict) else {})
         grades0 = grades[0] if isinstance(grades, list) and grades else (grades if isinstance(grades, dict) else {})
 
@@ -186,17 +185,25 @@ class CompanyUniverseService:
         sources["price"] = "FMP quote" if quote else (ESTIMATED if price is None else "FMP profile")
         sources["marketCap"] = "FMP profile" if profile else "FMP screener"
 
-        # Growth
-        rev_growth = _f(g0.get("revenueGrowth"))
-        rev_growth_prior = _f(g1.get("revenueGrowth"))
-        rev_growth = _round(rev_growth * 100) if rev_growth is not None else None
-        rev_growth_prior = _round(rev_growth_prior * 100) if rev_growth_prior is not None else None
+        # Growth: latest-quarter YoY (reflects reality within ~3 months, not ~12)
+        def _yoy(cur, prior, *fields):
+            for f in fields:
+                a, b = _f((cur or {}).get(f)), _f((prior or {}).get(f))
+                if a is not None and b is not None and b != 0:
+                    return (a - b) / abs(b) * 100
+            return None
+
+        rev_growth = rev_growth_prior = eps_growth = None
+        if len(quarters) >= 5:
+            rev_growth = _round(_yoy(quarters[0], quarters[4], "revenue"))
+            eps_growth = _round(_yoy(quarters[0], quarters[4], "epsDiluted", "epsdiluted", "eps"))
+        if len(quarters) >= 6:
+            rev_growth_prior = _round(_yoy(quarters[1], quarters[5], "revenue"))
         rev_accel = _round(rev_growth - rev_growth_prior) if (rev_growth is not None and rev_growth_prior is not None) else None
-        eps_growth = _f(g0.get("epsgrowth") if g0.get("epsgrowth") is not None else g0.get("epsGrowth"))
-        eps_growth = _round(eps_growth * 100) if eps_growth is not None else None
-        if growth:
-            sources["revenueGrowth"] = sources["epsGrowth"] = "FMP financial-growth"
-            sources["revenueAcceleration"] = "Computed (YoY growth delta)" if rev_accel is not None else ESTIMATED
+        if rev_growth is not None:
+            sources["revenueGrowth"] = "FMP income-statement (latest quarter YoY)"
+            sources["epsGrowth"] = "FMP income-statement (latest quarter YoY)" if eps_growth is not None else ESTIMATED
+            sources["revenueAcceleration"] = "Computed (change in quarterly YoY growth)" if rev_accel is not None else ESTIMATED
 
         # Margins (FMP returns these ratios as decimals; convert to %)
         ebitda_margin = _f((ratios or {}).get("ebitdaMarginTTM")) if ratios else None
@@ -544,9 +551,15 @@ class CompanyUniverseService:
         rating = c.get("analystRating")
         if rating:
             score += (70 if "Buy" in str(rating) else 50 if "Hold" in str(rating) else 35) * 0.10; weight += 0.10
+        ins = c.get("insiderActivity")
+        if ins:
+            score += (85 if ins == "Net buying" else 40 if ins == "Net selling" else 55) * 0.10; weight += 0.10
         if weight < 0.4:
             return None
         base = score / weight
+        # Thin-coverage haircut: unverified stories with no analyst rating or target.
+        if not rating and c.get("analystPriceTarget") is None:
+            base *= 0.75
         return round(min(100, base * self._size_tilt(c.get("marketCap"))), 1)
 
     def _growth_view(self, c: Dict) -> Dict:

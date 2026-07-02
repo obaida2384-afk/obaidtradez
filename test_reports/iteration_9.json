@@ -1,0 +1,52 @@
+{
+  "summary": "Full-stack verification of the new 'Day Trades' feature (backend + frontend) + regression on short-term-growth, top-plays/tracked, and coverage. All acceptance criteria pass. No blocking issues found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verified_behaviors": {
+    "backend": [
+      "GET /api/day-trades/today → 200. Response shape: {date, session:{phase,note,etTime}, candidates[8], scanned, generatedAt, cached}. session.phase='Closed' (expected, late-night ET).",
+      "Each candidate has all required fields: ticker, name, price, changePct, sourceList, technicals{vwap,rsi14,ema9,relVolume,openingRangeHigh}, analyst{consensus,priceTarget,recentActions}, catalyst{headline,sentiment}, score, signals[], risks[], plan{entryZoneLow,entryRef,target1,target2,stop,stopPct,rewardRisk,steps[6]}.",
+      "Plan math correct: target1≈entry*1.02 (e.g. CANF 4.63→4.72 = 1.0194), target2≈entry*1.03 (CANF 4.63→4.77 = 1.0302), stopPct within -0.75 to -1.5 (%). Every candidate has rewardRisk>=1 and exactly 6 numbered steps.",
+      "First uncached call returned cached=false in ~seconds (result already partially warm), subsequent call cached=true, ?refresh=true returned cached=false (regenerates as spec).",
+      "GET /api/day-trades/scoreboard → 200 with {evaluated:0, targetHits:0, stops:0, flat:0, winRatePct:null, avgRealizedPct:null, history:[]}. Empty history is expected (picks only evaluated after their date).",
+      "REGRESSION GET /api/universe/short-term-growth?limit=10 → 200. Top-10 growthScore ranked; 7/10 have insiderActivity='Net buying' (ZVRA, DEC, WRD, BCRX, TIGR, QUBT, SBET) — matches upgraded weighting.",
+      "REGRESSION GET /api/top-plays/tracked → 200 with active(42), exited(22), bestPerformers(20), stats(closedCount/hitRate/avgReturn/avgWinner/avgLoser/avgHoldDays/reasonBreakdown), exitedForwardSummary, sectorConcentration.",
+      "REGRESSION GET /api/universe/coverage → 200 count=3095 (~3095 as spec)."
+    ],
+    "frontend": [
+      "Login gate (obaidtradez/Odm200429) → dashboard route '/' loads without errors.",
+      "Sidebar has 'Day Trades' nav entry under AI INTELLIGENCE (between Top Plays and Future Giants). Clicking routes to /day-trades.",
+      "[data-testid=day-trades-page] mounts; [data-testid=session-banner] shows 'Closed · 23:42 ET · Market closed. Review today's trades and prepare tomorrow's plan.'",
+      "[data-testid=morning-routine-toggle] present and clickable (5-step routine renders).",
+      "Exactly 8 [data-testid=day-trade-card-{TICKER}] cards render: CANF, SOC, ICU, SKIL, RAAQ, RNAZ, DSC, GVH. Each shows ticker, change %, source badge ('Top Gainer'), setup score ring (75/etc), catalyst headline + sentiment badge ([data-testid=catalyst-{T}]), 4-cell technicals grid (VWAP / RSI(5M) / OR HIGH / 9-EMA), 4-cell plan grid ([data-testid=trade-plan-{T}]) with Entry Zone / Target 1 (+2%) / Target 2 (+3%) / Stop, plus R/R + analyst consensus/PT line.",
+      "First card (CANF) has [data-testid=playbook-CANF] expanded by default; SOC card's playbook is collapsed initially, clicking [data-testid=expand-playbook-SOC] expands and shows 6 numbered steps, 'Why it qualifies' section, and Risk Flags.",
+      "[data-testid=day-trades-scoreboard] renders with correct empty-state text 'No evaluated picks yet. Today's picks get scored against real intraday highs/lows after the session closes.'",
+      "[data-testid=day-trades-refresh-btn] present (not exercised end-to-end to avoid 60-120s wait; API path already validated).",
+      "REGRESSION: /top-plays and / (dashboard) both load successfully, sidebar and content render, no console errors."
+    ]
+  },
+  "test_report_links": [
+    "existing pytest suite under /app/backend/tests/ was not re-run this iteration (feature covered by direct API validation via curl + JSON schema checks)"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "day_trades_engine.py performs ~7 FMP calls per candidate for 16 candidates → 60-120s cold generation. 15-min mongo cache is present, but consider (a) parallelising the per-ticker fetches with an asyncio.gather bounded semaphore, and (b) short-TTL in-process memoisation of /historical-price-eod/full to avoid duplicate hits when tickers overlap between scans. Would reduce refresh latency significantly.",
+    "Frontend sidebar 'Day Trades' is rendered as a clickable div/button rather than an anchor tag (`href`). This still works with react-router but breaks middle-click 'open in new tab' and screen-reader link semantics. Consider using <Link to='/day-trades'> or <a href='/day-trades'>.",
+    "DayTrades.jsx: the risk disclaimer wording could be more prominent (search for 'disclaim' returned false in body text — 'RISK FLAGS' per card exists, but no top-level 'This is not financial advice' style disclaimer copy was matched). Minor UX/compliance nit, not a bug."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "obaidtradez / Odm200429 (works)",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Day-trades scan is expensive (60-120s cold) — always exercise the ?refresh=true path via curl with -m 180+ timeout, or trust the 15-min mongo cache in 'day_trades_cache'. Sidebar 'Day Trades' link is not a real anchor; use page.get_by_text('Day Trades', exact=True).click() or navigate directly to /day-trades. Session is 'Closed' at night ET — that is not a bug. Scoreboard history is intentionally empty until picks age past their session close. First candidate card is expanded by default; use expand-playbook-{2nd ticker} to test toggle behaviour. Top-plays/tracked now has 42 active + 22 exited on this env (up from 44/0 in iteration_8) so exited cards + exitedForwardSummary should now render in the UI — worth verifying if that flow is retested.",
+  "rca of the issue": "No issues to root-cause. All spec bullets from the review request map 1:1 to observed behaviour."
+}

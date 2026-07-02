@@ -16,6 +16,7 @@ import Research from "@/pages/Research";
 import Modeling from "@/pages/Modeling";
 import Discovery from "@/pages/Discovery";
 import TopPlays from "@/pages/TopPlays";
+import DayTrades from "@/pages/DayTrades";
 import FutureGiants from "@/pages/FutureGiants";
 import Watchlist from "@/pages/Watchlist";
 import Portfolio from "@/pages/Portfolio";
@@ -62,6 +63,7 @@ const NAV_GROUPS = [
     items: [
       { path: "/discovery", icon: Sparkles, label: "Discovery" },
       { path: "/top-plays", icon: TrendingUp, label: "Top Plays" },
+      { path: "/day-trades", icon: Zap, label: "Day Trades" },
       { path: "/future-giants", icon: Telescope, label: "Future Giants" },
     ],
   },
@@ -315,6 +317,7 @@ function AppRoutes() {
                 <Route path="/modeling" element={<Modeling />} />
                 <Route path="/discovery" element={<Discovery />} />
                 <Route path="/top-plays" element={<TopPlays />} />
+                <Route path="/day-trades" element={<DayTrades />} />
                 <Route path="/future-giants" element={<FutureGiants />} />
                 <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/portfolio" element={<Portfolio />} />

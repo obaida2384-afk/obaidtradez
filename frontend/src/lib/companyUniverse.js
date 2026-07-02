@@ -133,6 +133,18 @@ export async function fetchHallOfFame() {
   return res.json();
 }
 
+export async function fetchDayTrades(refresh = false) {
+  const res = await fetch(`${API}/day-trades/today${refresh ? "?refresh=true" : ""}`);
+  if (!res.ok) throw new Error(`Day trades request failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDayTradesScoreboard() {
+  const res = await fetch(`${API}/day-trades/scoreboard`);
+  if (!res.ok) throw new Error(`Day trades scoreboard request failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchMacro() {
   const res = await fetch(`${API}/market/macro`);
   if (!res.ok) throw new Error(`Macro request failed: ${res.status}`);
